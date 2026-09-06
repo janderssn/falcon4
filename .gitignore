@@ -1,0 +1,7 @@
+node_modules/
+viewer/dist/
+.DS_Store
+.env
+.env.*
+*.blend1
+*.blend2

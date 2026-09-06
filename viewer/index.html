@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#17212b"><title>Falcon 4 — Model viewer</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%232b655d'/%3E%3C/svg%3E"></head>
+<body>
+<header><a class="brand" href="./"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M3 29 20 9 37 29 20 23Z"/></svg><span>FALCON <b>4</b></span></a><span class="header-caption">MODEL VIEWER / 170</span><a class="download" href="./model.glb" download="falcon4-170.glb">Download GLB <span aria-hidden="true">↗</span></a></header>
+<main>
+<aside aria-label="Viewer controls">
+<div class="intro"><p class="eyebrow">WILLS WING · FALCON 4</p><h1>Falcon 4 <span class="model-size">170</span></h1><p class="description">Round control frame · 9.11 m span</p></div>
+<fieldset id="model-controls" disabled>
+<section><h2><span>01</span> Viewpoint</h2><div class="views"><button data-view="perspective" aria-pressed="true">Perspective</button><button data-view="front" aria-pressed="false">Front</button><button data-view="top" aria-pressed="false">Top</button><button data-view="underside" aria-pressed="false">Underside</button></div><label class="detail-label" for="detail">Inspect a connection</label><select id="detail"><option value="">Choose a detail…</option><option value="nose">Nose assembly</option><option value="junction">Crossbar / leading edge</option><option value="basebar">Basebar corner</option><option value="tension">Crossbar tension</option></select></section>
+<section><h2><span>02</span> Visible parts</h2><div id="layers"></div></section>
+<section><h2><span>03</span> Display</h2><label class="toggle"><span>Ground grid</span><input id="grid" type="checkbox" checked></label><label class="toggle"><span>Wireframe</span><input id="wireframe" type="checkbox"></label><label class="toggle"><span>Auto-rotate</span><input id="rotate" type="checkbox"></label><button id="reset" class="reset">↺ &nbsp; Reset viewer</button></section>
+</fieldset>
+<p class="model-note">Reference reconstruction<br><span>Some shapes and dimensions are estimated.</span></p>
+</aside>
+<section id="viewport" aria-label="Interactive model viewer">
+<div class="viewport-heading"><span class="live-dot"></span><span id="view-label">Perspective</span><span class="scale-note">METRIC / 1:1 MODEL</span></div>
+<div id="canvas-host"></div>
+<div id="loading" role="status" aria-live="polite"><span class="eyebrow">PREPARING THE WING</span><strong id="load-title">Loading model…</strong><progress id="progress" max="100" value="0" aria-label="Model download progress"></progress><span id="load-detail">Loading the full model and its components.</span><button id="retry" hidden>Try again</button></div>
+<div class="viewport-tools"><button id="fit" disabled title="Fit model (F)" aria-label="Fit model">Fit</button><button id="capture" disabled title="Save viewport image" aria-label="Save viewport image">PNG ↓</button></div>
+<div id="selection" aria-live="polite">Click a part to identify it · Double-click to focus</div>
+<div class="viewport-bottom"><span>DRAG to orbit <i>·</i> SCROLL to zoom <i>·</i> RIGHT-DRAG to pan</span><span id="part-count">— PARTS</span></div>
+</section>
+</main>
+<footer><span>FALCON 4 <b>/</b> MODEL VIEWER</span><span>Round control frame <b>·</b> 9.11 m wingspan</span></footer>
+<script type="module" src="/main.js"></script>
+</body></html>
