@@ -24,8 +24,7 @@ function start(){
  let renderPending=false;
  function requestRender(){if(!renderPending){renderPending=true;requestAnimationFrame(renderFrame);}}
  const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.12;controls.minDistance=.055;controls.maxDistance=40;controls.autoRotateSpeed=.5;
- const center=new THREE.Vector3(0,1.5,-1.7);
- const vec=a=>new THREE.Vector3(...a);
+ const center=new THREE.Vector3(0,1.5,-1.7); const vec=a=>new THREE.Vector3(...a);
  function view(target,offset,label){
   transition={from:camera.position.clone(),to:vec(target).add(vec(offset)),targetFrom:controls.target.clone(),targetTo:vec(target),start:performance.now()};
   if(reduced){camera.position.copy(transition.to);controls.target.copy(transition.targetTo);transition=null;}
@@ -73,17 +72,42 @@ function start(){
  const resize=()=>{const {width,height}=host.getBoundingClientRect();camera.aspect=width/height;camera.updateProjectionMatrix();renderer.setSize(width,height);requestRender();};new ResizeObserver(resize).observe(host);resize();
  let previous=performance.now();function renderFrame(now){renderPending=false;const dt=Math.min((now-previous)/1000,.1);previous=now;if(transition){const t=Math.min((now-transition.start)/650,1);const eased=t*t*(3-2*t);camera.position.lerpVectors(transition.from,transition.to,eased);controls.target.lerpVectors(transition.targetFrom,transition.targetTo,eased);if(t===1)transition=null;}controls.update(dt);renderer.render(scene,camera);if(transition||controls.autoRotate)requestRender();}
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();$('#loading').hidden=false;$('#load-title').textContent='Graphics connection interrupted';$('#load-detail').textContent='Reload the page to restore the model.';$('#progress').hidden=true;$('#retry').hidden=false;$('#retry').onclick=()=>location.reload();});
+ let entries=[],current;
+ function unload(){
+  select(null);
+  if(model){scene.remove(model);model.traverse(o=>{if(!o.isMesh)return;o.geometry.dispose();[o.userData.originalMaterial,o.userData.highlightMaterial].forEach(m=>m&&m.dispose());});model=null;}
+  for(const objects of Object.values(groups))objects.length=0;
+  for(const key of Object.keys(categories)){$(`#layer-${key}`).checked=true;$(`#count-${key}`).textContent='';}
+  $('#wireframe').checked=false;$('#model-controls').disabled=true;$('#fit').disabled=true;$('#capture').disabled=true;
+ }
+ function choose(id){
+  const entry=entries.find(e=>e.id===id)||entries[0];if(entry===current&&model)return;
+  current=entry;const url=new URL(location.href);url.searchParams.set('model',entry.id);history.replaceState(null,'',url);
+  document.querySelectorAll('[data-model]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.model===entry.id)));
+  $('#model-description').textContent=entry.description;$('#download').href='./'+entry.glb;$('#download').download=entry.download;
+  document.title=`Falcon 4 — ${entry.title}`;load();
+ }
+ async function init(){
+  try{const r=await fetch('./models.json');if(!r.ok)throw new Error('Model list is unavailable.');entries=await r.json();}
+  catch(error){$('#load-title').textContent='The model list could not load';$('#load-detail').textContent=error.message;$('#progress').hidden=true;$('#retry').hidden=false;$('#retry').onclick=()=>location.reload();return;}
+  for(const entry of entries){const b=document.createElement('button');b.dataset.model=entry.id;b.textContent=entry.label;b.title=entry.title;b.setAttribute('aria-pressed','false');b.onclick=()=>choose(entry.id);$('#models').append(b);}
+  choose(new URLSearchParams(location.search).get('model'));
+ }
  async function load(){
-  $('#loading').hidden=false;$('#retry').hidden=true;$('#progress').hidden=false;$('#progress').value=0;$('#load-title').textContent='Loading model…';
+  const entry=current;unload();
+  $('#loading').hidden=false;$('#retry').hidden=true;$('#progress').hidden=false;$('#progress').value=0;$('#load-title').textContent=`Loading ${entry.title.toLowerCase()}…`;
   try{
-   const response=await fetch('./parts.json');if(!response.ok)throw new Error('Parts index is unavailable.');const parts=await response.json();
+   const response=await fetch('./'+entry.parts);if(!response.ok)throw new Error('Parts index is unavailable.');const parts=await response.json();
    const mapping=Object.fromEntries(Object.entries(parts).map(([name,group])=>[THREE.PropertyBinding.sanitizeNodeName(name),{name,group}]));
-   const gltf=await new GLTFLoader().loadAsync('./model.glb',e=>{const percent=e.total?Math.round(e.loaded/e.total*100):0;$('#progress').value=percent;$('#load-detail').textContent=percent===100?'Preparing materials…':`${(e.loaded/1048576).toFixed(1)} MB downloaded`;});
+   const gltf=await new GLTFLoader().loadAsync('./'+entry.glb,e=>{const percent=e.total?Math.round(e.loaded/e.total*100):0;$('#progress').value=percent;$('#load-detail').textContent=percent===100?'Preparing materials…':`${(e.loaded/1048576).toFixed(1)} MB downloaded`;});
+   if(entry!==current){gltf.scene.traverse(o=>{if(o.isMesh){o.geometry.dispose();o.material.dispose();}});return;}
    model=gltf.scene;
+   if(entry.rotateY)model.rotation.y=THREE.MathUtils.degToRad(entry.rotateY);
+   if(entry.offset)model.position.set(...entry.offset);
    model.traverse(o=>{if(!o.isMesh)return;let node=o;while(node&&!mapping[node.name])node=node.parent;const part=node&&mapping[node.name];if(!part)throw new Error(`Missing part category: ${o.name}`);o.userData.displayName=part.name;o.userData.category=part.group;o.material=o.material.clone();o.userData.originalMaterial=o.material;o.userData.highlightMaterial=o.material.clone();o.userData.highlightMaterial.emissive.set('#bc7a28');o.userData.highlightMaterial.emissiveIntensity=.35;groups[part.group].push(o);});
    scene.add(model);for(const key of Object.keys(groups))$(`#count-${key}`).textContent=partCount(groups[key]);
    document.body.dataset.modelReady='true';$('#model-controls').disabled=false;$('#fit').disabled=false;$('#capture').disabled=false;$('#loading').hidden=true;count();fit();
   }catch(error){for(const objects of Object.values(groups))objects.length=0;console.error(error);$('#load-title').textContent='The model could not load';$('#load-detail').textContent='Check the connection and try again. '+error.message;$('#progress').hidden=true;$('#retry').hidden=false;}
  }
- $('#retry').onclick=load;load();
+ $('#retry').onclick=load;init();
 }

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "astra",
+    "label": "Astra",
+    "title": "Astra build",
+    "description": "391 parts · round control frame · resting on the ground",
+    "glb": "models/astra/model.glb",
+    "parts": "models/astra/parts.json",
+    "download": "falcon4-170-astra.glb"
+  },
+  {
+    "id": "opus",
+    "label": "Opus",
+    "title": "Opus build",
+    "description": "317 parts · manual-accurate hardware · speedbar basetube",
+    "glb": "models/opus/model.glb",
+    "parts": "models/opus/parts.json",
+    "download": "falcon4-170-opus.glb",
+    "rotateY": 180,
+    "offset": [0, 1.83, 0]
+  }
+]
