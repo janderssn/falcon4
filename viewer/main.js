@@ -57,14 +57,27 @@ const GROUP_TEXT = {
 };
 
 // ------------------------------------------------------------------ state
-const pick = (key, list, fallback = null) => (list.some((x) => x[0] === params.get(key)) ? params.get(key) : fallback);
+// What a visitor sees first, unless the link says otherwise. The address keeps only
+// what differs from this; "built" in it means the colour as built.
+const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
+  colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
+  seeThrough: 0.1,
+  pose: 'tail',
+  cam: '-0.279,1.089,-2.549,-0.3601,0.1682,0.9176,3.276,p',
+};
+const pick = (key, list) => {
+  const v = params.get(key);
+  if (v === 'built') return null;
+  if (list.some((x) => x[0] === v)) return v;
+  return DEFAULTS.colours[key] ?? null;
+};
 const state = {
   model: params.get('model'),
   scene: SCENES[params.get('scene')] ? params.get('scene') : 'studio',
   colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, pick(z, fabricsFor(z))])),
-  seeThrough: Math.min(1, Math.max(0, Number(params.get('xray')) || 0)),
+  seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
   wires: params.get('wires') !== '0',
-  pose: ['nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : 'bar',
+  pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
   wind: 1, shadows: true, sel: null, tour: false,
@@ -146,6 +159,7 @@ async function setModel(id, first = false) {
     if (cam) { rig.setProjection(cam.projection); rig.animateTo(cam.pose, false); }
     else frontView(false);
     $('#loader').classList.add('done');
+    lastInput = performance.now();            // the slow idle turn counts from when the glider appears
     if (THUMB) runThumb();
   } else toast(`${source.title} · ${source.description}`);
   syncPanel();
@@ -314,10 +328,12 @@ function setPose(pose) {
 }
 
 // ------------------------------------------------------------------ camera
+/** The start view: the default camera, or a framing of the whole glider. */
 function frontView(animate = !reduced) {
   if (!record) return;
-  rig.setProjection('perspective');
-  rig.animateTo(rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate);
+  const cam = parseCamera(DEFAULTS.cam);
+  rig.setProjection(cam ? cam.projection : 'perspective');
+  rig.animateTo(cam ? cam.pose : rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate);
   syncPanel();
 }
 function zoom(f) { const p = rig.pose(); p.size *= f; rig.animateTo(p, !reduced); userActive(); }
@@ -623,8 +639,8 @@ function wireUi() {
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
   $('#btn-reset').onclick = () => {
-    state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, null]));
-    state.seeThrough = 0; state.wires = true;
+    state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
+    state.seeThrough = DEFAULTS.seeThrough; state.wires = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
   $('#btn-share').onclick = async () => {
@@ -673,9 +689,10 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&le=red&top=white&under=navy&frame=black&xray=0.6&wires=0&names=1&t=19.5&cam=...
-function readCamera() {
-  const c = (params.get('cam') || '').split(',');
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&names=1&t=19.5&cam=...
+function readCamera() { return parseCamera(params.get('cam')); }
+function parseCamera(text) {
+  const c = (text || '').split(',');
   if (c.length !== 8 || !c.slice(0, 7).every((v) => Number.isFinite(Number(v)))) return null;
   const n = c.slice(0, 7).map(Number);
   return { projection: c[7] === 'o' ? 'orthographic' : 'perspective', pose: { target: new THREE.Vector3(n[0], n[1], n[2]), dir: new THREE.Vector3(n[3], n[4], n[5]).normalize(), size: n[6] } };
@@ -687,10 +704,10 @@ function saveUrl() {
   const q = new URLSearchParams();
   q.set('model', state.model);
   if (state.scene !== 'studio') q.set('scene', state.scene);
-  for (const [z, id] of Object.entries(state.colours)) if (id) q.set(z, id);
-  if (state.seeThrough) q.set('xray', state.seeThrough.toFixed(2));
+  for (const [z, id] of Object.entries(state.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
+  if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
-  if (state.pose !== 'bar') q.set('pose', state.pose);
+  if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.names) q.set('names', '1');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));

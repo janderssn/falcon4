@@ -55,6 +55,10 @@ The viewer is a glider configurator:
   has one; double-click to go to it.
 - **Copy link to this glider** puts the whole configuration in the link: build,
   colours, scene, time of day and camera.
+- The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite
+  frame, the sail slightly see-through, resting tail down, seen from below the wing
+  (`DEFAULTS` in [`viewer/main.js`](viewer/main.js)). **Reset** returns to these
+  colours; *As built* in a row gives the build's original colour (`built` in the link).
 
 ```sh
 npm run build     # Static site in viewer/dist/
