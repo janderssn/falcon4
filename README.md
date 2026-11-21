@@ -16,6 +16,11 @@ Wing manual.
 
 ## Run the viewer
 
+The viewer is published at **https://janderssn.github.io/falcon4/** on every push to `master`
+(see [`.github/workflows/pages.yml`](.github/workflows/pages.yml)).
+
+To run it locally:
+
 Requires Node.js 22.12+ and a WebGL-capable browser. The models are included, so
 you don't need Blender to run the viewer.
 
