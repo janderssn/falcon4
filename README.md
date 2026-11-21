@@ -46,7 +46,9 @@ The viewer is a glider configurator:
 - **Pose** (bottom of the view): standing on the control bar, or resting on the keel
   nose down or tail down - rocked over the basebar until the nose or the tail
   touches the ground, with the angle found from each model.
-- **Scene** (bottom left): studio, hangar, or a hill with grass in the wind,
+- **Scene** (bottom left): studio, a cosy club hangar (timber trusses, pendant
+  lamps and string lights, workbench, glider bags, helmets and harnesses, a lounge
+  corner with coffee), or a hill with grass in the wind,
   where you can also set the time of day and the wind. The camera stays above the
   ground on the hill and inside the hangar; in the studio you can look up from below.
 - **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
