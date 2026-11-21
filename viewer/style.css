@@ -61,6 +61,7 @@ body.panel-open #btn-custom { opacity: 0; pointer-events: none; }
 .sw { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 0; background: none; display: grid; place-items: center; position: relative; }
 .sw i { width: 22px; height: 22px; border-radius: 50%; background: var(--c, #888); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22), 0 1px 3px rgba(0, 0, 0, .35); transition: transform .12s; }
 .sw:hover i { transform: scale(1.12); }
+.sw.clear i { background: linear-gradient(color-mix(in srgb, var(--c) calc(var(--o) * 100%), transparent), color-mix(in srgb, var(--c) calc(var(--o) * 100%), transparent)), repeating-conic-gradient(#8a8f94 0 25%, #d9dde0 0 50%) 0 0 / 8px 8px; }
 .sw.on::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--accent); }
 .sw.original i { background: conic-gradient(var(--c, #888) 0 75%, transparent 0); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5); }
 .sw.original::before { content: ""; position: absolute; right: 1px; top: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--c, #888); border: 1.5px solid rgba(255, 255, 255, .85); }
@@ -95,8 +96,15 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #scene-fly { position: absolute; left: 0; bottom: 88px; display: flex; gap: 8px; padding: 10px; border-radius: 14px; }
 #scene-fly .tile { width: 112px; height: 80px; }
 
-/* ---- part chip, bottom centre */
-#chip { left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; }
+/* ---- pose bar, bottom centre */
+#posebar { left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 2px; padding: 4px; border-radius: 999px; }
+body.panel-open #posebar { left: calc(50% - var(--panel) / 2); }
+#posebar button { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 10px; border-radius: 999px; background: none; border: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+#posebar button:hover { color: var(--ink); background: rgba(255, 255, 255, .08); }
+#posebar button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+/* ---- part chip, bottom centre (above the pose bar) */
+#chip { left: 50%; bottom: 76px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; }
 body.panel-open #chip { left: calc(50% - var(--panel) / 2); }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
 .chip-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -152,6 +160,10 @@ body.nolabels #labels { display: none; }
   #scene-pick { left: 10px; bottom: 14px; } #scene-btn { width: 64px; height: 64px; }
   #scene-fly { bottom: 76px; } #scene-fly .tile { width: 96px; height: 70px; }
   #chip { left: 10px; right: 64px; bottom: 88px; width: auto; transform: none; animation: none; }
+  #posebar { left: 84px; right: 60px; bottom: 18px; transform: none; justify-content: space-between; }
+  #posebar span { display: none; }
+  #posebar button { padding: 0 12px; }
+  body.panel-open #posebar { opacity: 0; pointer-events: none; }
   body.panel-open #chip { left: 10px; }
   .chip-btn { display: none; }
 }

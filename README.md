@@ -35,19 +35,30 @@ Open **http://localhost:5180**. Add `?model=opus` or `?model=astra` to the URL t
 
 The viewer is a glider configurator:
 
-- **Customize** (top right, `C`): pick the build (Astra or Opus), the sail colours
-  (leading edge, top surface, undersurface) and the frame finish; make the sail
-  see-through to look at the frame; show or hide the wires; put names on the main
-  parts. *As built* (the first swatch in each row) restores the original colour.
-  Colours are for show only.
+- **Customize** (top right, `C`): pick the build (Astra or Opus); colour the sail
+  panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2, P3,
+  P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
+  panel (the clear and tinted laminates are see-through), plus the batten pockets;
+  choose the frame finish; make the sail see-through to look at the frame; show or
+  hide the wires and bridles; put names on the main parts. *As built* (the first
+  swatch in each row) restores the original colour. Colours are approximate and for
+  show only; Wills Wing's own picker notes the same.
+- **Pose** (bottom of the view): standing on the control bar, or resting on the keel
+  nose down or tail down - rocked over the basebar until the nose or the tail
+  touches the ground, with the angle found from each model.
 - **Scene** (bottom left): studio, hangar, or a hill with grass in the wind,
-  where you can also set the time of day and the wind.
+  where you can also set the time of day and the wind. The camera stays above the
+  ground on the hill and inside the hangar; in the studio you can look up from below.
 - **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
   from above (`T`), zoom. Drag to turn, right-drag to move, scroll to zoom.
 - Click a part to see what it is, with its Wills Wing part number where the build
   has one; double-click to go to it.
 - **Copy link to this glider** puts the whole configuration in the link: build,
   colours, scene, time of day and camera.
+- The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite
+  frame, the sail slightly see-through, resting tail down, seen from below the wing
+  (`DEFAULTS` in [`viewer/main.js`](viewer/main.js)). **Reset** returns to these
+  colours; *As built* in a row gives the build's original colour (`built` in the link).
 
 ```sh
 npm run build     # Static site in viewer/dist/
@@ -71,8 +82,10 @@ To add another build, add an entry there.
   replace a model file, so browsers load the new file at once and don't use a
   cached copy.
 
-The sail colour and frame finish choices find their parts by material name
-(`ZONES` in [`viewer/main.js`](viewer/main.js)). The opus sail has its colours baked
+The sail colour and frame finish choices find their parts by part or material name
+(`ZONES` in [`viewer/main.js`](viewer/main.js)). The fabric names and screen colours in
+[`viewer/lib/fabrics.js`](viewer/lib/fabrics.js) come from the Wills Wing colour picker
+data (model type "Falcon"). The opus sail has its colours baked
 into textures; the viewer keeps the texture's light and dark (seams, stitching) and
 swaps the hue. The scene and glider-card pictures in `viewer/public/thumbs/` are
 rendered from the viewer itself by `node tools/thumbs.mjs` (Playwright and Pillow;

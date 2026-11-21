@@ -51,6 +51,17 @@ export class Scenes {
     this.meadow?.place(groundY, center);
   }
 
+  /**
+   * Where the camera may go, relative to the glider's ground and the scene centre:
+   * above the grass on the hill, inside the walls and under the roof in the hangar,
+   * anywhere in the studio (looking up from under the floor shows the underside).
+   */
+  cameraLimits() {
+    if (this.current === 'hill') return { minY: 0.5 };
+    if (this.current === 'hangar') return { minY: 0.3, maxY: 11.3, halfX: 21.5, halfZ: 18.5 };
+    return null;
+  }
+
   setTime(h) { this.hours = h; if (this.current === 'hill') this.meadow.setTime(h); }
   setWind(w) { this.wind = w; this.meadow?.setWind(w); }
   setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); }

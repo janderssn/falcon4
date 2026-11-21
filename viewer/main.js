@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES } from './lib/scenes.js';
+import { FALCON_FABRICS } from './lib/fabrics.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -12,20 +13,30 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const small = matchMedia('(max-width: 760px)').matches;
 
 // ------------------------------------------------------------------ what can be tweaked
-// Sail and frame zones, by the material names each build uses.
+// Sail and frame zones. The sail panels follow the Wills Wing Falcon colour picker:
+// P1 leading edge, P2, P3, P4 trailing edge on top, P5 undersurface (Opus uses the
+// same panel names; Astra's panels 1-4 match P1-P4 and it has no P5). A part belongs
+// to the first zone whose part-name pattern matches it, otherwise to the zone of its
+// material. Rows only show for a build that has parts in them.
 const ZONES = {
-  le: { name: 'Leading edge', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
-  top: { name: 'Top surface', mats: ['Off-white Dacron', 'Sail P2 (white)', 'Sail P3 (white)', 'Sail P4 TE panel (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)'] },
-  under: { name: 'Undersurface', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P5 undersurface (colour)'] },
+  pockets: { name: 'Batten pockets', parts: /^(Batten pocket [LR] [2-6]|[LR] batten [2-6] fabric pocket)$/ },
+  p4: { name: 'P4 · Trailing edge', panel: 'P4', parts: /^(Trailing edge hem|[LR] sail panel 4)$/, mats: ['Sail P4 TE panel (white)'] },
+  p3: { name: 'P3', panel: 'P3', parts: /^[LR] sail panel 3$/, mats: ['Sail P3 (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)', 'Off-white Dacron'] },
+  p1: { name: 'P1 · Leading edge', panel: 'P1', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
+  p2: { name: 'P2', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
+  p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'] },
 };
-const SAIL_COLOURS = [
-  ['white', 'White', '#f1f0ea'], ['ivory', 'Ivory', '#e7dfc6'], ['silver', 'Silver', '#b9bcc0'], ['yellow', 'Yellow', '#f0c419'],
-  ['orange', 'Orange', '#ee7420'], ['red', 'Red', '#c41e2a'], ['magenta', 'Magenta', '#b4246f'], ['purple', 'Purple', '#5a35a3'],
-  ['royal', 'Royal blue', '#1d47b8'], ['sky', 'Sky blue', '#3f9fdc'], ['teal', 'Teal', '#138486'], ['lime', 'Lime', '#8fc22c'],
-  ['green', 'Green', '#2c7a3a'], ['navy', 'Navy', '#1a2850'], ['black', 'Black', '#19191b'],
-];
-const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21'], ['graphite', 'Graphite', '#5b5e63'], ['gold', 'Gold anodised', '#b8954a']];
+const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
+const zoneOf = (mesh) => {
+  const part = mesh.userData.part.name, mat = mesh.userData.materials.base.name;
+  return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part)) || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat));
+};
+const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1]];
+// Each panel offers the Wills Wing fabrics for that panel; the pockets offer the solid colours of P3.
+const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
+  : zone === 'pockets' ? FALCON_FABRICS.P3.filter((f) => f[3] === 1)
+  : FALCON_FABRICS[ZONES[zone].panel]);
 // Baked colours of the textured opus sail panels (linear RGB), from falcon4-opus f4/sailmat.py.
 const BAKED = { white: [0.93, 0.93, 0.9], blue: [0.02, 0.1, 0.62], red: [0.78, 0.05, 0.03] };
 
@@ -46,13 +57,27 @@ const GROUP_TEXT = {
 };
 
 // ------------------------------------------------------------------ state
-const pick = (key, list, fallback = null) => (list.some((x) => x[0] === params.get(key)) ? params.get(key) : fallback);
+// What a visitor sees first, unless the link says otherwise. The address keeps only
+// what differs from this; "built" in it means the colour as built.
+const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
+  colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
+  seeThrough: 0.1,
+  pose: 'tail',
+  cam: '-0.279,1.089,-2.549,-0.3601,0.1682,0.9176,3.276,p',
+};
+const pick = (key, list) => {
+  const v = params.get(key);
+  if (v === 'built') return null;
+  if (list.some((x) => x[0] === v)) return v;
+  return DEFAULTS.colours[key] ?? null;
+};
 const state = {
   model: params.get('model'),
   scene: SCENES[params.get('scene')] ? params.get('scene') : 'studio',
-  colours: { le: pick('le', SAIL_COLOURS), top: pick('top', SAIL_COLOURS), under: pick('under', SAIL_COLOURS), frame: pick('frame', FRAME_FINISHES) },
-  seeThrough: Math.min(1, Math.max(0, Number(params.get('xray')) || 0)),
+  colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, pick(z, fabricsFor(z))])),
+  seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
   wires: params.get('wires') !== '0',
+  pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
   wind: 1, shadows: true, sel: null, tour: false,
@@ -121,9 +146,9 @@ async function setModel(id, first = false) {
   record = rec;
   prepareTints(record);
   scene.add(record.root);
-  anchors.clear();
+  applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
-  scenes.place(record.box.min.y, new THREE.Vector3(center.x, record.box.min.y, center.z));
+  scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
   state.sel = null;
   applyLook();
   buildLabels();
@@ -134,6 +159,7 @@ async function setModel(id, first = false) {
     if (cam) { rig.setProjection(cam.projection); rig.animateTo(cam.pose, false); }
     else frontView(false);
     $('#loader').classList.add('done');
+    lastInput = performance.now();            // the slow idle turn counts from when the glider appears
     if (THUMB) runThumb();
   } else toast(`${source.title} · ${source.description}`);
   syncPanel();
@@ -153,7 +179,7 @@ function prepareTints(rec) {
   for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [] };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
-    const zone = Object.keys(ZONES).find((z) => ZONES[z].mats.includes(name));
+    const zone = zoneOf(mesh);
     if (!zone) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
@@ -178,19 +204,22 @@ function prepareTints(rec) {
   }
 }
 
-function colourOf(zone, id) {
-  const list = zone === 'frame' ? FRAME_FINISHES : SAIL_COLOURS;
-  const hit = list.find((c) => c[0] === id);
-  return hit ? new THREE.Color().setStyle(hit[2]) : null;
+function fabricOf(zone, id) {
+  const hit = fabricsFor(zone).find((c) => c[0] === id);
+  return hit ? { colour: new THREE.Color().setStyle(hit[2]), opacity: hit[3], name: hit[1] } : null;
 }
 
 function applyLook() {
   if (!record) return;
+  const clear = {};
   for (const [zone, t] of Object.entries(record.tints)) {
-    const colour = colourOf(zone, state.colours[zone]);
+    const fabric = fabricOf(zone, state.colours[zone]);
+    const colour = fabric?.colour;
+    if (fabric && fabric.opacity < 1) clear[zone] = fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
     if (colour) t.uTint.value.copy(colour);
     for (const mesh of t.meshes) {
+      mesh.userData.zone = zone;
       for (const m of Object.values(mesh.userData.materials)) {
         if (m.map) continue;
         m.color.copy(colour || m.userData.original);
@@ -205,24 +234,106 @@ function applyLook() {
     let mat = selected ? M.selected : M.base;
     let visible = true;
     if (part.group === '04' || part.group === '05') visible = state.wires;
-    if (part.group === '01' && state.seeThrough > 0) {
-      visible = state.seeThrough < 0.98;
+    // See-through sail, or a clear laminate panel.
+    const laminate = clear[mesh.userData.zone];
+    const ghost = (part.group === '01' && state.seeThrough > 0) || laminate !== undefined;
+    if (ghost) {
+      const seeThrough = part.group === '01' ? 1 - state.seeThrough * 0.92 : 1;
+      if (part.group === '01' && state.seeThrough >= 0.98) visible = false;
       mat = M.ghost;
-      mat.opacity = 1 - state.seeThrough * 0.92;
+      mat.opacity = Math.min(seeThrough, laminate ?? 1);
       mat.transparent = true;
       mat.depthWrite = false;
       if (mat.emissive) mat.emissive.set(selected ? '#d0832a' : 0x000000);
     }
+    depthTwin(mesh, ghost && visible);
+    if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35 && laminate === undefined;
     mesh.material = mat;
     mesh.visible = visible;
   }
 }
 
+/**
+ * A see-through part gets a twin that only writes depth, drawn after everything
+ * solid (so the frame behind still shows) and before the see-through pass. Then only
+ * the nearest layer of cloth is drawn, whatever order the transparent parts are
+ * sorted in; without it, overlapping panels and pockets pop in and out as the view turns.
+ */
+const DEPTH_ONLY = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
+function depthTwin(mesh, on) {
+  let twin = mesh.userData.depthTwin;
+  if (!twin && !on) return;
+  if (!twin) {
+    twin = new THREE.Mesh(mesh.geometry, DEPTH_ONLY);
+    twin.renderOrder = 1;
+    twin.raycast = () => {};
+    mesh.add(twin);
+    mesh.userData.depthTwin = twin;
+  }
+  twin.visible = on;
+}
+
+// ------------------------------------------------------------------ pose
+/**
+ * Standing on the control bar (as modelled), or resting on the keel: rocked forward
+ * over the basebar until the nose is on the ground, or back until the tail is.
+ * The tilt is found from the model itself: the smallest rotation about the front
+ * (or back) of the basebar at which another point of the glider reaches the ground.
+ */
+function restingPose(rec) {
+  const root = rec.root;
+  root.position.set(0, 0, 0);
+  root.quaternion.identity();
+  root.updateMatrixWorld(true);
+  // Flat arrays and plain loops: the models have up to a million vertices.
+  const ys = [], zs = [];
+  const v = new THREE.Vector3();
+  for (const m of rec.meshes) {
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 2) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld); ys.push(v.y); zs.push(v.z); }
+  }
+  let minY = Infinity;
+  for (const y of ys) if (y < minY) minY = y;
+  let front = -Infinity, back = Infinity;
+  for (let i = 0; i < ys.length; i++) if (ys[i] < minY + 0.03) { front = Math.max(front, zs[i]); back = Math.min(back, zs[i]); }
+  let nose = Math.PI * 0.45, tail = Math.PI * 0.45;    // upper bound only; the first contact sets the angle
+  for (let i = 0; i < ys.length; i++) {
+    if (zs[i] > front + 0.5) nose = Math.min(nose, Math.atan2(ys[i] - minY, zs[i] - front));
+    if (zs[i] < back - 0.5) tail = Math.min(tail, Math.atan2(ys[i] - minY, back - zs[i]));
+  }
+  return {
+    nose: { pivot: new THREE.Vector3(0, minY, front), angle: nose },      // nose down: +rotation about X
+    tail: { pivot: new THREE.Vector3(0, minY, back), angle: -tail },      // tail down: the other way
+  };
+}
+function applyPose() {
+  if (!record) return;
+  if (!record.rest) record.rest = restingPose(record);
+  const { pivot, angle } = record.rest[state.pose] || { pivot: record.rest.nose.pivot, angle: 0 };   // standing: no tilt
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
+  record.root.quaternion.copy(q);
+  record.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
+  record.root.updateMatrixWorld(true);
+  // Exact bounds: the quick box of rotated parts reaches below the glider.
+  record.box.setFromObject(record.root, true);
+  // The ground is where the basebar touches it, in every pose.
+  record.ground = pivot.y;
+  anchors.clear();
+}
+function setPose(pose) {
+  state.pose = pose;
+  applyPose();
+  syncPanel();
+  saveUrlSoon();
+}
+
 // ------------------------------------------------------------------ camera
+/** The start view: the default camera, or a framing of the whole glider. */
 function frontView(animate = !reduced) {
   if (!record) return;
-  rig.setProjection('perspective');
-  rig.animateTo(rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate);
+  const cam = parseCamera(DEFAULTS.cam);
+  rig.setProjection(cam ? cam.projection : 'perspective');
+  rig.animateTo(cam ? cam.pose : rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate);
   syncPanel();
 }
 function zoom(f) { const p = rig.pose(); p.size *= f; rig.animateTo(p, !reduced); userActive(); }
@@ -240,6 +351,38 @@ function focusPart(part) {
   rig.animateTo(pose, !reduced);
 }
 
+// Keep the camera out of the ground and inside the hangar. The orbit's lowest angle is
+// set so the camera stays above the floor; anything that still gets out (zooming out,
+// moving the target) is pulled back along the line to the target.
+function limitCamera() {
+  const lim = record && scenes.cameraLimits();
+  const c = rig.controls;
+  if (!lim) { c.maxPolarAngle = Math.PI; return; }
+  const g = record.ground, t = c.target;
+  if (lim.halfX) {
+    t.x = THREE.MathUtils.clamp(t.x, -lim.halfX + 1, lim.halfX - 1);
+    t.z = THREE.MathUtils.clamp(t.z, -lim.halfZ + 1, lim.halfZ - 1);
+    t.y = Math.min(t.y, g + lim.maxY - 1);
+  }
+  t.y = Math.max(t.y, g + lim.minY + 0.1);
+  const d = Math.max(rig.camera.position.distanceTo(t), 1e-3);
+  c.maxPolarAngle = Math.acos(THREE.MathUtils.clamp((g + lim.minY - t.y) / d, -1, 1));
+}
+function clampCamera() {
+  const lim = record && scenes.cameraLimits();
+  if (!lim) return;
+  const g = record.ground, cam = rig.camera.position, t = rig.controls.target;
+  const off = cam.clone().sub(t);
+  let s = 1;
+  if (cam.y < g + lim.minY && off.y < 0) s = Math.min(s, (g + lim.minY - t.y) / off.y);
+  if (lim.maxY && cam.y > g + lim.maxY && off.y > 0) s = Math.min(s, (g + lim.maxY - t.y) / off.y);
+  if (lim.halfX) {
+    if (Math.abs(cam.x) > lim.halfX && off.x) s = Math.min(s, (Math.sign(off.x) * lim.halfX - t.x) / off.x);
+    if (Math.abs(cam.z) > lim.halfZ && off.z) s = Math.min(s, (Math.sign(off.z) * lim.halfZ - t.z) / off.z);
+  }
+  if (s < 1) cam.copy(t).addScaledVector(off, Math.max(s, 0.02));
+}
+
 // Fly-around on request; a slow turn on its own after a while without input.
 let lastInput = performance.now();
 function userActive() { lastInput = performance.now(); if (!state.tour) rig.controls.autoRotate = false; }
@@ -255,7 +398,9 @@ function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (!THUMB && !state.tour && !rig.transition && now - lastInput > 30000 && rig.projection === 'perspective') { rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 0.35; }
+  limitCamera();
   rig.update(now, dt);
+  clampCamera();
   scenes.update(rig.camera, (now - clock0) / 1000);
   renderer.render(scene, rig.camera);
   updateLabels();
@@ -374,10 +519,10 @@ function updateLabels() {
 
 // ------------------------------------------------------------------ customize panel
 const thumb = (name) => `url('./thumbs/${name}.jpg')`;
-function swatches(zone, list) {
+function swatches(zone) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
-    ${list.map(([id, name, hex]) => `<button type="button" class="sw" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hex}"><i></i></button>`).join('')}
+    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hex};--o:${opacity}"><i></i></button>`).join('')}
   </div>`;
 }
 function buildPanel() {
@@ -386,8 +531,8 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = ['le', 'top', 'under'].map((z) => `<div class="row"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z, SAIL_COLOURS)}</div>`).join('');
-  $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame', FRAME_FINISHES)}</div>`;
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
+  $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame')}</div>`;
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -405,15 +550,16 @@ function syncPanel() {
   }
   for (const el of document.querySelectorAll('[data-name]')) {
     const z = el.dataset.name, id = state.colours[z];
-    el.textContent = id ? (z === 'frame' ? FRAME_FINISHES : SAIL_COLOURS).find((c) => c[0] === id)[1] : 'As built';
+    el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
   }
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
     const c = !m ? null : m.map ? new THREE.Color(.../\(blue\)/.test(m.name) ? BAKED.blue : /\(colour\)/.test(m.name) ? BAKED.red : BAKED.white) : m.userData.original;
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
-    b.hidden = !t?.meshes.length;
   }
+  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
+  for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
   $('#opt-names').checked = state.names;
@@ -493,8 +639,8 @@ function wireUi() {
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
   $('#btn-reset').onclick = () => {
-    state.colours = { le: null, top: null, under: null, frame: null };
-    state.seeThrough = 0; state.wires = true;
+    state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
+    state.seeThrough = DEFAULTS.seeThrough; state.wires = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
   $('#btn-share').onclick = async () => {
@@ -502,6 +648,7 @@ function wireUi() {
     try { await navigator.clipboard.writeText(location.href); toast('Link copied: it opens this glider just like this'); }
     catch { toast('Copy the address bar to share this glider'); }
   };
+  $('#posebar').addEventListener('click', (e) => { const b = e.target.closest('[data-pose]'); if (b) setPose(b.dataset.pose); });
   $('#chip').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'close') select(null);
@@ -542,9 +689,10 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&le=red&top=white&under=navy&frame=black&xray=0.6&wires=0&names=1&t=19.5&cam=...
-function readCamera() {
-  const c = (params.get('cam') || '').split(',');
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&names=1&t=19.5&cam=...
+function readCamera() { return parseCamera(params.get('cam')); }
+function parseCamera(text) {
+  const c = (text || '').split(',');
   if (c.length !== 8 || !c.slice(0, 7).every((v) => Number.isFinite(Number(v)))) return null;
   const n = c.slice(0, 7).map(Number);
   return { projection: c[7] === 'o' ? 'orthographic' : 'perspective', pose: { target: new THREE.Vector3(n[0], n[1], n[2]), dir: new THREE.Vector3(n[3], n[4], n[5]).normalize(), size: n[6] } };
@@ -556,9 +704,10 @@ function saveUrl() {
   const q = new URLSearchParams();
   q.set('model', state.model);
   if (state.scene !== 'studio') q.set('scene', state.scene);
-  for (const [z, id] of Object.entries(state.colours)) if (id) q.set(z, id);
-  if (state.seeThrough) q.set('xray', state.seeThrough.toFixed(2));
+  for (const [z, id] of Object.entries(state.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
+  if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
+  if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.names) q.set('names', '1');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));

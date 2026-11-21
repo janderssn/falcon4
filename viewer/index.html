@@ -32,7 +32,7 @@
 <aside id="custom" class="hud glass" aria-label="Customize the glider" hidden>
   <header>
     <h2>Customize</h2>
-    <button type="button" id="btn-reset" class="textbtn" title="Back to the colours as built">Reset</button>
+    <button type="button" id="btn-reset" class="textbtn" title="Back to the default colours">Reset</button>
     <button type="button" id="btn-close" class="icon" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </header>
   <div class="body">
@@ -70,6 +70,12 @@
 <div id="scene-pick" class="hud">
   <div id="scene-fly" class="glass" hidden></div>
   <button type="button" id="scene-btn" class="tile" title="Scene" aria-haspopup="true" aria-expanded="false"><span class="art" id="scene-art"></span><span class="cap" id="scene-cap">Scene</span></button>
+</div>
+
+<div id="posebar" class="hud glass" role="group" aria-label="How the glider rests on the ground">
+  <button type="button" data-pose="bar" aria-pressed="true" title="Standing on the control bar"><svg viewBox="0 0 24 24" class="ic"><path d="M2 9h20M12 9l-4.5 10h9z"/><path d="M2 21h20" opacity=".45"/></svg><span>Standing</span></button>
+  <button type="button" data-pose="nose" aria-pressed="false" title="Resting on the keel, nose down"><svg viewBox="0 0 24 24" class="ic"><path d="M2 20.5 21 4M12.5 11.6 9.4 21h7.8z"/><path d="M2 21h20" opacity=".45"/></svg><span>Nose down</span></button>
+  <button type="button" data-pose="tail" aria-pressed="false" title="Resting on the keel, tail down"><svg viewBox="0 0 24 24" class="ic"><path d="M3 4l19 16.5M11.5 11.6 7.6 21h7.8z"/><path d="M2 21h20" opacity=".45"/></svg><span>Tail down</span></button>
 </div>
 
 <div id="chip" class="hud glass" hidden aria-live="polite"></div>
