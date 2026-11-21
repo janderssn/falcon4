@@ -46,9 +46,8 @@ The viewer is a glider configurator:
 - **Pose** (bottom of the view): standing on the control bar, or resting on the keel
   nose down or tail down - rocked over the basebar until the nose or the tail
   touches the ground, with the angle found from each model.
-- **Scene** (bottom left): studio, a cosy club hangar (timber trusses, pendant
-  lamps and string lights, workbench, glider bags, helmets and harnesses, a lounge
-  corner with coffee), or a hill with grass in the wind,
+- **Scene** (bottom left): studio, a cosy club hangar (a generated 360° panorama:
+  the glider stands on its floor, and the same image lights it), or a hill with grass in the wind,
   where you can also set the time of day and the wind. The camera stays above the
   ground on the hill and inside the hangar; in the studio you can look up from below.
 - **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
@@ -91,7 +90,9 @@ data (model type "Falcon"). The opus sail has its colours baked
 into textures; the viewer keeps the texture's light and dark (seams, stitching) and
 swaps the hue. The scene and glider-card pictures in `viewer/public/thumbs/` are
 rendered from the viewer itself by `node tools/thumbs.mjs` (Playwright and Pillow;
-start `npm run dev` first).
+start `npm run dev` first). The hangar panorama, `viewer/public/scenes/hangar.jpg`, was
+generated with an image model (GPT Image 2.6) as a 2:1 equirectangular image, its seam
+blended and softly blurred; `hangar-env.jpg` is a small copy for the lighting.
 
 This repository contains the models, viewer and screenshots. The reconstruction
 scripts, research documents and reference photographs are kept in separate

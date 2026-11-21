@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Meadow } from './meadow.js';
-import { buildClubHangar, ROOM } from './clubhouse.js';
+import { GroundedSkybox } from 'three/addons/objects/GroundedSkybox.js';
 
 export const SCENES = {
   studio: { label: 'Studio' },
@@ -36,6 +36,7 @@ export class Scenes {
         if (this.ground) this.meadow.place(...this.ground);
       }
       this.indoor.setActive(false);
+      this.scene.environmentRotation.set(0, 0, 0);
       this.meadow.setActive(true);
       this.meadow.setShadows(this.shadows);
       this.meadow.setTime(this.hours);
@@ -59,7 +60,7 @@ export class Scenes {
    */
   cameraLimits() {
     if (this.current === 'hill') return { minY: 0.5 };
-    if (this.current === 'hangar') return { minY: 0.3, maxY: ROOM.wall - 0.4, x: [-ROOM.x + 0.5, ROOM.x - 0.5], z: [ROOM.zBack + 0.5, ROOM.zFront - 0.5] };
+    if (this.current === 'hangar') return HANGAR_LIMITS;
     return null;
   }
 
@@ -116,6 +117,7 @@ class Environments {
     this.current = name;
     this.scene.background = env.background;
     this.scene.environment = env.envMap;
+    this.scene.environmentRotation.set(0, env.envRotation || 0, 0);
     this.scene.environmentIntensity = env.envIntensity;
     this.scene.fog = env.fog || null;
     this.sun.color.set(env.sunColor);
@@ -139,7 +141,50 @@ class Environments {
   }
 }
 
-const BUILDERS = { studio: buildStudio, hangar: buildClubHangar };
+const BUILDERS = { studio: buildStudio, hangar: buildPanoramaHangar };
+
+// The club hangar is one generated 360° panorama (public/scenes/hangar.jpg), projected
+// onto a dome with a flat floor, so the glider stands on the panorama's floor. The
+// same image lights the glider and shows in its tubes. Keep the camera near the
+// middle: far from where the panorama was "taken" the walls stretch.
+const PANO = { url: './scenes/hangar.jpg', env: './scenes/hangar-env.jpg', height: 1.6, radius: 11, turn: Math.PI / 2 };
+export const HANGAR_LIMITS = { minY: 0.3, maxY: 4, x: [-6.5, 6.5], z: [-6.5, 6.5] };
+
+function buildPanoramaHangar(envs) {
+  const group = new THREE.Group();
+  envs.root.add(group);
+  const loader = new THREE.TextureLoader();
+  const map = loader.load(PANO.url, () => envs.onChange?.());
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.mapping = THREE.EquirectangularReflectionMapping;
+  const dome = new GroundedSkybox(map, PANO.height, PANO.radius, 96);
+  dome.position.y = PANO.height;
+  dome.rotation.y = PANO.turn;
+  dome.material.depthWrite = false;
+  dome.renderOrder = -5;
+  group.add(dome);
+  // The glider's shadow falls on the panorama floor.
+  const catcher = new THREE.Mesh(new THREE.PlaneGeometry(22, 22), new THREE.ShadowMaterial({ opacity: 0.32 }));
+  catcher.rotation.x = -Math.PI / 2;
+  catcher.position.y = 0.002;
+  catcher.receiveShadow = true;
+  group.add(catcher);
+  const env = {
+    group, envMap: null, envRotation: PANO.turn, envIntensity: 0.9, background: new THREE.Color('#2b2016'), exposure: 1.0,
+    sunColor: 0xffe2b8, sunIntensity: 1.2, sunDir: new THREE.Vector3(0.35, 1, -0.25).normalize(),
+    hemi: [0xffe6c8, 0x6a5440, 0.55], fillIntensity: 0.1,
+  };
+  loader.load(PANO.env, (t) => {
+    t.mapping = THREE.EquirectangularReflectionMapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    const rt = envs.pmrem.fromEquirectangular(t);
+    t.dispose();
+    env.envMap = rt.texture;
+    if (envs.current === 'hangar') envs.scene.environment = env.envMap;
+    envs.onChange?.();
+  });
+  return env;
+}
 
 function buildStudio(envs) {
   const group = new THREE.Group();
