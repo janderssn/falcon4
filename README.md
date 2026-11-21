@@ -33,12 +33,28 @@ npm run dev
 
 Open **http://localhost:5180**. Add `?model=opus` or `?model=astra` to the URL to open a specific build.
 
-- Pick a build with **Model** in the sidebar.
-- Drag to orbit, right-drag to pan, and scroll to zoom.
-- Click a part to identify it; double-click to focus.
-- Switch viewpoints and inspect connections from the sidebar.
-- Toggle sail, frame, battens, wires, hardware and webbing separately.
-- Save a viewport PNG, or download the current build's GLB.
+- **Models.** Pick model **A** in the top bar. Switching keeps the camera where it is.
+- **Compare.** Choose **Overlay** (both builds in the same place, with an A↔B fade
+  and an orange tint on B), **Side by side** (two viewports with locked cameras;
+  stacked on a portrait screen) or **Swipe** (drag the divider), then pick model **B**.
+  B can also be an earlier version of a build.
+- **Views.** Perspective, and orthographic Front, Side, Top and Bottom (keys `1`–`5`);
+  `O` switches the projection. Click an axis on the gizmo to look along it. `F` fits.
+- **Parts.** Search by name or Wills Wing part number (`/`). Click to select,
+  Shift-click to add, double-click to focus. The part card shows the part number,
+  description, source, size and mesh size, and has **Isolate** (`I`), **Hide** (`H`)
+  and **Compare**. In compare modes it shows the matching part in the other build,
+  which you can change.
+- **Layers.** Turn the seven part groups on and off; hidden parts are listed so you
+  can show them again.
+- **Scene.** Studio, hangar or mountain launch environment; grid, shadows,
+  wireframe, auto-rotate, and close-ups of the main connections.
+- **Stats.** Triangles, vertices, parts, materials, textures and GLB size per build,
+  for what is visible and for the selection, plus renderer draw calls.
+- **Share.** The address bar always holds the current view (models, compare mode,
+  camera, selection, hidden parts, environment); the link button copies it.
+  Save a PNG of the viewport, or download the GLB of model A.
+- Press `?` for all keyboard shortcuts.
 
 ```sh
 npm run build     # Static site in viewer/dist/
@@ -57,6 +73,15 @@ npm run preview   # Preview at http://localhost:5181
 entry gives the GLB, the parts file, and an optional `rotateY` / `offset`. The
 opus model is rotated 180° and raised to stand on the same ground plane as astra.
 To add another build, add an entry there.
+
+- `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
+  replace a model file, so browsers load the new file at once and don't use a
+  cached copy.
+- `versions` lists earlier builds that can be compared in the viewer. Each one is
+  a commit of this repository (`ref`) and a `label`. The viewer loads that commit's
+  GLB and parts file from `raw.githubusercontent.com`, so they must exist at the
+  same paths in that commit (or give `glb` / `parts` paths for the version).
+  When you update a model, add the commit that held the previous file here.
 
 This repository contains the models, viewer and screenshots. The reconstruction
 scripts, research documents and reference photographs are kept in separate
