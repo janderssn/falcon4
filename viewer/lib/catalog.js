@@ -10,16 +10,13 @@ const INFO_KEYS = ['part_no', 'description', 'source', 'note'];
 const TEXTURE_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap', 'bumpMap'];
 
 /**
- * Reads models.json and returns { sources, models }.
- * A source is one loadable GLB: the current build of a model ("opus") or an
- * earlier version ("opus@5bc5146") read from the repository at that commit.
+ * Reads models.json and returns { sources, models }; a source is one loadable GLB.
  */
 export async function loadCatalog() {
   const response = await fetch('./models.json', { cache: 'no-cache' });
   if (!response.ok) throw new Error('Model list is unavailable.');
   const data = await response.json();
   const list = Array.isArray(data) ? data : data.models;
-  const repo = Array.isArray(data) ? null : data.repo;
   const sources = new Map();
   for (const m of list) {
     const base = {
@@ -31,15 +28,6 @@ export async function loadCatalog() {
       ...base, id: m.id, label: m.label, short: m.label, versionLabel: m.version ? `current · ${m.version}` : 'current',
       glb: `./${m.glb}${v}`, parts: `./${m.parts}${v}`, current: true,
     });
-    for (const ver of (repo && m.versions) || []) {
-      const raw = `https://raw.githubusercontent.com/${repo}/${ver.ref}/viewer/public/`;
-      sources.set(`${m.id}@${ver.ref}`, {
-        ...base, ...(ver.rotateY !== undefined ? { rotateY: ver.rotateY } : {}), ...(ver.offset ? { offset: ver.offset } : {}),
-        id: `${m.id}@${ver.ref}`, label: `${m.label} · ${ver.label}`, short: `${m.label} ${ver.ref}`,
-        versionLabel: ver.label, glb: raw + (ver.glb || m.glb), parts: raw + (ver.parts || m.parts),
-        download: m.download.replace(/\.glb$/, `-${ver.ref}.glb`), current: false, date: ver.date,
-      });
-    }
   }
   return { sources, models: list };
 }
@@ -51,7 +39,7 @@ export function loadModel(source, onProgress) {
   if (!cache.has(source.id)) {
     const entry = { listeners: new Set(), promise: null };
     if (onProgress) entry.listeners.add(onProgress);
-    entry.promise = load(source, (p) => entry.listeners.forEach((f) => f(p))).catch((error) => {
+    entry.promise = load(source, (...a) => entry.listeners.forEach((f) => f(...a))).catch((error) => {
       cache.delete(source.id);
       throw error;
     });
