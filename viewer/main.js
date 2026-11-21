@@ -282,7 +282,7 @@ function restingPose(rec) {
   for (const y of ys) if (y < minY) minY = y;
   let front = -Infinity, back = Infinity;
   for (let i = 0; i < ys.length; i++) if (ys[i] < minY + 0.03) { front = Math.max(front, zs[i]); back = Math.min(back, zs[i]); }
-  let nose = Math.PI / 4, tail = Math.PI / 4;
+  let nose = Math.PI * 0.45, tail = Math.PI * 0.45;    // upper bound only; the first contact sets the angle
   for (let i = 0; i < ys.length; i++) {
     if (zs[i] > front + 0.5) nose = Math.min(nose, Math.atan2(ys[i] - minY, zs[i] - front));
     if (zs[i] < back - 0.5) tail = Math.min(tail, Math.atan2(ys[i] - minY, back - zs[i]));
