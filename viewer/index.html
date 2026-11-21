@@ -3,119 +3,91 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#121a22">
-<meta name="description" content="Interactive 3D viewer for the Wills Wing Falcon 4 170 hang glider models: compare builds, browse parts by name and part number.">
-<title>Falcon 4 — Model viewer</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%236cabee'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0c130d">
+<meta name="description" content="Configure a Wills Wing Falcon 4 170 hang glider in 3D: choose the build, sail colours, frame finish and scene.">
+<title>Falcon 4 — Hang glider configurator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%23d8f08a'/%3E%3C/svg%3E">
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="./" title="Falcon 4 model viewer">
-    <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M3 29 20 9 37 29 20 23Z"/></svg>
-    <span class="brand-name">FALCON <b>4</b></span><span class="brand-sub">170 · model viewer</span>
-  </a>
-  <div class="model-bar">
-    <label class="slot slot-a"><span class="slot-tag">A</span><span class="sr-only">Model A</span><select id="source-a" aria-label="Model A"></select></label>
-    <div class="segmented" id="compare-modes" role="group" aria-label="Compare mode"></div>
-    <label class="slot slot-b" id="slot-b"><span class="slot-tag">B</span><span class="sr-only">Model B</span><select id="source-b" aria-label="Model B"></select></label>
+<canvas id="scene" tabindex="0" aria-label="3D hang glider. Drag to turn, right-drag to move, scroll to zoom. Click a part to see what it is."></canvas>
+
+<div id="loader" role="status" aria-live="polite">
+  <div class="ld-center">
+    <div class="ld-title">Falcon 4</div>
+    <div class="ld-bar"><i id="ld-fill"></i></div>
+    <div class="ld-note"><span id="ld-note">Starting…</span><span id="ld-pct">0 %</span></div>
+    <button type="button" id="ld-retry" class="wide" hidden>Try again</button>
   </div>
-  <div class="top-actions">
-    <button type="button" id="share" class="icon-btn" data-icon="link" title="Copy a link to this exact view"><span class="sr-only">Copy link</span></button>
-    <a id="download" class="icon-btn" data-icon="download" href="#" title="Download GLB"><span class="sr-only">Download GLB</span></a>
-    <button type="button" id="help-btn" class="icon-btn" data-icon="help" title="Keyboard shortcuts (?)"><span class="sr-only">Help</span></button>
-  </div>
+</div>
+
+<header id="title" class="hud">
+  <h1>Falcon 4</h1>
+  <p id="subtitle">Wills Wing · 170</p>
 </header>
 
-<main class="app">
-  <nav class="rail" id="rail" aria-label="Panels">
-    <button type="button" data-panel="parts" data-icon="parts" aria-pressed="false"><span>Parts</span></button>
-    <button type="button" data-panel="layers" data-icon="layers" aria-pressed="false"><span>Layers</span></button>
-    <button type="button" data-panel="scene" data-icon="scene" aria-pressed="false"><span>Scene</span></button>
-    <button type="button" data-panel="stats" data-icon="stats" aria-pressed="false"><span>Stats</span></button>
-  </nav>
+<button type="button" id="btn-custom" class="hud pillbtn glass" aria-controls="custom" aria-expanded="false" title="Customize (C)">
+  <svg viewBox="0 0 24 24" class="ic"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Customize</span>
+</button>
 
-  <aside class="panel" id="panel" aria-labelledby="panel-title">
-    <div class="panel-head"><h2 id="panel-title">Parts</h2><button type="button" id="panel-close" class="icon-btn" data-icon="close" title="Close panel"><span class="sr-only">Close panel</span></button></div>
-
-    <section data-panel-body="parts" class="panel-body parts-body">
-      <label class="search" data-icon="search"><span class="sr-only">Search parts</span><input id="search" type="search" placeholder="Name or part number…" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
-      <div class="slot-tabs" id="parts-slot" role="group" aria-label="Which model's parts"></div>
-      <p class="list-meta" id="parts-meta"></p>
-      <div id="parts-list" class="parts-list"></div>
-      <p class="hint">Click to select · Shift-click to add · Double-click to focus</p>
+<aside id="custom" class="hud glass" aria-label="Customize the glider" hidden>
+  <header>
+    <h2>Customize</h2>
+    <button type="button" id="btn-reset" class="textbtn" title="Back to the colours as built">Reset</button>
+    <button type="button" id="btn-close" class="icon" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </header>
+  <div class="body">
+    <section>
+      <h3>Glider</h3>
+      <div id="builds" class="builds"></div>
     </section>
-
-    <section data-panel-body="layers" class="panel-body" hidden>
-      <div id="layer-list" class="toggles"></div>
-      <div id="layers-extra"></div>
-      <h3>Isolation</h3>
-      <label class="toggle"><span>Ghost the other parts</span><input type="checkbox" id="iso-ghost"></label>
+    <section>
+      <h3>Sail colours</h3>
+      <div id="sail-rows"></div>
     </section>
-
-    <section data-panel-body="scene" class="panel-body" hidden>
-      <h3>Environment</h3>
-      <div id="env-list" class="env-list"></div>
-      <h3>Display</h3>
-      <div class="toggles">
-        <label class="toggle"><span>Ground grid <kbd>G</kbd></span><input type="checkbox" id="opt-grid"></label>
-        <label class="toggle"><span>Shadows</span><input type="checkbox" id="opt-shadows"></label>
-        <label class="toggle"><span>Wireframe <kbd>W</kbd></span><input type="checkbox" id="opt-wireframe"></label>
-        <label class="toggle"><span>Auto-rotate <kbd>R</kbd></span><input type="checkbox" id="opt-rotate"></label>
-      </div>
-      <h3>Close-ups</h3>
-      <div id="closeups" class="chips"></div>
-      <button type="button" id="reset" class="wide-btn" data-icon="reset"><span>Reset viewer</span></button>
-      <p class="model-note"><span id="model-description"></span><br>Reference reconstruction — some shapes and dimensions are estimated.</p>
+    <section>
+      <h3>Frame</h3>
+      <div id="frame-row"></div>
     </section>
-
-    <section data-panel-body="stats" class="panel-body" hidden>
-      <div id="stats"></div>
+    <section>
+      <h3>Look inside</h3>
+      <label class="slider"><span>Sail</span><small class="ends"><span>Solid</span><span>See-through</span></small><input id="xray" type="range" min="0" max="1" step="0.01" value="0" aria-label="Sail see-through"></label>
+      <label class="switch"><input type="checkbox" id="opt-wires" checked><i></i><span>Wires</span></label>
+      <label class="switch"><input type="checkbox" id="opt-names"><i></i><span>Names on the main parts</span></label>
     </section>
-  </aside>
-
-  <section id="viewport" aria-label="Interactive model viewer">
-    <div id="canvas-host"></div>
-    <div class="viewbar" id="viewbar" role="toolbar" aria-label="Views"></div>
-    <div id="gizmo" class="gizmo"></div>
-    <div class="slot-labels"><span id="label-a"></span><span id="label-b"></span></div>
-    <div id="swipe-handle" class="swipe-handle" role="slider" tabindex="0" aria-label="Swipe divider between A and B" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>
-    <div id="overlay-controls" class="floating overlay-controls" hidden>
-      <span class="slot-tag">A</span>
-      <input type="range" id="fade" min="0" max="1" step="0.01" aria-label="Fade between A and B">
-      <span class="slot-tag b">B</span>
-      <label class="mini-toggle"><input type="checkbox" id="tint"><span>Tint B</span></label>
-    </div>
-    <div id="info-card" class="info-card" hidden></div>
-    <div class="corner-tools"><button type="button" id="capture" class="icon-btn" data-icon="camera" title="Save viewport image (PNG)"><span class="sr-only">Save image</span></button></div>
-    <div id="status-pill" class="status-pill" role="status" hidden></div>
-    <div class="statusbar"><span id="view-name">Perspective</span><span class="hint-text">Drag to orbit · Scroll to zoom · Right-drag to pan</span><span id="part-count"></span></div>
-    <div id="loading" role="status" aria-live="polite">
-      <span class="eyebrow">PREPARING THE WING</span>
-      <strong id="load-title">Loading model…</strong>
-      <progress id="progress" max="100" value="0" aria-label="Model download progress"></progress>
-      <span id="load-detail">Loading the full model and its components.</span>
-      <button type="button" id="retry" hidden>Try again</button>
-    </div>
-    <div id="toast" class="toast" role="status" hidden></div>
-  </section>
-</main>
-
-<dialog id="help" aria-labelledby="help-title">
-  <div class="dialog-head"><h2 id="help-title">Keyboard shortcuts</h2><button type="button" id="help-close" class="icon-btn" data-icon="close" title="Close"><span class="sr-only">Close</span></button></div>
-  <div class="shortcuts">
-    <section><h3>Views</h3><dl>
-      <dt><kbd>1</kbd></dt><dd>Front (orthographic)</dd><dt><kbd>2</kbd></dt><dd>Side</dd><dt><kbd>3</kbd></dt><dd>Top</dd>
-      <dt><kbd>4</kbd></dt><dd>Bottom</dd><dt><kbd>5</kbd> <kbd>P</kbd></dt><dd>Perspective</dd><dt><kbd>O</kbd></dt><dd>Toggle orthographic</dd>
-      <dt><kbd>F</kbd></dt><dd>Fit to view</dd></dl></section>
-    <section><h3>Parts</h3><dl>
-      <dt><kbd>/</kbd></dt><dd>Search parts</dd><dt><kbd>I</kbd></dt><dd>Isolate selection</dd><dt><kbd>H</kbd></dt><dd>Hide selection</dd>
-      <dt><kbd>Shift</kbd> <kbd>H</kbd></dt><dd>Show everything</dd><dt><kbd>Esc</kbd></dt><dd>Clear selection</dd></dl></section>
-    <section><h3>Scene</h3><dl>
-      <dt><kbd>C</kbd></dt><dd>Next compare mode</dd><dt><kbd>E</kbd></dt><dd>Next environment</dd><dt><kbd>G</kbd></dt><dd>Grid</dd>
-      <dt><kbd>W</kbd></dt><dd>Wireframe</dd><dt><kbd>R</kbd></dt><dd>Auto-rotate</dd><dt><kbd>?</kbd></dt><dd>This help</dd></dl></section>
+    <section id="light" hidden>
+      <h3>Light</h3>
+      <label class="slider"><span>Time of day</span><b id="time-label">09:30</b><input id="time" type="range" min="3.6" max="22" step="0.05" value="9.5"></label>
+      <label class="slider"><span>Wind</span><input id="wind" type="range" min="0" max="2.5" step="0.05" value="1"></label>
+    </section>
+    <footer>
+      <button type="button" id="btn-share" class="wide">Copy link to this glider</button>
+      <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
+      <p class="note">Reconstructions from the owner's manual, factory drawings and photos; colours are for show. Some shapes and sizes are estimated. Don't use the model for maintenance.</p>
+    </footer>
   </div>
-  <p class="dialog-note">Mouse: drag to orbit, right-drag to pan, scroll to zoom. Click a part to select it, Shift-click to add, double-click to focus. Touch: one finger orbits, two fingers pan and zoom.</p>
-</dialog>
+</aside>
+
+<div id="scene-pick" class="hud">
+  <div id="scene-fly" class="glass" hidden></div>
+  <button type="button" id="scene-btn" class="tile" title="Scene" aria-haspopup="true" aria-expanded="false"><span class="art" id="scene-art"></span><span class="cap" id="scene-cap">Scene</span></button>
+</div>
+
+<div id="chip" class="hud glass" hidden aria-live="polite"></div>
+
+<div id="navstack" class="hud">
+  <button type="button" id="btn-tour" class="icon" title="Fly around (F)" aria-label="Fly around"><svg viewBox="0 0 24 24" class="ic"><path d="M8 5.5v13l10.5-6.5Z"/></svg></button>
+  <div class="stack glass">
+    <button type="button" id="btn-front" title="Back to the start view (N)" aria-label="Back to the start view"><svg viewBox="0 0 24 24" class="ic"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button type="button" id="btn-2d" title="Plan view from above / 3D (T)" aria-label="Switch between plan view and 3D">2D</button>
+  </div>
+  <div class="stack glass">
+    <button type="button" id="btn-zin" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" class="ic"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
+    <button type="button" id="btn-zout" title="Zoom out (−)" aria-label="Zoom out"><svg viewBox="0 0 24 24" class="ic"><path d="M5.5 12h13"/></svg></button>
+  </div>
+</div>
+<div id="labels" aria-hidden="true"></div>
+<div id="toast" role="status"></div>
+<button type="button" id="btn-showhud">Show the controls</button>
 <script type="module" src="/main.js"></script>
 </body>
 </html>

@@ -1,18 +1,63 @@
-// Scene environments: studio (plain), hangar and a mountain launch site.
-// Everything is generated in code, so no extra downloads are needed.
-// Each environment sits on the ground plane (y = 0 of its group); the app
-// moves the group to the lowest point of the loaded glider.
+// Scenes for the glider: a plain studio, a hangar and a hilltop meadow (meadow.js).
+// The studio and the hangar are generated in code, like the meadow.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Sky } from 'three/addons/objects/Sky.js';
+import { Meadow } from './meadow.js';
 
-export const ENVIRONMENTS = {
-  studio: { label: 'Studio', detail: 'Plain backdrop, soft room light' },
-  hangar: { label: 'Hangar', detail: 'Hangar floor with skylights' },
-  mountain: { label: 'Mountain launch', detail: 'Launch ramp above a valley' },
+export const SCENES = {
+  studio: { label: 'Studio' },
+  hangar: { label: 'Hangar' },
+  hill: { label: 'Hill' },
 };
 
-export class Environments {
+/** Switches between the scenes; the meadow is only built when the hill is first chosen. */
+export class Scenes {
+  constructor(renderer, scene, { grass = 170000 } = {}) {
+    this.renderer = renderer;
+    this.scene = scene;
+    this.grass = grass;
+    this.indoor = new Environments(renderer, scene);
+    this.meadow = null;
+    this.current = null;
+    this.hours = 9.5;
+    this.wind = 1;
+    this.shadows = true;
+    this.ground = null;
+  }
+
+  set(name) {
+    if (!SCENES[name]) name = 'studio';
+    this.current = name;
+    if (name === 'hill') {
+      if (!this.meadow) {
+        this.meadow = new Meadow(this.renderer, this.scene, { grass: this.grass });
+        this.meadow.setWind(this.wind);
+        if (this.ground) this.meadow.place(...this.ground);
+      }
+      this.indoor.setActive(false);
+      this.meadow.setActive(true);
+      this.meadow.setShadows(this.shadows);
+      this.meadow.setTime(this.hours);
+    } else {
+      this.meadow?.setActive(false);
+      this.indoor.setActive(true);
+      this.indoor.set(name, this.shadows);
+    }
+  }
+
+  place(groundY, center) {
+    this.ground = [groundY, center.clone()];
+    this.indoor.place(groundY, center);
+    this.meadow?.place(groundY, center);
+  }
+
+  setTime(h) { this.hours = h; if (this.current === 'hill') this.meadow.setTime(h); }
+  setWind(w) { this.wind = w; this.meadow?.setWind(w); }
+  setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); }
+  update(camera, seconds) { if (this.current === 'hill') this.meadow.update(camera, seconds); }
+}
+
+class Environments {
   constructor(renderer, scene) {
     this.renderer = renderer;
     this.scene = scene;
@@ -52,7 +97,7 @@ export class Environments {
   }
 
   set(name, shadows = true) {
-    if (!ENVIRONMENTS[name]) name = 'studio';
+    if (!BUILDERS[name]) name = 'studio';
     if (!this.built[name]) this.built[name] = BUILDERS[name](this);
     for (const [key, env] of Object.entries(this.built)) env.group.visible = key === name;
     const env = this.built[name];
@@ -74,9 +119,15 @@ export class Environments {
     this.sun.castShadow = on;
     this.renderer.shadowMap.needsUpdate = true;
   }
+
+  /** Shows or hides the studio and hangar, with their lights. */
+  setActive(on) {
+    this.root.visible = on;
+    this.sun.visible = this.hemi.visible = this.fill.visible = on;
+  }
 }
 
-const BUILDERS = { studio: buildStudio, hangar: buildHangar, mountain: buildMountain };
+const BUILDERS = { studio: buildStudio, hangar: buildHangar };
 
 function buildStudio(envs) {
   const group = new THREE.Group();
@@ -226,175 +277,11 @@ function buildHangar(envs) {
   };
 }
 
-// ---------------------------------------------------------------- mountain
-
 function mulberry(seed) {
   return () => {
     seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function makeNoise(seed) {
-  const rnd = mulberry(seed);
-  const perm = new Uint8Array(512);
-  const p = [...Array(256).keys()].sort(() => rnd() - 0.5);
-  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
-  const grad = (h, x, y) => ((h & 1) ? x : -x) + ((h & 2) ? y : -y);
-  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
-  const noise = (x, y) => {
-    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-    x -= Math.floor(x); y -= Math.floor(y);
-    const u = fade(x), v = fade(y);
-    const a = perm[X] + Y, b = perm[X + 1] + Y;
-    return THREE.MathUtils.lerp(
-      THREE.MathUtils.lerp(grad(perm[a], x, y), grad(perm[b], x - 1, y), u),
-      THREE.MathUtils.lerp(grad(perm[a + 1], x, y - 1), grad(perm[b + 1], x - 1, y - 1), u), v);
-  };
-  return (x, y, octaves = 5) => {
-    let sum = 0, amp = 1, f = 1, norm = 0;
-    for (let i = 0; i < octaves; i++) { sum += amp * noise(x * f, y * f); norm += amp; amp *= 0.5; f *= 2.03; }
-    return sum / norm;
-  };
-}
-
-const smooth = (a, b, x) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-const EDGE = 15;   // the launch edge is 15 m in front of the glider (+Z)
-
-function terrainHeight(fbm, x, z) {
-  const r = Math.hypot(x, z);
-  const flat = smooth(18, 60, r);            // keep the launch area flat
-  let h = 0;
-  // Mountain behind the launch rises gently, the slope in front drops into the valley.
-  h += smooth(-30, -400, z) * 220 + Math.max(0, -z - 30) * 0.12;
-  const drop = smooth(EDGE, EDGE + 40, z) * (z - EDGE) * 0.8 + smooth(EDGE + 30, 1100, z) * 520;
-  h -= Math.min(drop, 720);
-  // The ridge continues to both sides.
-  h += smooth(30, 200, Math.abs(x)) * 60 * (1 - smooth(EDGE, 300, z) * 0.7);
-  // Mountains around the valley.
-  h += smooth(900, 2200, r) * (380 + fbm(x / 520, z / 520, 4) * 900);
-  h += fbm(x / 140, z / 140) * 28 * flat + fbm(x / 22, z / 22, 3) * 1.6 * flat;
-  // The ramp deck is the glider's ground; the grass sits a little below it.
-  h -= 0.55 * (1 - smooth(12, 26, Math.hypot(x * 1.4, z)));
-  h += fbm(x / 3, z / 3, 2) * 0.06;
-  return h;
-}
-
-function buildMountain(envs) {
-  const group = new THREE.Group();
-  envs.root.add(group);
-  const fbm = makeNoise(11);
-
-  // Terrain grid that is dense near the glider and coarse far away.
-  const N = 300, R = 4200;
-  const geo = new THREE.PlaneGeometry(2, 2, N, N);
-  geo.rotateX(-Math.PI / 2);
-  const pos = geo.attributes.position;
-  const warp = (s) => Math.sign(s) * (Math.abs(s) ** 3 * (R - 40) + Math.abs(s) * 40);
-  for (let i = 0; i < pos.count; i++) {
-    const x = warp(pos.getX(i)), z = warp(pos.getZ(i));
-    pos.setXYZ(i, x, terrainHeight(fbm, x, z), z);
-  }
-  geo.computeVertexNormals();
-  const colors = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
-  const grass = new THREE.Color('#5b7a33'), dry = new THREE.Color('#8f8a4f'), rock = new THREE.Color('#7a7368'), snow = new THREE.Color('#f2f4f6'), forest = new THREE.Color('#2f4a2a');
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const ny = geo.attributes.normal.getY(i);
-    const n = fbm(x / 60, z / 60, 3);
-    c.copy(grass).lerp(dry, smooth(-0.2, 0.5, n));
-    if (y < -200) c.lerp(forest, smooth(-200, -420, y) * 0.8);
-    c.lerp(rock, smooth(0.85, 0.6, ny));
-    c.lerp(snow, smooth(380, 620, y + n * 80) * smooth(0.45, 0.7, ny));
-    colors.set([c.r, c.g, c.b], i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  // World-space UVs for a grass detail texture that tiles every 4 m.
-  const uv = geo.attributes.uv;
-  for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 4, pos.getZ(i) / 4);
-  const detail = canvasTexture(256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#e6e6e6'; ctx.fillRect(0, 0, w, h);
-    const rnd = mulberry(5);
-    for (let i = 0; i < 2600; i++) {
-      const v = 150 + rnd() * 105;
-      ctx.strokeStyle = `rgba(${v * 0.95},${v},${v * 0.8},${0.25 + rnd() * 0.35})`;
-      ctx.lineWidth = 0.6 + rnd();
-      const x = rnd() * w, y = rnd() * h;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (rnd() - 0.5) * 4, y - 3 - rnd() * 6); ctx.stroke();
-    }
-  });
-  const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, roughness: 0.95 }));
-  terrain.receiveShadow = true;
-  group.add(terrain);
-
-  // Wooden launch ramp: the glider stands on the deck, which overhangs the edge.
-  const plank = canvasTexture(256, 256, (ctx, w, h) => {
-    for (let i = 0; i < 8; i++) {
-      const v = 120 + ((i * 37) % 40);
-      ctx.fillStyle = `rgb(${v + 20},${v - 10},${v - 50})`;
-      ctx.fillRect(0, i * h / 8, w, h / 8 - 2);
-      ctx.fillStyle = 'rgba(40,25,10,.6)'; ctx.fillRect(0, (i + 1) * h / 8 - 2, w, 2);
-    }
-    speckle(ctx, w, h, 2500, 0.15, false);
-  }, [1, 6]);
-  const wood = new THREE.MeshStandardMaterial({ map: plank, roughness: 0.8 });
-  const deckLength = 26, deckStart = -8;
-  // Level under the glider, then sloping down over the edge.
-  const deckGeo = new THREE.BoxGeometry(5, 0.12, deckLength, 1, 1, 13);
-  const dp = deckGeo.attributes.position;
-  for (let i = 0; i < dp.count; i++) {
-    const z = dp.getZ(i) + deckStart + deckLength / 2;
-    dp.setY(i, dp.getY(i) + (z > 6 ? -(z - 6) * 0.22 : 0));
-  }
-  deckGeo.computeVertexNormals();
-  const deck = new THREE.Mesh(deckGeo, wood);
-  deck.position.set(0, -0.06, deckStart + deckLength / 2);
-  deck.castShadow = deck.receiveShadow = true;
-  group.add(deck);
-  const post = new THREE.MeshStandardMaterial({ color: '#5a4630', roughness: 0.9 });
-  for (let z = deckStart + 1; z < deckStart + deckLength; z += 3) {
-    for (const x of [-2.2, 2.2]) {
-      const top = z > 6 ? -(z - 6) * 0.22 - 0.1 : -0.1;
-      const ground = terrainHeight(fbm, x, z);
-      const len = top - ground;
-      if (len < 0.2) continue;
-      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, len, 8), post);
-      p.position.set(x, ground + len / 2, z); p.castShadow = true; group.add(p);
-    }
-  }
-  // Windsock.
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 6, 8), new THREE.MeshStandardMaterial({ color: '#d8d8d8', metalness: 0.6, roughness: 0.4 }));
-  pole.position.set(9, 3, 9); pole.castShadow = true; group.add(pole);
-  const sockGeo = new THREE.CylinderGeometry(0.28, 0.12, 1.8, 16, 4, true);
-  sockGeo.rotateZ(Math.PI / 2);
-  sockGeo.translate(0.9, 0, 0);
-  const sock = new THREE.Mesh(sockGeo, new THREE.MeshStandardMaterial({ color: '#f26a1b', roughness: 0.7, side: THREE.DoubleSide }));
-  sock.position.set(9, 5.7, 9); sock.rotation.set(0, Math.PI * 0.62, -0.12); sock.castShadow = true;
-  group.add(sock);
-
-  // Physical sky; the same sky lights the scene through an environment map.
-  const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(58), THREE.MathUtils.degToRad(35));
-  const makeSky = () => {
-    const sky = new Sky();
-    sky.scale.setScalar(5000);
-    const u = sky.material.uniforms;
-    u.turbidity.value = 3.5; u.rayleigh.value = 1.2; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.8;
-    u.sunPosition.value.copy(sunDir);
-    return sky;
-  };
-  const sky = makeSky();
-  sky.material.depthWrite = false;
-  group.add(sky);
-  const skyScene = new THREE.Scene();
-  skyScene.add(makeSky());
-  const envMap = envs.pmrem.fromScene(skyScene).texture;
-  return {
-    group, envMap, envIntensity: 0.55, background: null, exposure: 0.62,
-    fog: new THREE.Fog('#b4c6d8', 900, 5200),
-    sunColor: 0xfff1dc, sunIntensity: 2.6, sunDir,
-    hemi: [0xbcd6ff, 0x5b6b3a, 0.55], fillIntensity: 0.15,
   };
 }

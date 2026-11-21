@@ -33,28 +33,21 @@ npm run dev
 
 Open **http://localhost:5180**. Add `?model=opus` or `?model=astra` to the URL to open a specific build.
 
-- **Models.** Pick model **A** in the top bar. Switching keeps the camera where it is.
-- **Compare.** Choose **Overlay** (both builds in the same place, with an A↔B fade
-  and an orange tint on B), **Side by side** (two viewports with locked cameras;
-  stacked on a portrait screen) or **Swipe** (drag the divider), then pick model **B**.
-  B can also be an earlier version of a build.
-- **Views.** Perspective, and orthographic Front, Side, Top and Bottom (keys `1`–`5`);
-  `O` switches the projection. Click an axis on the gizmo to look along it. `F` fits.
-- **Parts.** Search by name or Wills Wing part number (`/`). Click to select,
-  Shift-click to add, double-click to focus. The part card shows the part number,
-  description, source, size and mesh size, and has **Isolate** (`I`), **Hide** (`H`)
-  and **Compare**. In compare modes it shows the matching part in the other build,
-  which you can change.
-- **Layers.** Turn the seven part groups on and off; hidden parts are listed so you
-  can show them again.
-- **Scene.** Studio, hangar or mountain launch environment; grid, shadows,
-  wireframe, auto-rotate, and close-ups of the main connections.
-- **Stats.** Triangles, vertices, parts, materials, textures and GLB size per build,
-  for what is visible and for the selection, plus renderer draw calls.
-- **Share.** The address bar always holds the current view (models, compare mode,
-  camera, selection, hidden parts, environment); the link button copies it.
-  Save a PNG of the viewport, or download the GLB of model A.
-- Press `?` for all keyboard shortcuts.
+The viewer is a glider configurator:
+
+- **Customize** (top right, `C`): pick the build (Astra or Opus), the sail colours
+  (leading edge, top surface, undersurface) and the frame finish; make the sail
+  see-through to look at the frame; show or hide the wires; put names on the main
+  parts. *As built* (the first swatch in each row) restores the original colour.
+  Colours are for show only.
+- **Scene** (bottom left): studio, hangar, or a hill with grass in the wind,
+  where you can also set the time of day and the wind.
+- **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
+  from above (`T`), zoom. Drag to turn, right-drag to move, scroll to zoom.
+- Click a part to see what it is, with its Wills Wing part number where the build
+  has one; double-click to go to it.
+- **Copy link to this glider** puts the whole configuration in the link: build,
+  colours, scene, time of day and camera.
 
 ```sh
 npm run build     # Static site in viewer/dist/
@@ -77,11 +70,13 @@ To add another build, add an entry there.
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
   replace a model file, so browsers load the new file at once and don't use a
   cached copy.
-- `versions` lists earlier builds that can be compared in the viewer. Each one is
-  a commit of this repository (`ref`) and a `label`. The viewer loads that commit's
-  GLB and parts file from `raw.githubusercontent.com`, so they must exist at the
-  same paths in that commit (or give `glb` / `parts` paths for the version).
-  When you update a model, add the commit that held the previous file here.
+
+The sail colour and frame finish choices find their parts by material name
+(`ZONES` in [`viewer/main.js`](viewer/main.js)). The opus sail has its colours baked
+into textures; the viewer keeps the texture's light and dark (seams, stitching) and
+swaps the hue. The scene and glider-card pictures in `viewer/public/thumbs/` are
+rendered from the viewer itself by `node tools/thumbs.mjs` (Playwright and Pillow;
+start `npm run dev` first).
 
 This repository contains the models, viewer and screenshots. The reconstruction
 scripts, research documents and reference photographs are kept in separate
