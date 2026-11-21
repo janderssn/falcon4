@@ -9,8 +9,10 @@
       "glb": "models/astra/model.glb",
       "parts": "models/astra/parts.json",
       "download": "falcon4-170-astra.glb",
-      "version": "92b1911",
-      "versions": []
+      "version": "d70af6a",
+      "versions": [
+        { "ref": "e705a24", "label": "92b1911 · L/R named from the front", "date": "2026-11-09" }
+      ]
     },
     {
       "id": "opus",
