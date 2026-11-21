@@ -12,7 +12,7 @@
     "id": "opus",
     "label": "Opus",
     "title": "Opus build",
-    "description": "317 parts · manual-accurate hardware · speedbar basetube",
+    "description": "356 parts · manual-accurate hardware · speedbar basetube",
     "glb": "models/opus/model.glb",
     "parts": "models/opus/parts.json",
     "download": "falcon4-170-opus.glb",

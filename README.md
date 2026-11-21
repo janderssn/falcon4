@@ -8,7 +8,7 @@ viewer that switches between two independent reconstructions.
 | Build | Parts | What it is |
 |---|---|---|
 | **Astra** | 391 | Round control frame, blue/red/off-white sail, resting ground configuration |
-| **Opus** | 317 | Hardware matched to the owner's manual with part numbers (nose plate, keyhole tangs, crossbar junction, speedbar corners), batten strings and lever tips, reflex bridles, washout tubes |
+| **Opus** | 356 | Hardware matched to the owner's manual with part numbers (nose plate, keyhole tangs, crossbar junction, speedbar corners), batten strings and lever tips, reflex bridles, washout tubes |
 
 Both builds use the same seven visibility groups. Some shapes and dimensions are
 approximate. Don't use either model as a maintenance reference; use the Wills
