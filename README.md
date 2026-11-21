@@ -35,13 +35,16 @@ Open **http://localhost:5180**. Add `?model=opus` or `?model=astra` to the URL t
 
 The viewer is a glider configurator:
 
-- **Customize** (top right, `C`): pick the build (Astra or Opus), the sail colours
-  (leading edge, top surface, undersurface) and the frame finish; make the sail
-  see-through to look at the frame; show or hide the wires; put names on the main
-  parts. *As built* (the first swatch in each row) restores the original colour.
-  Colours are for show only.
+- **Customize** (top right, `C`): pick the build (Astra or Opus) and whether it is
+  standing on its control bar or parked on its keel (nose down); the sail colours
+  (leading edge, top surface, trailing edge, batten pockets, and Astra's stripe or
+  Opus's undersurface) and the frame finish; make the sail see-through to look at
+  the frame; show or hide the wires and bridles; put names on the main parts.
+  *As built* (the first swatch in each row) restores the original colour. Colours
+  are for show only.
 - **Scene** (bottom left): studio, hangar, or a hill with grass in the wind,
-  where you can also set the time of day and the wind.
+  where you can also set the time of day and the wind. The camera stays above the
+  ground on the hill and inside the hangar; in the studio you can look up from below.
 - **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
   from above (`T`), zoom. Drag to turn, right-drag to move, scroll to zoom.
 - Click a part to see what it is, with its Wills Wing part number where the build

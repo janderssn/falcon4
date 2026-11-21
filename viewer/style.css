@@ -54,6 +54,10 @@ body.panel-open #btn-custom { opacity: 0; pointer-events: none; }
 .build b { display: block; font-family: var(--serif); font-weight: 500; font-size: 18px; }
 .build small { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 10px; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, .07); }
+.seg button { height: 32px; border-radius: 999px; background: none; border: 0; font-size: 12.5px; color: var(--muted); }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .row { margin-bottom: 12px; }
 .row-name { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-bottom: 7px; }
 .row-name small { font-size: 11.5px; color: var(--muted); }

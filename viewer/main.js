@@ -12,12 +12,22 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const small = matchMedia('(max-width: 760px)').matches;
 
 // ------------------------------------------------------------------ what can be tweaked
-// Sail and frame zones, by the material names each build uses.
+// Sail and frame zones. A part belongs to the first zone whose part-name pattern
+// matches it, otherwise to the zone of its material. Rows only show for a build
+// that has parts in them (Astra has a red stripe on top, Opus a coloured undersurface).
 const ZONES = {
+  pockets: { name: 'Batten pockets', parts: /^(Batten pocket [LR] [2-6]|[LR] batten [2-6] fabric pocket)$/ },
+  te: { name: 'Trailing edge', parts: /^(Trailing edge hem|[LR] sail panel 4)$/, mats: ['Sail P4 TE panel (white)'] },
   le: { name: 'Leading edge', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
-  top: { name: 'Top surface', mats: ['Off-white Dacron', 'Sail P2 (white)', 'Sail P3 (white)', 'Sail P4 TE panel (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)'] },
-  under: { name: 'Undersurface', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P5 undersurface (colour)'] },
+  top: { name: 'Top surface', mats: ['Off-white Dacron', 'Sail P2 (white)', 'Sail P3 (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)'] },
+  stripe: { name: 'Stripe', mats: ['Signal red Dacron', 'Red inner cloth - underside only'] },
+  under: { name: 'Undersurface', mats: ['Sail P5 undersurface (colour)'] },
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'] },
+};
+const SAIL_ZONES = ['le', 'top', 'te', 'pockets', 'stripe', 'under'];
+const zoneOf = (mesh) => {
+  const part = mesh.userData.part.name, mat = mesh.userData.materials.base.name;
+  return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part)) || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat));
 };
 const SAIL_COLOURS = [
   ['white', 'White', '#f1f0ea'], ['ivory', 'Ivory', '#e7dfc6'], ['silver', 'Silver', '#b9bcc0'], ['yellow', 'Yellow', '#f0c419'],
@@ -50,9 +60,10 @@ const pick = (key, list, fallback = null) => (list.some((x) => x[0] === params.g
 const state = {
   model: params.get('model'),
   scene: SCENES[params.get('scene')] ? params.get('scene') : 'studio',
-  colours: { le: pick('le', SAIL_COLOURS), top: pick('top', SAIL_COLOURS), under: pick('under', SAIL_COLOURS), frame: pick('frame', FRAME_FINISHES) },
+  colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, pick(z, z === 'frame' ? FRAME_FINISHES : SAIL_COLOURS)])),
   seeThrough: Math.min(1, Math.max(0, Number(params.get('xray')) || 0)),
   wires: params.get('wires') !== '0',
+  pose: params.get('pose') === 'keel' ? 'keel' : 'bar',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
   wind: 1, shadows: true, sel: null, tour: false,
@@ -121,7 +132,7 @@ async function setModel(id, first = false) {
   record = rec;
   prepareTints(record);
   scene.add(record.root);
-  anchors.clear();
+  applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
   scenes.place(record.box.min.y, new THREE.Vector3(center.x, record.box.min.y, center.z));
   state.sel = null;
@@ -153,7 +164,7 @@ function prepareTints(rec) {
   for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [] };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
-    const zone = Object.keys(ZONES).find((z) => ZONES[z].mats.includes(name));
+    const zone = zoneOf(mesh);
     if (!zone) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
@@ -210,12 +221,58 @@ function applyLook() {
       mat = M.ghost;
       mat.opacity = 1 - state.seeThrough * 0.92;
       mat.transparent = true;
-      mat.depthWrite = false;
+      mat.depthWrite = true;          // only the nearest layer shows, so overlapping cloth doesn't stack in patches
       if (mat.emissive) mat.emissive.set(selected ? '#d0832a' : 0x000000);
     }
+    if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35;
     mesh.material = mat;
     mesh.visible = visible;
   }
+}
+
+// ------------------------------------------------------------------ pose
+/**
+ * Standing on the control bar (as modelled), or parked: rocked forward over the
+ * basebar until the nose comes down on the ground. The tilt is found from the
+ * model itself: the smallest forward rotation about the front of the basebar at
+ * which any other point of the glider reaches the ground.
+ */
+function restingPose(rec) {
+  const root = rec.root;
+  root.position.set(0, 0, 0);
+  root.quaternion.identity();
+  root.updateMatrixWorld(true);
+  // Flat arrays and plain loops: the models have up to a million vertices.
+  const ys = [], zs = [];
+  const v = new THREE.Vector3();
+  for (const m of rec.meshes) {
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 2) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld); ys.push(v.y); zs.push(v.z); }
+  }
+  let minY = Infinity;
+  for (const y of ys) if (y < minY) minY = y;
+  let pivotZ = -Infinity;
+  for (let i = 0; i < ys.length; i++) if (ys[i] < minY + 0.03 && zs[i] > pivotZ) pivotZ = zs[i];
+  let angle = Math.PI / 4;
+  for (let i = 0; i < ys.length; i++) if (zs[i] > pivotZ + 0.5) angle = Math.min(angle, Math.atan2(ys[i] - minY, zs[i] - pivotZ));
+  return { pivot: new THREE.Vector3(0, minY, pivotZ), angle };
+}
+function applyPose() {
+  if (!record) return;
+  if (!record.rest) record.rest = restingPose(record);
+  const { pivot, angle } = record.rest;
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), state.pose === 'keel' ? angle : 0);
+  record.root.quaternion.copy(q);
+  record.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
+  record.root.updateMatrixWorld(true);
+  record.box.setFromObject(record.root);
+  anchors.clear();
+}
+function setPose(pose) {
+  state.pose = pose;
+  applyPose();
+  syncPanel();
+  saveUrlSoon();
 }
 
 // ------------------------------------------------------------------ camera
@@ -240,6 +297,38 @@ function focusPart(part) {
   rig.animateTo(pose, !reduced);
 }
 
+// Keep the camera out of the ground and inside the hangar. The orbit's lowest angle is
+// set so the camera stays above the floor; anything that still gets out (zooming out,
+// moving the target) is pulled back along the line to the target.
+function limitCamera() {
+  const lim = record && scenes.cameraLimits();
+  const c = rig.controls;
+  if (!lim) { c.maxPolarAngle = Math.PI; return; }
+  const g = record.box.min.y, t = c.target;
+  if (lim.halfX) {
+    t.x = THREE.MathUtils.clamp(t.x, -lim.halfX + 1, lim.halfX - 1);
+    t.z = THREE.MathUtils.clamp(t.z, -lim.halfZ + 1, lim.halfZ - 1);
+    t.y = Math.min(t.y, g + lim.maxY - 1);
+  }
+  t.y = Math.max(t.y, g + lim.minY + 0.1);
+  const d = Math.max(rig.camera.position.distanceTo(t), 1e-3);
+  c.maxPolarAngle = Math.acos(THREE.MathUtils.clamp((g + lim.minY - t.y) / d, -1, 1));
+}
+function clampCamera() {
+  const lim = record && scenes.cameraLimits();
+  if (!lim) return;
+  const g = record.box.min.y, cam = rig.camera.position, t = rig.controls.target;
+  const off = cam.clone().sub(t);
+  let s = 1;
+  if (cam.y < g + lim.minY && off.y < 0) s = Math.min(s, (g + lim.minY - t.y) / off.y);
+  if (lim.maxY && cam.y > g + lim.maxY && off.y > 0) s = Math.min(s, (g + lim.maxY - t.y) / off.y);
+  if (lim.halfX) {
+    if (Math.abs(cam.x) > lim.halfX && off.x) s = Math.min(s, (Math.sign(off.x) * lim.halfX - t.x) / off.x);
+    if (Math.abs(cam.z) > lim.halfZ && off.z) s = Math.min(s, (Math.sign(off.z) * lim.halfZ - t.z) / off.z);
+  }
+  if (s < 1) cam.copy(t).addScaledVector(off, Math.max(s, 0.02));
+}
+
 // Fly-around on request; a slow turn on its own after a while without input.
 let lastInput = performance.now();
 function userActive() { lastInput = performance.now(); if (!state.tour) rig.controls.autoRotate = false; }
@@ -255,7 +344,9 @@ function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (!THUMB && !state.tour && !rig.transition && now - lastInput > 30000 && rig.projection === 'perspective') { rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 0.35; }
+  limitCamera();
   rig.update(now, dt);
+  clampCamera();
   scenes.update(rig.camera, (now - clock0) / 1000);
   renderer.render(scene, rig.camera);
   updateLabels();
@@ -386,7 +477,7 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = ['le', 'top', 'under'].map((z) => `<div class="row"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z, SAIL_COLOURS)}</div>`).join('');
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z, SAIL_COLOURS)}</div>`).join('');
   $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame', FRAME_FINISHES)}</div>`;
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
@@ -412,8 +503,9 @@ function syncPanel() {
     const m = t?.meshes[0]?.userData.materials.base;
     const c = !m ? null : m.map ? new THREE.Color(.../\(blue\)/.test(m.name) ? BAKED.blue : /\(colour\)/.test(m.name) ? BAKED.red : BAKED.white) : m.userData.original;
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
-    b.hidden = !t?.meshes.length;
   }
+  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
+  for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
   $('#opt-names').checked = state.names;
@@ -486,6 +578,8 @@ function wireUi() {
   $('#custom').addEventListener('click', (e) => {
     const sw = e.target.closest('.sw');
     if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); return; }
+    const pose = e.target.closest('[data-pose]');
+    if (pose) { setPose(pose.dataset.pose); return; }
     const build = e.target.closest('.build');
     if (build && build.dataset.model !== state.model) setModel(build.dataset.model);
   });
@@ -493,7 +587,7 @@ function wireUi() {
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
   $('#btn-reset').onclick = () => {
-    state.colours = { le: null, top: null, under: null, frame: null };
+    state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, null]));
     state.seeThrough = 0; state.wires = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
@@ -559,6 +653,7 @@ function saveUrl() {
   for (const [z, id] of Object.entries(state.colours)) if (id) q.set(z, id);
   if (state.seeThrough) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
+  if (state.pose === 'keel') q.set('pose', 'keel');
   if (state.names) q.set('names', '1');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));

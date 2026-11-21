@@ -8,7 +8,8 @@ const buf = fs.readFileSync(glb);
 const gltf = JSON.parse(buf.slice(20, 20 + buf.readUInt32LE(12)).toString('utf8'));
 const rules = [
   ['07', /webbing|hang loop|cinch strap|rope (hand )?loop|bungee/i],                    // Webbing
-  ['01', /^Sail (top|P\d|number)|Trailing edge hem|Keel pocket|Kingpost patch|Kingpost base sock|Nosecone/i], // Sail & cloth
+  ['01', /^Sail (top|P\d|number)|Trailing edge hem|pocket|Kingpost patch|Kingpost base sock|Nosecone/i], // Sail & cloth (all pockets are cloth)
+  ['05', /^Bridle/i],                                                          // reflex bridles, before the batten rule (#4)
   ['03', /batten|Lever tip|String tip|Washout/i],                              // Battens & washout
   ['06', /\btang\b|keyhole/i],                                                 // wire tangs count as hardware
   ['05', /^Top .*wire|Bridle|Sweep wire/i],                                    // Upper wires & bridles
