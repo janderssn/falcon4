@@ -1,22 +1,36 @@
-[
-  {
-    "id": "astra",
-    "label": "Astra",
-    "title": "Astra build",
-    "description": "391 parts · round control frame · resting on the ground",
-    "glb": "models/astra/model.glb",
-    "parts": "models/astra/parts.json",
-    "download": "falcon4-170-astra.glb"
-  },
-  {
-    "id": "opus",
-    "label": "Opus",
-    "title": "Opus build",
-    "description": "356 parts · manual-accurate hardware · speedbar basetube",
-    "glb": "models/opus/model.glb",
-    "parts": "models/opus/parts.json",
-    "download": "falcon4-170-opus.glb",
-    "rotateY": 180,
-    "offset": [0, 1.83, 0]
-  }
-]
+{
+  "repo": "janderssn/falcon4",
+  "models": [
+    {
+      "id": "astra",
+      "label": "Astra",
+      "title": "Astra build",
+      "description": "391 parts · round control frame · resting on the ground",
+      "glb": "models/astra/model.glb",
+      "parts": "models/astra/parts.json",
+      "download": "falcon4-170-astra.glb",
+      "version": "d70af6a",
+      "versions": [
+        { "ref": "e705a24", "label": "92b1911 · L/R named from the front", "date": "2026-11-09" }
+      ]
+    },
+    {
+      "id": "opus",
+      "label": "Opus",
+      "title": "Opus build",
+      "description": "356 parts · manual-accurate hardware · speedbar basetube",
+      "glb": "models/opus/model.glb",
+      "parts": "models/opus/parts.json",
+      "download": "falcon4-170-opus.glb",
+      "rotateY": 180,
+      "offset": [0, 1.83, 0],
+      "version": "bb85d59",
+      "versions": [
+        { "ref": "0d011c5", "label": "02a99a7 · baked sail colours", "date": "2026-11-21" },
+        { "ref": "5bc5146", "label": "bdc9965 · raw sail detail map", "date": "2026-11-21" },
+        { "ref": "3c031c9", "label": "f88d0e3", "date": "2026-11-21" },
+        { "ref": "e705a24", "label": "first build · 317 parts", "date": "2026-11-09" }
+      ]
+    }
+  ]
+}

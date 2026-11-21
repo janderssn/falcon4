@@ -1,28 +1,121 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#17212b"><title>Falcon 4 — Model viewer</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%232b655d'/%3E%3C/svg%3E"></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#121a22">
+<meta name="description" content="Interactive 3D viewer for the Wills Wing Falcon 4 170 hang glider models: compare builds, browse parts by name and part number.">
+<title>Falcon 4 — Model viewer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%236cabee'/%3E%3C/svg%3E">
+</head>
 <body>
-<header><a class="brand" href="./"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M3 29 20 9 37 29 20 23Z"/></svg><span>FALCON <b>4</b></span></a><span class="header-caption">MODEL VIEWER / 170</span><a class="download" id="download" href="./models/astra/model.glb" download="falcon4-170-astra.glb">Download GLB <span aria-hidden="true">↗</span></a></header>
-<main>
-<aside aria-label="Viewer controls">
-<div class="intro"><p class="eyebrow">WILLS WING · FALCON 4</p><h1>Falcon 4 <span class="model-size">170</span></h1><p class="description" id="model-description">Round control frame · 9.11 m span</p></div>
-<section class="model-picker"><h2><span>00</span> Model</h2><div class="views" id="models" role="group" aria-label="Choose a model build"></div></section>
-<fieldset id="model-controls" disabled>
-<section><h2><span>01</span> Viewpoint</h2><div class="views"><button data-view="perspective" aria-pressed="true">Perspective</button><button data-view="front" aria-pressed="false">Front</button><button data-view="top" aria-pressed="false">Top</button><button data-view="underside" aria-pressed="false">Underside</button></div><label class="detail-label" for="detail">Inspect a connection</label><select id="detail"><option value="">Choose a detail…</option><option value="nose">Nose assembly</option><option value="junction">Crossbar / leading edge</option><option value="basebar">Basebar corner</option><option value="tension">Crossbar tension</option></select></section>
-<section><h2><span>02</span> Visible parts</h2><div id="layers"></div></section>
-<section><h2><span>03</span> Display</h2><label class="toggle"><span>Ground grid</span><input id="grid" type="checkbox" checked></label><label class="toggle"><span>Wireframe</span><input id="wireframe" type="checkbox"></label><label class="toggle"><span>Auto-rotate</span><input id="rotate" type="checkbox"></label><button id="reset" class="reset">↺ &nbsp; Reset viewer</button></section>
-</fieldset>
-<p class="model-note">Reference reconstruction<br><span>Some shapes and dimensions are estimated.</span></p>
-</aside>
-<section id="viewport" aria-label="Interactive model viewer">
-<div class="viewport-heading"><span class="live-dot"></span><span id="view-label">Perspective</span><span class="scale-note">METRIC / 1:1 MODEL</span></div>
-<div id="canvas-host"></div>
-<div id="loading" role="status" aria-live="polite"><span class="eyebrow">PREPARING THE WING</span><strong id="load-title">Loading model…</strong><progress id="progress" max="100" value="0" aria-label="Model download progress"></progress><span id="load-detail">Loading the full model and its components.</span><button id="retry" hidden>Try again</button></div>
-<div class="viewport-tools"><button id="fit" disabled title="Fit model (F)" aria-label="Fit model">Fit</button><button id="capture" disabled title="Save viewport image" aria-label="Save viewport image">PNG ↓</button></div>
-<div id="selection" aria-live="polite">Click a part to identify it · Double-click to focus</div>
-<div class="viewport-bottom"><span>DRAG to orbit <i>·</i> SCROLL to zoom <i>·</i> RIGHT-DRAG to pan</span><span id="part-count">— PARTS</span></div>
-</section>
+<header class="topbar">
+  <a class="brand" href="./" title="Falcon 4 model viewer">
+    <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M3 29 20 9 37 29 20 23Z"/></svg>
+    <span class="brand-name">FALCON <b>4</b></span><span class="brand-sub">170 · model viewer</span>
+  </a>
+  <div class="model-bar">
+    <label class="slot slot-a"><span class="slot-tag">A</span><span class="sr-only">Model A</span><select id="source-a" aria-label="Model A"></select></label>
+    <div class="segmented" id="compare-modes" role="group" aria-label="Compare mode"></div>
+    <label class="slot slot-b" id="slot-b"><span class="slot-tag">B</span><span class="sr-only">Model B</span><select id="source-b" aria-label="Model B"></select></label>
+  </div>
+  <div class="top-actions">
+    <button type="button" id="share" class="icon-btn" data-icon="link" title="Copy a link to this exact view"><span class="sr-only">Copy link</span></button>
+    <a id="download" class="icon-btn" data-icon="download" href="#" title="Download GLB"><span class="sr-only">Download GLB</span></a>
+    <button type="button" id="help-btn" class="icon-btn" data-icon="help" title="Keyboard shortcuts (?)"><span class="sr-only">Help</span></button>
+  </div>
+</header>
+
+<main class="app">
+  <nav class="rail" id="rail" aria-label="Panels">
+    <button type="button" data-panel="parts" data-icon="parts" aria-pressed="false"><span>Parts</span></button>
+    <button type="button" data-panel="layers" data-icon="layers" aria-pressed="false"><span>Layers</span></button>
+    <button type="button" data-panel="scene" data-icon="scene" aria-pressed="false"><span>Scene</span></button>
+    <button type="button" data-panel="stats" data-icon="stats" aria-pressed="false"><span>Stats</span></button>
+  </nav>
+
+  <aside class="panel" id="panel" aria-labelledby="panel-title">
+    <div class="panel-head"><h2 id="panel-title">Parts</h2><button type="button" id="panel-close" class="icon-btn" data-icon="close" title="Close panel"><span class="sr-only">Close panel</span></button></div>
+
+    <section data-panel-body="parts" class="panel-body parts-body">
+      <label class="search" data-icon="search"><span class="sr-only">Search parts</span><input id="search" type="search" placeholder="Name or part number…" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+      <div class="slot-tabs" id="parts-slot" role="group" aria-label="Which model's parts"></div>
+      <p class="list-meta" id="parts-meta"></p>
+      <div id="parts-list" class="parts-list"></div>
+      <p class="hint">Click to select · Shift-click to add · Double-click to focus</p>
+    </section>
+
+    <section data-panel-body="layers" class="panel-body" hidden>
+      <div id="layer-list" class="toggles"></div>
+      <div id="layers-extra"></div>
+      <h3>Isolation</h3>
+      <label class="toggle"><span>Ghost the other parts</span><input type="checkbox" id="iso-ghost"></label>
+    </section>
+
+    <section data-panel-body="scene" class="panel-body" hidden>
+      <h3>Environment</h3>
+      <div id="env-list" class="env-list"></div>
+      <h3>Display</h3>
+      <div class="toggles">
+        <label class="toggle"><span>Ground grid <kbd>G</kbd></span><input type="checkbox" id="opt-grid"></label>
+        <label class="toggle"><span>Shadows</span><input type="checkbox" id="opt-shadows"></label>
+        <label class="toggle"><span>Wireframe <kbd>W</kbd></span><input type="checkbox" id="opt-wireframe"></label>
+        <label class="toggle"><span>Auto-rotate <kbd>R</kbd></span><input type="checkbox" id="opt-rotate"></label>
+      </div>
+      <h3>Close-ups</h3>
+      <div id="closeups" class="chips"></div>
+      <button type="button" id="reset" class="wide-btn" data-icon="reset"><span>Reset viewer</span></button>
+      <p class="model-note"><span id="model-description"></span><br>Reference reconstruction — some shapes and dimensions are estimated.</p>
+    </section>
+
+    <section data-panel-body="stats" class="panel-body" hidden>
+      <div id="stats"></div>
+    </section>
+  </aside>
+
+  <section id="viewport" aria-label="Interactive model viewer">
+    <div id="canvas-host"></div>
+    <div class="viewbar" id="viewbar" role="toolbar" aria-label="Views"></div>
+    <div id="gizmo" class="gizmo"></div>
+    <div class="slot-labels"><span id="label-a"></span><span id="label-b"></span></div>
+    <div id="swipe-handle" class="swipe-handle" role="slider" tabindex="0" aria-label="Swipe divider between A and B" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>
+    <div id="overlay-controls" class="floating overlay-controls" hidden>
+      <span class="slot-tag">A</span>
+      <input type="range" id="fade" min="0" max="1" step="0.01" aria-label="Fade between A and B">
+      <span class="slot-tag b">B</span>
+      <label class="mini-toggle"><input type="checkbox" id="tint"><span>Tint B</span></label>
+    </div>
+    <div id="info-card" class="info-card" hidden></div>
+    <div class="corner-tools"><button type="button" id="capture" class="icon-btn" data-icon="camera" title="Save viewport image (PNG)"><span class="sr-only">Save image</span></button></div>
+    <div id="status-pill" class="status-pill" role="status" hidden></div>
+    <div class="statusbar"><span id="view-name">Perspective</span><span class="hint-text">Drag to orbit · Scroll to zoom · Right-drag to pan</span><span id="part-count"></span></div>
+    <div id="loading" role="status" aria-live="polite">
+      <span class="eyebrow">PREPARING THE WING</span>
+      <strong id="load-title">Loading model…</strong>
+      <progress id="progress" max="100" value="0" aria-label="Model download progress"></progress>
+      <span id="load-detail">Loading the full model and its components.</span>
+      <button type="button" id="retry" hidden>Try again</button>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </section>
 </main>
-<footer><span>FALCON 4 <b>/</b> MODEL VIEWER</span><span>Round control frame <b>·</b> 9.11 m wingspan</span></footer>
+
+<dialog id="help" aria-labelledby="help-title">
+  <div class="dialog-head"><h2 id="help-title">Keyboard shortcuts</h2><button type="button" id="help-close" class="icon-btn" data-icon="close" title="Close"><span class="sr-only">Close</span></button></div>
+  <div class="shortcuts">
+    <section><h3>Views</h3><dl>
+      <dt><kbd>1</kbd></dt><dd>Front (orthographic)</dd><dt><kbd>2</kbd></dt><dd>Side</dd><dt><kbd>3</kbd></dt><dd>Top</dd>
+      <dt><kbd>4</kbd></dt><dd>Bottom</dd><dt><kbd>5</kbd> <kbd>P</kbd></dt><dd>Perspective</dd><dt><kbd>O</kbd></dt><dd>Toggle orthographic</dd>
+      <dt><kbd>F</kbd></dt><dd>Fit to view</dd></dl></section>
+    <section><h3>Parts</h3><dl>
+      <dt><kbd>/</kbd></dt><dd>Search parts</dd><dt><kbd>I</kbd></dt><dd>Isolate selection</dd><dt><kbd>H</kbd></dt><dd>Hide selection</dd>
+      <dt><kbd>Shift</kbd> <kbd>H</kbd></dt><dd>Show everything</dd><dt><kbd>Esc</kbd></dt><dd>Clear selection</dd></dl></section>
+    <section><h3>Scene</h3><dl>
+      <dt><kbd>C</kbd></dt><dd>Next compare mode</dd><dt><kbd>E</kbd></dt><dd>Next environment</dd><dt><kbd>G</kbd></dt><dd>Grid</dd>
+      <dt><kbd>W</kbd></dt><dd>Wireframe</dd><dt><kbd>R</kbd></dt><dd>Auto-rotate</dd><dt><kbd>?</kbd></dt><dd>This help</dd></dl></section>
+  </div>
+  <p class="dialog-note">Mouse: drag to orbit, right-drag to pan, scroll to zoom. Click a part to select it, Shift-click to add, double-click to focus. Touch: one finger orbits, two fingers pan and zoom.</p>
+</dialog>
 <script type="module" src="/main.js"></script>
-</body></html>
+</body>
+</html>
