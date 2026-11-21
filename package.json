@@ -11,7 +11,7 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
-    "vite": "^7.1.0"
+    "vite": "^7.3.7"
   },
   "description": "Editable Falcon 4 170 Blender model and interactive Three.js viewer",
   "engines": {
