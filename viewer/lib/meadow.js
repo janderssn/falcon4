@@ -384,7 +384,9 @@ export class Meadow {
     sc.left = -8; sc.right = 8; sc.top = 8; sc.bottom = -8; sc.near = 0.5; sc.far = 80;
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x445522, 1);
     scene.add(this.sun, this.sun.target, this.hemi);
-    scene.fog = new THREE.Fog(0xffffff, 160, 3800);
+    this.fog = new THREE.Fog(0xffffff, 160, 3800);
+    scene.fog = this.fog;
+    this.active = true;
 
     this.envScene = new THREE.Scene();
     this.envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), this.sky.material));
@@ -428,7 +430,8 @@ export class Meadow {
     this.hemi.color.setRGB(zen[0] * 0.3 + hor[0] * 0.55 + 0.1, zen[1] * 0.3 + hor[1] * 0.55 + 0.1, zen[2] * 0.3 + hor[2] * 0.55 + 0.06);
     this.hemi.groundColor.setRGB(0.20 * amb + 0.05, 0.26 * amb + 0.05, 0.10 * amb + 0.04);
     this.hemi.intensity = 1.15 * amb * (0.45 + 0.55 * Math.min(1, Math.max(0, e / 16))) + (1 - day) * 0.5;
-    this.scene.fog.color.setRGB(...hor).multiplyScalar(0.95);
+    this.fog.color.setRGB(...hor).multiplyScalar(0.95);
+    if (!this.active) return;
     this.renderer.toneMappingExposure = 0.95 + 0.35 * (1 - Math.min(1, Math.max(0, e / 25)));
     this.aimSun();
     this.refreshEnvironment();
@@ -438,12 +441,25 @@ export class Meadow {
   refreshEnvironment() {
     clearTimeout(this.envTimer);
     this.envTimer = setTimeout(() => {
-      const old = this.scene.environment;
-      this.scene.environment = this.pmrem.fromScene(this.envScene, 0.02).texture;
+      if (!this.active) return;
+      const old = this.envMap;
+      this.envMap = this.pmrem.fromScene(this.envScene, 0.02).texture;
+      this.scene.environment = this.envMap;
       this.scene.environmentIntensity = 0.7;
       if (old) old.dispose();
       this.onChange?.();
-    }, this.scene.environment ? 120 : 0);
+    }, this.envMap ? 120 : 0);
+  }
+
+  /** Shows or hides the meadow, its sky and its lights; the scene's background, fog and reflections follow. */
+  setActive(on) {
+    this.active = on;
+    this.group.visible = this.sky.visible = this.sun.visible = this.hemi.visible = on;
+    if (on) {
+      this.scene.fog = this.fog;
+      this.scene.background = null;
+      this.envDirty = true;
+    }
   }
 
   setWind(w) { this.uniforms.uWind.value = w; }

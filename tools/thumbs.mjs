@@ -1,5 +1,5 @@
 // Renders the thumbnails in viewer/public/thumbs/ from the scene itself:
-// the views along the bottom, the layer presets and the model cards.
+// the scene picker tiles and the glider cards in the Customize panel.
 // Start the viewer first (npm run dev), then: node tools/thumbs.mjs [base-url]
 // Needs Playwright with Chromium, and Python 3 with Pillow to shrink the images.
 import { createRequire } from 'node:module';
@@ -12,9 +12,8 @@ const base = process.argv[2] || 'http://localhost:5180/';
 const out = fileURLToPath(new URL('../viewer/public/thumbs/', import.meta.url));
 mkdirSync(out, { recursive: true });
 const jobs = [
-  ...['overview', 'front', 'side', 'top', 'nose', 'junction', 'kingpost', 'controlbar'].map((id) => ({ name: `view-${id}`, q: `thumb=view:${id}&model=opus`, w: 276, h: 180 })),
-  ...['glider', 'airframe', 'frame', 'rigging', 'sail'].map((id) => ({ name: `layer-${id}`, q: `thumb=layer:${id}&model=opus`, w: 240, h: 200 })),
-  ...['astra', 'opus'].map((id) => ({ name: `model-${id}`, q: `thumb=model:${id}&model=${id}`, w: 316, h: 192 })),
+  ...['studio', 'hangar', 'hill'].map((id) => ({ name: `scene-${id}`, q: `thumb=scene:${id}&model=opus`, w: 240, h: 172 })),
+  ...['astra', 'opus'].map((id) => ({ name: `model-${id}`, q: `thumb=model:${id}&model=${id}`, w: 240, h: 140 })),
 ];
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 for (const job of jobs) {

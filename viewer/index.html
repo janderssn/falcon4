@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0c130d">
-<meta name="description" content="Learn the parts of a hang glider: an interactive 3D Wills Wing Falcon 4 170 on a hilltop meadow.">
-<title>Falcon 4 — Hang glider in 3D</title>
+<meta name="description" content="Configure a Wills Wing Falcon 4 170 hang glider in 3D: choose the build, sail colours, frame finish and scene.">
+<title>Falcon 4 — Hang glider configurator</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%23d8f08a'/%3E%3C/svg%3E">
 </head>
 <body>
-<canvas id="scene" tabindex="0" aria-label="3D hang glider. Drag to turn, right-drag to move, scroll to zoom. Click a part to learn about it."></canvas>
+<canvas id="scene" tabindex="0" aria-label="3D hang glider. Drag to turn, right-drag to move, scroll to zoom. Click a part to see what it is."></canvas>
 
 <div id="loader" role="status" aria-live="polite">
   <div class="ld-center">
@@ -22,102 +22,72 @@
 
 <header id="title" class="hud">
   <h1>Falcon 4</h1>
-  <p id="subtitle">Wills Wing · 170 · hang glider</p>
+  <p id="subtitle">Wills Wing · 170</p>
 </header>
 
-<div id="search" class="hud">
-  <label class="searchbox glass">
-    <svg viewBox="0 0 24 24" class="ic"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
-    <input id="q" type="search" placeholder="Find a part" autocomplete="off" spellcheck="false" aria-label="Find a part by name or part number" aria-controls="results" aria-expanded="false">
-  </label>
-  <ul id="results" class="glass" role="listbox" hidden></ul>
-  <article id="card" class="glass" hidden aria-live="polite"></article>
+<button type="button" id="btn-custom" class="hud pillbtn glass" aria-controls="custom" aria-expanded="false" title="Customize (C)">
+  <svg viewBox="0 0 24 24" class="ic"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Customize</span>
+</button>
+
+<aside id="custom" class="hud glass" aria-label="Customize the glider" hidden>
+  <header>
+    <h2>Customize</h2>
+    <button type="button" id="btn-reset" class="textbtn" title="Back to the colours as built">Reset</button>
+    <button type="button" id="btn-close" class="icon" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </header>
+  <div class="body">
+    <section>
+      <h3>Glider</h3>
+      <div id="builds" class="builds"></div>
+    </section>
+    <section>
+      <h3>Sail colours</h3>
+      <div id="sail-rows"></div>
+    </section>
+    <section>
+      <h3>Frame</h3>
+      <div id="frame-row"></div>
+    </section>
+    <section>
+      <h3>Look inside</h3>
+      <label class="slider"><span>Sail</span><small class="ends"><span>Solid</span><span>See-through</span></small><input id="xray" type="range" min="0" max="1" step="0.01" value="0" aria-label="Sail see-through"></label>
+      <label class="switch"><input type="checkbox" id="opt-wires" checked><i></i><span>Wires</span></label>
+      <label class="switch"><input type="checkbox" id="opt-names"><i></i><span>Names on the main parts</span></label>
+    </section>
+    <section id="light" hidden>
+      <h3>Light</h3>
+      <label class="slider"><span>Time of day</span><b id="time-label">09:30</b><input id="time" type="range" min="3.6" max="22" step="0.05" value="9.5"></label>
+      <label class="slider"><span>Wind</span><input id="wind" type="range" min="0" max="2.5" step="0.05" value="1"></label>
+    </section>
+    <footer>
+      <button type="button" id="btn-share" class="wide">Copy link to this glider</button>
+      <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
+      <p class="note">Reconstructions from the owner's manual, factory drawings and photos; colours are for show. Some shapes and sizes are estimated. Don't use the model for maintenance.</p>
+    </footer>
+  </div>
+</aside>
+
+<div id="scene-pick" class="hud">
+  <div id="scene-fly" class="glass" hidden></div>
+  <button type="button" id="scene-btn" class="tile" title="Scene" aria-haspopup="true" aria-expanded="false"><span class="art" id="scene-art"></span><span class="cap" id="scene-cap">Scene</span></button>
 </div>
 
-<div id="topright" class="hud">
-  <label id="timepill" class="glass" title="Time of day">
-    <svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
-    <input id="time" type="range" min="3.6" max="22" step="0.05" value="9.5" aria-label="Time of day">
-    <b id="time-label">09:30</b>
-  </label>
-  <button type="button" id="btn-settings" class="icon" title="Settings (,)" aria-label="Settings"><svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></button>
-</div>
-
-<div id="layers" class="hud">
-  <div id="layer-fly" class="glass" hidden></div>
-  <button type="button" id="layer-btn" class="tile" title="Layers" aria-haspopup="true" aria-expanded="false"><span class="art" id="layer-art"></span><span class="cap">Layers</span></button>
-</div>
-
-<nav id="places" class="hud" aria-label="Views"></nav>
+<div id="chip" class="hud glass" hidden aria-live="polite"></div>
 
 <div id="navstack" class="hud">
   <button type="button" id="btn-tour" class="icon" title="Fly around (F)" aria-label="Fly around"><svg viewBox="0 0 24 24" class="ic"><path d="M8 5.5v13l10.5-6.5Z"/></svg></button>
   <div class="stack glass">
-    <button type="button" id="btn-compass" title="Back to the front view (N)" aria-label="Back to the front view"><span id="needle"><svg viewBox="0 0 24 24"><path d="M12 3l3.6 9H8.4Z" class="n"/><path d="M12 21l3.6-9H8.4Z" class="s"/></svg></span></button>
-    <button type="button" id="btn-2d" title="Flat drawing view / 3D (T)" aria-label="Switch between flat drawing view and 3D">2D</button>
+    <button type="button" id="btn-front" title="Back to the start view (N)" aria-label="Back to the start view"><svg viewBox="0 0 24 24" class="ic"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button type="button" id="btn-2d" title="Plan view from above / 3D (T)" aria-label="Switch between plan view and 3D">2D</button>
   </div>
   <div class="stack glass">
     <button type="button" id="btn-zin" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" class="ic"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
     <button type="button" id="btn-zout" title="Zoom out (−)" aria-label="Zoom out"><svg viewBox="0 0 24 24" class="ic"><path d="M5.5 12h13"/></svg></button>
   </div>
 </div>
-<div id="scale" class="hud"><span id="scale-label">1 m</span><i id="scale-bar"></i></div>
-<button type="button" id="btn-about" class="hud linklike">Reconstruction · not a maintenance reference</button>
 <div id="labels" aria-hidden="true"></div>
 <div id="toast" role="status"></div>
-
-<div id="scrim" hidden></div>
-<aside id="settings" hidden aria-label="Settings">
-  <header><h2>Settings</h2><button type="button" id="btn-close" class="icon" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
-  <div class="body">
-    <section>
-      <h3>Glider</h3>
-      <div class="cards" id="model-cards"></div>
-      <p class="note" id="model-note"></p>
-    </section>
-    <section>
-      <h3>Light and wind</h3>
-      <label class="slider"><span>Time of day</span><b id="time2-label">09:30</b><input id="time2" type="range" min="3.6" max="22" step="0.05" value="9.5"></label>
-      <label class="slider"><span>Wind</span><input id="wind" type="range" min="0" max="2.5" step="0.05" value="1"></label>
-    </section>
-    <section>
-      <h3>Parts shown</h3>
-      <div id="groups"></div>
-    </section>
-    <section>
-      <h3>Display</h3>
-      <label class="switch"><input type="checkbox" id="opt-labels" checked><i></i><span>Names on the glider<small>Keel, kingpost, crossbar and the other main parts</small></span></label>
-      <label class="switch"><input type="checkbox" id="opt-idle" checked><i></i><span>Slow turn when you leave it alone</span></label>
-      <label class="switch"><input type="checkbox" id="opt-shadows" checked><i></i><span>Shadows</span></label>
-      <label class="switch"><input type="checkbox" id="opt-wire"><i></i><span>Wireframe</span></label>
-      <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
-    </section>
-    <section>
-      <h3>Keyboard</h3>
-      <dl class="keys">
-        <dt>Drag</dt><dd>Turn the glider</dd>
-        <dt>Right-drag · Shift + drag</dt><dd>Move</dd>
-        <dt>Scroll · pinch</dt><dd>Zoom</dd>
-        <dt>Click · double-click</dt><dd>Learn about a part · go to it</dd>
-        <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>Views</dd>
-        <dt><kbd>/</kbd></dt><dd>Find a part</dd>
-        <dt><kbd>T</kbd></dt><dd>Flat drawing view / 3D</dd>
-        <dt><kbd>N</kbd></dt><dd>Front view</dd>
-        <dt><kbd>+</kbd> <kbd>−</kbd></dt><dd>Zoom</dd>
-        <dt><kbd>F</kbd></dt><dd>Fly around</dd>
-        <dt><kbd>L</kbd></dt><dd>Names on the glider</dd>
-        <dt><kbd>Esc</kbd></dt><dd>Close the part card</dd>
-        <dt><kbd>H</kbd></dt><dd>Hide the interface</dd>
-        <dt><kbd>,</kbd></dt><dd>Settings</dd>
-      </dl>
-    </section>
-    <section>
-      <h3>About</h3>
-      <p class="note">Two independent reconstructions of the Wills Wing Falcon 4 170 from the owner's manual, factory drawings and photos. Some shapes and sizes are estimated. Don't use the model for maintenance; use the Wills Wing manual.</p>
-    </section>
-  </div>
-</aside>
-<button type="button" id="btn-showhud">Show the interface</button>
+<button type="button" id="btn-showhud">Show the controls</button>
 <script type="module" src="/main.js"></script>
 </body>
 </html>
