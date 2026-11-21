@@ -135,7 +135,7 @@ async function setModel(id, first = false) {
   scene.add(record.root);
   applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
-  scenes.place(record.box.min.y, new THREE.Vector3(center.x, record.box.min.y, center.z));
+  scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
   state.sel = null;
   applyLook();
   buildLabels();
@@ -295,12 +295,15 @@ function restingPose(rec) {
 function applyPose() {
   if (!record) return;
   if (!record.rest) record.rest = restingPose(record);
-  const { pivot, angle } = record.rest[state.pose] || { pivot: new THREE.Vector3(), angle: 0 };
+  const { pivot, angle } = record.rest[state.pose] || { pivot: record.rest.nose.pivot, angle: 0 };   // standing: no tilt
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
   record.root.quaternion.copy(q);
   record.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
   record.root.updateMatrixWorld(true);
-  record.box.setFromObject(record.root);
+  // Exact bounds: the quick box of rotated parts reaches below the glider.
+  record.box.setFromObject(record.root, true);
+  // The ground is where the basebar touches it, in every pose.
+  record.ground = pivot.y;
   anchors.clear();
 }
 function setPose(pose) {
@@ -339,7 +342,7 @@ function limitCamera() {
   const lim = record && scenes.cameraLimits();
   const c = rig.controls;
   if (!lim) { c.maxPolarAngle = Math.PI; return; }
-  const g = record.box.min.y, t = c.target;
+  const g = record.ground, t = c.target;
   if (lim.halfX) {
     t.x = THREE.MathUtils.clamp(t.x, -lim.halfX + 1, lim.halfX - 1);
     t.z = THREE.MathUtils.clamp(t.z, -lim.halfZ + 1, lim.halfZ - 1);
@@ -352,7 +355,7 @@ function limitCamera() {
 function clampCamera() {
   const lim = record && scenes.cameraLimits();
   if (!lim) return;
-  const g = record.box.min.y, cam = rig.camera.position, t = rig.controls.target;
+  const g = record.ground, cam = rig.camera.position, t = rig.controls.target;
   const off = cam.clone().sub(t);
   let s = 1;
   if (cam.y < g + lim.minY && off.y < 0) s = Math.min(s, (g + lim.minY - t.y) / off.y);
