@@ -373,7 +373,7 @@ function updateLabels() {
 }
 
 // ------------------------------------------------------------------ customize panel
-const thumb = (name) => `url("./thumbs/${name}.jpg")`;
+const thumb = (name) => `url('./thumbs/${name}.jpg')`;
 function swatches(zone, list) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
