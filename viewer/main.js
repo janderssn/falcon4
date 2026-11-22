@@ -76,7 +76,7 @@ const GROUP_TEXT = {
 // what differs from this; "built" in it means the colour as built.
 const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
   colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
-  seeThrough: 0.1,
+  seeThrough: 0,
   pose: 'tail',
   cam: '-1.181,0.903,-2.922,-0.3601,0.1682,0.9176,3.593,p',
 };
