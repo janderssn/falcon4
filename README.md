@@ -48,8 +48,8 @@ The viewer is a glider configurator:
   sail or the battens); put names on the main parts. *As built* (the first
   swatch in each row) restores the original colour. Colours are approximate and for
   show only; Wills Wing's own picker notes the same.
-- **Pose** (bottom of the view): standing on the control bar, or resting on the keel
-  nose down or tail down - rocked over the basebar until the nose or the tail
+- **Pose** (bottom of the view): tail down, standing on the control bar, or nose
+  down - resting on the keel, rocked over the basebar until the tail or the nose
   touches the ground, with the angle found from each model.
 - **Scene** (bottom left): studio, hangar, or a hill with grass in the wind,
   where you can also set the time of day and the wind. The camera stays above the
@@ -61,7 +61,7 @@ The viewer is a glider configurator:
 - **Copy link to this glider** puts the whole configuration in the link: build,
   colours, scene, settings, time of day and camera.
 - The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite
-  frame, the sail slightly see-through, resting tail down, seen from below the wing
+  frame, the sail slightly see-through, standing on the control bar, seen from below the wing
   (`DEFAULTS` in [`viewer/main.js`](viewer/main.js)). **Reset** returns to these
   colours; *As built* in a row gives the build's original colour (`built` in the link).
 
