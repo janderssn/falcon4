@@ -669,19 +669,22 @@ function closeIn(cam) {
  */
 function placeWallGrid(dir, flat, t = rig.controls.target) {
   const floor = scenes.indoor.built?.studio?.floor;
-  const on = flat && floor?.visible && scenes.current === 'studio' && Math.abs(dir.y) < 0.7;
+  // The wall fades in as the view turns from looking down (or up) to looking across, and the
+  // floor fades out as much, so a turn from Top to Bottom passes one into the other.
+  const fade = flat ? THREE.MathUtils.smoothstep(Math.abs(dir.y), 0.55, 0.85) : 1;   // 1: the floor only
+  if (floor) floor.material.uniforms.uFade.value = fade;
+  const on = flat && floor?.visible && scenes.current === 'studio' && fade < 1;
   if (!on) { if (plan.wall) plan.wall.visible = false; return; }
   if (!plan.wall) { plan.wall = new THREE.Mesh(floor.geometry, floor.material.clone()); plan.wall.renderOrder = floor.renderOrder; scene.add(plan.wall); }
   const w = plan.wall, u = w.material.uniforms, back = reachOf() - 1, base = floor.getWorldPosition(new THREE.Vector3());
-  for (const [k, v] of Object.entries(floor.material.uniforms)) if (k !== 'uCentre') { if (v.value?.copy) u[k].value.copy(v.value); else u[k].value = v.value; }
+  for (const [k, v] of Object.entries(floor.material.uniforms)) if (k !== 'uCentre' && k !== 'uFade') { if (v.value?.copy) u[k].value.copy(v.value); else u[k].value = v.value; }
   w.visible = true;
-  if (Math.abs(dir.x) > Math.abs(dir.z)) {
-    w.rotation.set(0, Math.PI / 2, 0);
-    w.position.set(t.x - Math.sign(dir.x) * back, base.y, base.z);
-  } else {
-    w.rotation.set(0, 0, 0);
-    w.position.set(base.x, base.y, t.z - Math.sign(dir.z) * back);
-  }
+  u.uFade.value = 1 - fade;
+  // Square to the view at every angle, so a turn between views (Right to Left goes round
+  // through Front) keeps the pool of light steady behind the glider instead of flipping.
+  const h = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+  w.rotation.set(0, Math.atan2(h.x, h.z), 0);
+  w.position.set(t.x - h.x * back, base.y, t.z - h.z * back);
   w.updateMatrixWorld();
   const c = w.worldToLocal(t.clone());
   u.uCentre.value.set(c.x, c.y);

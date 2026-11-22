@@ -17,6 +17,9 @@ export const SCENES = {
   hill: { label: 'Hill' },
 };
 
+/** Strength of the 2D light from below, about the studio sun's. */
+const VIEW_LIGHT = 1.6;
+
 /** Switches between the scenes; the meadow is only built when the hill is first chosen. */
 export class Scenes {
   constructor(renderer, scene, { grass = 170000 } = {}) {
@@ -33,6 +36,11 @@ export class Scenes {
     this.spot = true;
     this.backdrop = 'dark';
     this.ground = null;
+    // In 2D, a light from the camera for views from below: the sun lights the top of the
+    // wing, and without it the underside comes out dark next to the top view. Always in the
+    // scene (at zero when not needed), so switching views doesn't recompile the materials.
+    this.viewLight = new THREE.DirectionalLight(0xffffff, 0);
+    scene.add(this.viewLight, this.viewLight.target);
   }
 
   set(name) {
@@ -87,7 +95,15 @@ export class Scenes {
     this.backdrop = BACKDROPS[name] ? name : 'dark';
     this.indoor.setBackdrop(this.backdrop);
   }
-  update(camera, seconds) { if (this.current === 'hill') this.meadow.update(camera, seconds); }
+  update(camera, seconds) {
+    if (this.current === 'hill') this.meadow.update(camera, seconds);
+    const look = camera.getWorldDirection(new THREE.Vector3());
+    const up = camera.isOrthographicCamera ? Math.max(0, look.y) : 0;   // 1 looking straight up
+    this.viewLight.intensity = VIEW_LIGHT * up;
+    this.viewLight.position.copy(camera.position);
+    this.viewLight.target.position.copy(camera.position).add(look);
+    this.viewLight.target.updateMatrixWorld();
+  }
 }
 
 class Environments {
@@ -245,6 +261,7 @@ function buildFloor() {
       uGrid: { value: 0 }, uGridColor: { value: new THREE.Color(0xffffff) }, uGridGain: { value: 1 },
       uSpot: { value: 1 }, uSpotColor: { value: new THREE.Color('#bdeeff') }, uSpotGain: { value: 0.42 },
       uCentre: { value: new THREE.Vector2() },
+      uFade: { value: 1 },                                         // fades the whole floor, for 2D view changes
     },
     vertexShader: `#include <common>
       #include <logdepthbuf_pars_vertex>
@@ -256,7 +273,7 @@ function buildFloor() {
       }`,
     fragmentShader: `#include <common>
       #include <logdepthbuf_pars_fragment>
-      uniform float uGrid, uGridGain, uSpot, uSpotGain;
+      uniform float uGrid, uGridGain, uSpot, uSpotGain, uFade;
       uniform vec3 uGridColor, uSpotColor;
       uniform vec2 uCentre;
       varying vec2 vXY;
@@ -274,9 +291,9 @@ function buildFloor() {
         float grid = max(lines(1.0, 1.0) * 0.45, lines(5.0, 1.5) * 0.7);
         grid *= exp(-r * r / 45.0) * uGridGain * uGrid;                      // gone by about 14 m
         grid = min(grid, 1.0);
-        float a = grid + spotA * (1.0 - grid);
+        float a = (grid + spotA * (1.0 - grid)) * uFade;
         if (a < 0.002) discard;
-        vec3 c = mix(uSpotColor, uGridColor, grid / max(a, 1e-4));
+        vec3 c = mix(uSpotColor, uGridColor, grid / max(grid + spotA * (1.0 - grid), 1e-4));
         gl_FragColor = vec4(c, a);
         #include <colorspace_fragment>
       }`,
