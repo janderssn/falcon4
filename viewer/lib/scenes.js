@@ -30,6 +30,7 @@ export class Scenes {
     this.wind = 1;
     this.shadows = true;
     this.grid = false;
+    this.spot = true;
     this.backdrop = 'dark';
     this.ground = null;
   }
@@ -52,6 +53,7 @@ export class Scenes {
       this.indoor.setActive(true);
       this.indoor.backdrop = this.backdrop;
       this.indoor.set(name, this.shadows);
+      this.indoor.spotOn = this.spot;
       this.indoor.setGrid(this.grid);
     }
   }
@@ -78,6 +80,8 @@ export class Scenes {
   setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); }
   /** A metre grid on the studio floor. */
   setGrid(on) { this.grid = on; this.indoor.setGrid(on); }
+  /** The soft pool of light under the glider in the studio. */
+  setSpot(on) { this.spot = on; this.indoor.setSpot(on); }
   /** The studio background: 'dark', 'light' or 'blueprint'. */
   setBackdrop(name) {
     this.backdrop = BACKDROPS[name] ? name : 'dark';
@@ -97,6 +101,7 @@ class Environments {
     this.current = null;
     this.backdrop = 'dark';
     this.gridOn = false;
+    this.spotOn = true;
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.sun = new THREE.DirectionalLight(0xffffff, 1.6);
     this.sun.castShadow = true;
@@ -126,10 +131,7 @@ class Environments {
     this.sun.position.copy(this.center).addScaledVector(dir, 25);
     this.sun.target.updateMatrixWorld();
     const studio = this.built.studio;
-    if (studio) {                                                        // centred under the glider
-      studio.grid.position.set(this.center.x, 0.002, this.center.z);
-      studio.floor.position.set(this.center.x, -0.004, this.center.z);
-    }
+    if (studio) studio.floor.position.set(this.center.x, 0.002, this.center.z);   // centred under the glider
   }
 
   set(name, shadows = true) {
@@ -160,8 +162,14 @@ class Environments {
   setGrid(on) {
     this.gridOn = on;
     const studio = this.built.studio;
-    if (studio) studio.grid.visible = on && studio.backdrop !== 'blueprint';   // the blueprint floor has its own
+    if (!studio) return;
+    const u = studio.floor.material.uniforms;
+    u.uGrid.value = on || studio.backdrop === 'blueprint' ? 1 : 0;         // the blueprint always has its grid
+    u.uSpot.value = this.spotOn ? 1 : 0;
+    studio.floor.visible = u.uGrid.value + u.uSpot.value > 0;
   }
+
+  setSpot(on) { this.spotOn = on; this.setGrid(this.gridOn); }
 
   setBackdrop(name) {
     this.backdrop = name;
@@ -190,45 +198,10 @@ function buildStudio(envs) {
   catcher.rotation.x = -Math.PI / 2;
   catcher.receiveShadow = true;
   group.add(catcher);
-  // Metre grid, brighter every 5 m, fading out towards the edge; hidden unless asked for.
-  const grid = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, extensions: { derivatives: true },
-    uniforms: { uColor: { value: new THREE.Color(0xdfe6ee) }, uGain: { value: 1 } },
-    vertexShader: `#include <common>
-      #include <logdepthbuf_pars_vertex>
-      varying vec2 vXY;
-      void main() {
-        vXY = position.xy;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        #include <logdepthbuf_vertex>
-      }`,
-    fragmentShader: `#include <common>
-      #include <logdepthbuf_pars_fragment>
-      uniform vec3 uColor;
-      uniform float uGain;
-      varying vec2 vXY;
-      float lines(float step, float width) {
-        vec2 g = abs(fract(vXY / step - 0.5) - 0.5) / fwidth(vXY / step);
-        return 1.0 - min(min(g.x, g.y) / width, 1.0);
-      }
-      void main() {
-        #include <logdepthbuf_fragment>
-        float a = max(lines(1.0, 1.0) * 0.22, lines(5.0, 1.4) * 0.42);
-        a *= 1.0 - smoothstep(6.0, 22.0, length(vXY));
-        a = min(a * uGain, 1.0);
-        if (a < 0.003) discard;
-        gl_FragColor = vec4(uColor, a);
-      }`,
-  }));
-  grid.rotation.x = -Math.PI / 2;
-  grid.position.y = 0.002;
-  grid.renderOrder = -1;
-  grid.visible = false;
-  group.add(grid);
-  const floor = buildBlueprint();
+  const floor = buildFloor();
   group.add(floor);
   return {
-    group, grid, floor, catcher, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
+    group, floor, catcher, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
     sunColor: 0xfff8eb, sunIntensity: 1.6, sunDir: new THREE.Vector3(3, 8, 5).normalize(),
     hemi: [0xffffff, 0x919781, 0.6], fillIntensity: 0.5,
   };
@@ -240,31 +213,39 @@ function buildStudio(envs) {
  * and a white grid under the glider that fade out before any horizon shows.
  */
 const STUDIO_LOOKS = {
-  dark: { background: '#222c38', grid: [0xdfe6ee, 1], shadow: [0x000000, 0.28], hemi: [0xffffff, 0x919781, 0.6] },
-  light: { background: '#e6e9ec', grid: [0x3c4654, 1.15], shadow: [0x1c2430, 0.2], hemi: [0xffffff, 0xb9bdb3, 0.75] },
-  blueprint: { background: '#1f9ee0', grid: [0xffffff, 1], shadow: [0x063a6b, 0.3], hemi: [0xe6f7ff, 0x5fb4dc, 0.75] },
+  dark: { background: '#222c38', grid: [0xdfe6ee, 0.5], spot: [0x8fb0d0, 0.22], shadow: [0x000000, 0.28], hemi: [0xffffff, 0x919781, 0.6] },
+  light: { background: '#e6e9ec', grid: [0x3c4654, 0.55], spot: [0xffffff, 0.75], shadow: [0x1c2430, 0.2], hemi: [0xffffff, 0xb9bdb3, 0.75] },
+  blueprint: { background: '#1f9ee0', grid: [0xffffff, 1], spot: [0xbdeeff, 0.42], shadow: [0x063a6b, 0.3], hemi: [0xe6f7ff, 0x5fb4dc, 0.75] },
 };
 function applyBackdrop(studio, name) {
   const look = STUDIO_LOOKS[name] || STUDIO_LOOKS.dark;
   studio.backdrop = name;
   studio.background = new THREE.Color(look.background);
-  studio.grid.material.uniforms.uColor.value.set(look.grid[0]);
-  studio.grid.material.uniforms.uGain.value = look.grid[1];
+  const u = studio.floor.material.uniforms;
+  u.uGridColor.value.set(look.grid[0]);
+  u.uGridGain.value = look.grid[1];
+  u.uSpotColor.value.set(look.spot[0]);
+  u.uSpotGain.value = look.spot[1];
   studio.catcher.material.color.set(look.shadow[0]);
   studio.catcher.material.opacity = look.shadow[1];
   studio.hemi = look.hemi;
-  studio.floor.visible = name === 'blueprint';
 }
 
 /**
- * Blueprint floor: a transparent sheet over the plain blue background. It adds a soft pool of
- * light under the glider and a white grid; both fade out with distance, so far away there is
- * only the background colour and no horizon.
+ * Studio floor: a transparent sheet over the plain background with a soft pool of light under
+ * the glider and a metre grid, brighter every 5 m. Both fade out with distance, so far away
+ * there is only the background colour and no horizon. It is seen from both sides, so the
+ * Bottom view looks up through it, and the plan views stand a copy of it up as a wall.
+ * uCentre is where the pool of light sits on the sheet (the wall moves it up to the glider).
  */
-function buildBlueprint() {
+function buildFloor() {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, extensions: { derivatives: true }, fog: false,
-    uniforms: { uSpot: { value: new THREE.Color('#bdeeff') } },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, extensions: { derivatives: true }, fog: false,
+    uniforms: {
+      uGrid: { value: 0 }, uGridColor: { value: new THREE.Color(0xffffff) }, uGridGain: { value: 1 },
+      uSpot: { value: 1 }, uSpotColor: { value: new THREE.Color('#bdeeff') }, uSpotGain: { value: 0.42 },
+      uCentre: { value: new THREE.Vector2() },
+    },
     vertexShader: `#include <common>
       #include <logdepthbuf_pars_vertex>
       varying vec2 vXY;
@@ -275,7 +256,9 @@ function buildBlueprint() {
       }`,
     fragmentShader: `#include <common>
       #include <logdepthbuf_pars_fragment>
-      uniform vec3 uSpot;
+      uniform float uGrid, uGridGain, uSpot, uSpotGain;
+      uniform vec3 uGridColor, uSpotColor;
+      uniform vec2 uCentre;
       varying vec2 vXY;
       // Anti-aliased grid lines that also fade where they get closer together than a few pixels.
       float lines(float step, float width) {
@@ -286,22 +269,22 @@ function buildBlueprint() {
       }
       void main() {
         #include <logdepthbuf_fragment>
-        float r = length(vXY);
-        float spot = exp(-r * r / 32.0);                                     // soft pool of light, ~6 m across
+        float r = length(vXY - uCentre);
+        float spotA = exp(-r * r / 32.0) * uSpotGain * uSpot;               // soft pool of light, ~6 m across
         float grid = max(lines(1.0, 1.0) * 0.45, lines(5.0, 1.5) * 0.7);
-        grid *= exp(-r * r / 45.0);                                          // gone by about 14 m
-        float spotA = spot * 0.42;
+        grid *= exp(-r * r / 45.0) * uGridGain * uGrid;                      // gone by about 14 m
+        grid = min(grid, 1.0);
         float a = grid + spotA * (1.0 - grid);
         if (a < 0.002) discard;
-        vec3 c = mix(uSpot, vec3(1.0), grid / max(a, 1e-4));
+        vec3 c = mix(uSpotColor, uGridColor, grid / max(a, 1e-4));
         gl_FragColor = vec4(c, a);
         #include <colorspace_fragment>
       }`,
   }));
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -0.004;
-  floor.renderOrder = -2;
-  floor.name = 'blueprint floor';
+  floor.position.y = 0.002;
+  floor.renderOrder = -1;
+  floor.name = 'studio floor';
   floor.visible = false;
   return floor;
 }

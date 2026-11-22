@@ -98,6 +98,7 @@ const state = {
   grid: params.get('grid') === '1',                // settings: floor grid in the studio
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
+  spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
   wind: 1, sel: null, tour: false,
   panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
 };
@@ -121,6 +122,7 @@ async function boot() {
   scenes.hours = state.hours;
   scenes.setShadows(state.shadows);
   scenes.setGrid(state.grid);
+  scenes.setSpot(state.spot);
   scenes.setBackdrop(state.backdrop);
   wireUi();
   resize();
@@ -470,12 +472,13 @@ function toggle2d() {
 }
 // ------------------------------------------------------------------ plan views (2D)
 // In 2D a bar at the top looks straight along an axis, or splits the screen into four
-// views that share one centre and zoom. The nose points to +Z, the left wing to +X.
+// views, each with its own pan and zoom. The nose points to +Z, the left wing to +X.
 const PLAN = { front: [0, 0, 1], top: [0, 1, -1e-4], bottom: [0, -1, 1e-4], left: [1, 0, 0], right: [-1, 0, 0] };
 const QUAD = [PLAN.top, PLAN.front, PLAN.left, [0.42, 0.32, 1]];   // top left, top right, bottom left, bottom right (3D)
 const SPLIT_TIME = 650;
 // split: how far the four views are open (0 one view, 1 four), and where it is going.
-const plan = { quad: false, view: null, cams: null, fit: [1, 1, 1, 1], flat: false, wall: null, split: 0, splitFrom: 0, splitStart: 0 };
+// panes: the centre and size of each quarter; the active one is driven by the camera rig.
+const plan = { quad: false, view: null, cams: null, panes: null, active: 0, flat: false, wall: null, split: 0, splitFrom: 0, splitStart: 0 };
 function planView(name) {
   if (!record) return;
   if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
@@ -504,15 +507,17 @@ function setQuad(on) {
   plan.splitStart = performance.now();
   if (on) {
     if (state.compare) setCompare(false);
-    // Each quarter frames the glider on its own; zooming scales them all alike. The top
-    // left quarter grows out of the current view while it turns to the top view.
-    const fit = QUAD.map((d) => planFrame(d, 1.2, true));
-    plan.fit = fit.map((f) => f.size);
-    rig.animateTo({ target: fit[0].target, dir: new THREE.Vector3(...PLAN.top), size: plan.fit[0] }, !reduced, fitSize);
+    // Each quarter frames the glider on its own and then pans and zooms on its own. The
+    // top left quarter grows out of the current view while it turns to the top view.
+    plan.panes = QUAD.map((d) => { const f = planFrame(d, 1.2, true); return { target: f.target, size: f.size }; });
+    plan.active = 0;
+    rig.animateTo({ ...plan.panes[0], dir: new THREE.Vector3(...PLAN.top) }, !reduced, fitSize);
   } else {
     // The top left quarter shows the top view; the single view grows back out of it.
     rig.transition = null;
-    rig.setPose({ ...rig.pose(), dir: new THREE.Vector3(...PLAN.top) });
+    if (plan.active !== 0) { holdPane(); plan.active = 0; }
+    const p = plan.panes?.[0] || rig.pose();
+    rig.setPose({ target: p.target.clone(), size: p.size, dir: new THREE.Vector3(...PLAN.top) });
   }
   if (reduced) plan.split = on ? 1 : 0;
   syncPlan();
@@ -550,12 +555,33 @@ function wirePlan() {
   $('#viewbar').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) planView(b.dataset.view); });
   rig.addEventListener('projection', syncPlan);
   rig.addEventListener('change', syncPlan);
-  // In four views, a drag pans the quarter it starts in.
-  canvas.addEventListener('pointerdown', (e) => {
+  // In four views, a drag or wheel pans or zooms the quarter it starts in, and only that one.
+  const pick = (e) => {
     const v = plan.quad && plan.split === 1 && viewAt(e.clientX, e.clientY);
-    if (v && v.index < 3) { rig.transition = null; rig.setPose({ ...rig.pose(), dir: new THREE.Vector3(...QUAD[v.index]).normalize() }); }
-  }, true);
+    if (v && v.index >= 0) usePane(v.index);
+  };
+  canvas.addEventListener('pointerdown', pick, true);
+  canvas.addEventListener('wheel', pick, { capture: true, passive: true });
   syncPlan();
+}
+/** Keeps the active quarter's centre and size while the rig moves to another quarter. */
+function holdPane() {
+  const p = rig.pose();
+  plan.panes[plan.active] = { target: p.target.clone(), size: p.size };
+}
+/** Hands the camera rig to quarter i, so the controls move that quarter. */
+function usePane(i) {
+  if (i === plan.active || !plan.panes) return;
+  rig.transition = null;
+  holdPane();
+  plan.active = i;
+  const p = plan.panes[i];
+  rig.setPose({ target: p.target.clone(), size: p.size, dir: new THREE.Vector3(...QUAD[i]).normalize() });
+}
+/** Centre and size of quarter i: live from the rig for the active one. */
+function paneOf(i) {
+  if (i === plan.active || !plan.panes) { const p = rig.pose(); return { target: p.target, size: p.size }; }
+  return plan.panes[i];
 }
 /** The area the views are drawn in, in CSS pixels: the whole screen (the panels draw over it). */
 function viewArea() {
@@ -581,30 +607,33 @@ function closeIn(cam) {
   if (off.lengthSq() > 0) cam.position.copy(t).addScaledVector(off.normalize(), reachOf());
 }
 /**
- * The studio grid stands up behind the glider in the views from the side, so Front, Left
- * and Right get the same metre grid as Top. It is a copy of the floor grid, sharing its
- * material, so it takes the colours of the studio background.
+ * The studio floor stands up behind the glider in the views from the side, so Front, Left
+ * and Right get the same metre grid and pool of light as Top and Bottom. It is a copy of
+ * the floor with the floor's settings, its light raised to the height of the view's centre.
  */
-function placeWallGrid(dir, flat) {
-  const floor = scenes.indoor.built?.studio?.grid;
-  const on = flat && floor && scenes.current === 'studio' && (floor.visible || scenes.backdrop === 'blueprint') && Math.abs(dir.y) < 0.7;
+function placeWallGrid(dir, flat, t = rig.controls.target) {
+  const floor = scenes.indoor.built?.studio?.floor;
+  const on = flat && floor?.visible && scenes.current === 'studio' && Math.abs(dir.y) < 0.7;
   if (!on) { if (plan.wall) plan.wall.visible = false; return; }
-  if (!plan.wall) { plan.wall = floor.clone(); scene.add(plan.wall); }
-  const w = plan.wall, t = rig.controls.target, back = reachOf() - 1;
+  if (!plan.wall) { plan.wall = new THREE.Mesh(floor.geometry, floor.material.clone()); plan.wall.renderOrder = floor.renderOrder; scene.add(plan.wall); }
+  const w = plan.wall, u = w.material.uniforms, back = reachOf() - 1, base = floor.getWorldPosition(new THREE.Vector3());
+  for (const [k, v] of Object.entries(floor.material.uniforms)) if (k !== 'uCentre') { if (v.value?.copy) u[k].value.copy(v.value); else u[k].value = v.value; }
   w.visible = true;
   if (Math.abs(dir.x) > Math.abs(dir.z)) {
     w.rotation.set(0, Math.PI / 2, 0);
-    w.position.set(t.x - Math.sign(dir.x) * back, 0, floor.position.z);
+    w.position.set(t.x - Math.sign(dir.x) * back, base.y, base.z);
   } else {
     w.rotation.set(0, 0, 0);
-    w.position.set(floor.position.x, 0, t.z - Math.sign(dir.z) * back);
+    w.position.set(base.x, base.y, t.z - Math.sign(dir.z) * back);
   }
   w.updateMatrixWorld();
+  const c = w.worldToLocal(t.clone());
+  u.uCentre.value.set(c.x, c.y);
 }
 /** The camera of quarter i (top, front, left, 3D) for a quarter of the given aspect. */
 function cellCam(i, aspect) {
   if (!plan.cams) plan.cams = [0, 1, 2].map(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 400)).concat(new THREE.PerspectiveCamera(38, 1, 0.01, 2000));
-  const cam = plan.cams[i], { target, size } = rig.pose(), k = size / plan.fit[0], s = plan.fit[i] * k;
+  const cam = plan.cams[i], { target, size: s } = paneOf(i);
   const dir = new THREE.Vector3(...QUAD[i]).normalize(), reach = reachOf();
   if (cam.isOrthographicCamera) {
     // Close in, so walls and roof of the hangar stay behind the camera.
@@ -640,7 +669,7 @@ function renderQuad() {
       placeWallGrid(rig.pose().dir, rig.projection === 'orthographic');
     } else {
       cam = cellCam(i, c.w / c.h);
-      placeWallGrid(new THREE.Vector3(...QUAD[i]), cam.isOrthographicCamera);
+      placeWallGrid(new THREE.Vector3(...QUAD[i]), cam.isOrthographicCamera, paneOf(i).target);
     }
     renderer.render(scene, cam);
   });
@@ -900,6 +929,9 @@ function syncPanel() {
   $('#backdrop-hint').hidden = state.scene === 'studio';
   document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
   $('#opt-shadows').checked = state.shadows;
+  $('#opt-spot').checked = state.spot;
+  $('#opt-spot').disabled = state.scene !== 'studio';
+  $('#spot-hint').textContent = state.scene === 'studio' ? 'Soft light under the glider' : 'In the studio';
   document.body.classList.toggle('nolabels', !state.names);
   $('#light').hidden = state.scene !== 'hill';
   $('#scene-art').style.backgroundImage = thumb(`scene-${state.scene}`);
@@ -992,6 +1024,7 @@ function wireUi() {
   });
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
+  $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
@@ -1049,7 +1082,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&bg=blueprint&shadows=0&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&bg=blueprint&shadows=0&spot=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -1074,6 +1107,7 @@ function saveUrl() {
   if (state.grid) q.set('grid', '1');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
+  if (!state.spot) q.set('spot', '0');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));
   q.set('cam', [...p.target.toArray().map((v) => r(v)), ...p.dir.toArray().map((v) => r(v, 4)), r(p.size), rig.projection === 'orthographic' ? 'o' : 'p'].join(','));
