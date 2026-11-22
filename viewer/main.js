@@ -10,7 +10,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const params = new URLSearchParams(location.search);
 const THUMB = params.get('thumb');                   // set by tools/thumbs.mjs to render the thumbnails
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const small = matchMedia('(max-width: 760px)').matches;
+const small = matchMedia('(max-width: 760px)').matches;   // at load: sets the start state and the grass density
 
 // ------------------------------------------------------------------ what can be tweaked
 // Sail and frame zones. The sail panels follow the Wills Wing Falcon colour picker:
@@ -485,9 +485,12 @@ function planView(name) {
   rig.animateTo(planFrame(PLAN[name]), !reduced, fitSize);
   userActive();
 }
-/** Pose that frames the glider from `dir` in the part of the screen the panel leaves free. */
-function planFrame(dir, margin = 1.15) {
-  const a = viewArea();
+/**
+ * Pose that frames the glider from `dir`: on the whole screen, or in a quarter of it in
+ * four views. The panels draw over the scene and don't move it.
+ */
+function planFrame(dir, margin = 1.15, quad = false) {
+  const a = quad ? viewArea() : { w: innerWidth, h: innerHeight };
   return rig.frame(record.box, dir, margin, a.w / a.h);
 }
 /** The size that shows the whole glider from dir, for transitions to zoom out to. */
@@ -503,7 +506,7 @@ function setQuad(on) {
     if (state.compare) setCompare(false);
     // Each quarter frames the glider on its own; zooming scales them all alike. The top
     // left quarter grows out of the current view while it turns to the top view.
-    const fit = QUAD.map((d) => planFrame(d, 1.2));
+    const fit = QUAD.map((d) => planFrame(d, 1.2, true));
     plan.fit = fit.map((f) => f.size);
     rig.animateTo({ target: fit[0].target, dir: new THREE.Vector3(...PLAN.top), size: plan.fit[0] }, !reduced, fitSize);
   } else {
@@ -554,12 +557,9 @@ function wirePlan() {
   }, true);
   syncPlan();
 }
-/** The free part of the screen (the open panel covers the rest), in CSS pixels. */
+/** The area the views are drawn in, in CSS pixels: the whole screen (the panels draw over it). */
 function viewArea() {
-  const sheet = state.panel && $(`#${state.panel}`);
-  const w = innerWidth, h = innerHeight;
-  if (!sheet) return { x: 0, y: 0, w, h };
-  return small ? { x: 0, y: 0, w, h: h - sheet.offsetHeight } : { x: 0, y: 0, w: w - sheet.offsetWidth - 16, h };
+  return { x: 0, y: 0, w: innerWidth, h: innerHeight };
 }
 /** The four quarters as { x, y, w, h } in CSS pixels from the top left, for a split of s. */
 function cells(s = plan.split) {
@@ -632,7 +632,6 @@ function renderQuad() {
     renderer.setScissor(x, y, c.w, c.h);
     let cam;
     if (i === 0 && moving) {
-      for (const cam of [rig.perspective, rig.orthographic]) cam.clearViewOffset();
       // While the split opens or closes, the top left quarter is the main view itself,
       // so it hands over to the single view without a jump.
       rig.setAspect(c.w / c.h);
@@ -647,7 +646,7 @@ function renderQuad() {
   });
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, innerWidth, innerHeight);
-  if (moving) { rig.setAspect(innerWidth / innerHeight); shiftView(); rig.setPose(rig.pose()); }
+  if (moving) { rig.setAspect(innerWidth / innerHeight); rig.setPose(rig.pose()); }
 }
 
 function focusPart(part) {
@@ -736,20 +735,7 @@ function loop(now) {
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   rig.setAspect(innerWidth / innerHeight);
-  shiftView();
 }
-/** Centre the glider in the part of the screen the panel leaves free. */
-function shiftView() {
-  const w = innerWidth, h = innerHeight;
-  const sheet = state.panel && $(`#${state.panel}`);
-  const dx = sheet && !small ? (sheet.offsetWidth + 16) / 2 : 0;
-  const dy = sheet && small ? sheet.offsetHeight / 2 : 0;
-  for (const cam of [rig.perspective, rig.orthographic]) {
-    if (dx || dy) cam.setViewOffset(w, h, dx, dy, w, h); else cam.clearViewOffset();
-    cam.updateProjectionMatrix();
-  }
-}
-
 // ------------------------------------------------------------------ clicking a part
 const raycaster = new THREE.Raycaster();
 function pickPart(e) {
@@ -880,7 +866,6 @@ function syncPanel() {
     $(`#${id}`).hidden = state.panel !== id;
     $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
   }
-  if (rig) shiftView();
   for (const b of document.querySelectorAll('.build')) b.classList.toggle('on', b.dataset.model === state.model);
   for (const b of document.querySelectorAll('.sw')) {
     const on = (state.colours[b.dataset.zone] || '') === b.dataset.colour;
