@@ -40,12 +40,13 @@ The viewer is a glider configurator:
 - **Settings** (gear, top right corner, `S`): pick the build (Astra or Opus), turn the floor
   grid in the studio on or off, and turn the shadows on or off.
 - **Customize** (top right, `C`): colour the sail
-  panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2, P3,
+  panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2 forward, P3 middle,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
   panel (the clear and tinted laminates are see-through), plus the batten pockets;
   choose the frame finish; make the sail see-through to look at the frame; show or
   hide the wires and bridles, and the battens (the batten strings hide with the
-  sail or the battens); put names on the main parts. *As built* (the first
+  sail or the battens); label where each colour row goes on the glider, with the
+  colour chosen in it (click a label to go to its row). *As built* (the first
   swatch in each row) restores the original colour. Colours are approximate and for
   show only; Wills Wing's own picker notes the same.
 - **Pose** (bottom of the view): tail down, standing on the control bar, or nose

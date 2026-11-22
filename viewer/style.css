@@ -46,7 +46,7 @@ body.panel-open #topbtns { opacity: 0; pointer-events: none; }
 .textbtn:hover { color: var(--ink); background: rgba(255, 255, 255, .08); }
 
 /* ---- side panels: customize and settings */
-.sheet { top: 16px; right: 16px; bottom: 16px; width: var(--panel); border-radius: 18px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 18px 50px rgba(0, 0, 0, .35); animation: sheet .28s cubic-bezier(.2, .8, .2, 1); }
+.sheet { top: 16px; right: 16px; bottom: 16px; width: var(--panel); border-radius: 18px; display: flex; flex-direction: column; overflow: clip;   /* clip: can't be scrolled, so the header stays */ box-shadow: 0 18px 50px rgba(0, 0, 0, .35); animation: sheet .28s cubic-bezier(.2, .8, .2, 1); }
 @keyframes sheet { from { transform: translateX(24px); opacity: 0; } }
 .sheet > header { display: flex; align-items: center; gap: 4px; padding: 14px 12px 8px 20px; }
 .sheet h2 { flex: 1; margin: 0; font-family: var(--serif); font-weight: 500; font-size: 24px; }
@@ -99,7 +99,8 @@ body.panel-open #topbtns { opacity: 0; pointer-events: none; }
 input[type=range] { appearance: none; -webkit-appearance: none; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .3); margin: 6px 0 0; }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); box-shadow: 0 1px 6px rgba(0, 0, 0, .4); cursor: pointer; }
 input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--ink); border: 0; cursor: pointer; }
-.switch { display: flex; gap: 12px; align-items: center; font-size: 13px; margin: 0 0 12px; cursor: pointer; }
+/* relative: the hidden input stays inside the scrolling body, so focusing it scrolls the body, not the sheet */
+.switch { position: relative; display: flex; gap: 12px; align-items: center; font-size: 13px; margin: 0 0 12px; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
 .switch i { flex: none; width: 34px; height: 20px; border-radius: 20px; background: rgba(255, 255, 255, .22); position: relative; transition: background .2s; }
 .switch i::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); transition: transform .2s; }
@@ -161,6 +162,13 @@ body.nolabels #labels { display: none; }
 .label { position: absolute; left: 0; top: 0; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-shadow: 0 1px 8px rgba(0, 0, 0, .8); pointer-events: auto; cursor: pointer; background: none; border: 0; padding: 0; color: var(--ink); transition: opacity .3s; }
 .label::after { content: ""; display: block; width: 1px; height: 22px; margin: 4px auto 0; background: linear-gradient(rgba(255, 255, 255, .95), rgba(255, 255, 255, 0)); }
 .label b { font-weight: 600; }
+.label-tag { display: flex; align-items: center; gap: 6px; }
+.label .sw { width: 16px; height: 16px; pointer-events: none; }
+.label .sw i { width: 14px; height: 14px; }
+.label .sw.original::before { width: 6px; height: 6px; right: 0; top: 0; }
+/* The row a label points to lights up briefly in Customize. */
+.row.flash { animation: flash 1.2s ease; border-radius: 10px; }
+@keyframes flash { 0%, 40% { background: rgba(216, 240, 138, .16); } 100% { background: transparent; } }
 .label:hover b { color: var(--accent); }
 
 /* ---- loading screen */

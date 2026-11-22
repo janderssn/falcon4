@@ -21,9 +21,9 @@ const small = matchMedia('(max-width: 760px)').matches;   // at load: sets the s
 const ZONES = {
   pockets: { name: 'Batten pockets', parts: /^(Batten pocket [LR] [2-6]|[LR] batten [2-6] fabric pocket)$/ },
   p4: { name: 'P4 · Trailing edge', panel: 'P4', parts: /^(Trailing edge hem|[LR] sail panel 4)$/, mats: ['Sail P4 TE panel (white)'] },
-  p3: { name: 'P3', panel: 'P3', parts: /^[LR] sail panel 3$/, mats: ['Sail P3 (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)', 'Off-white Dacron'] },
+  p3: { name: 'P3 · Middle', panel: 'P3', parts: /^[LR] sail panel 3$/, mats: ['Sail P3 (white)', 'Sail P5 tip piece (white)', 'Keel pocket front (white)', 'Keel pocket rear (white)', 'Batten pocket cloth (white)', 'Off-white Dacron'] },
   p1: { name: 'P1 · Leading edge', panel: 'P1', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
-  p2: { name: 'P2', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
+  p2: { name: 'P2 · Forward', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'] },
 };
@@ -40,7 +40,7 @@ const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
 // Baked colours of the textured opus sail panels (linear RGB), from falcon4-opus f4/sailmat.py.
 const BAKED = { white: [0.93, 0.93, 0.9], blue: [0.02, 0.1, 0.62], red: [0.78, 0.05, 0.03] };
 
-// Names on the main parts.
+// Names and notes for the main parts, for the part card.
 const CONCEPTS = [
   { id: 'nose', name: 'Nose', at: { dir: [0, 0, 1], f: 1 }, re: /^(Removable nose cone|Nosecone)$/, text: 'The nose plates bolt the keel and both leading edges together; the nose cone covers them.' },
   { id: 'keel', name: 'Keel', at: { dir: [0, 0, 1], f: 0.02 }, re: /^(Keel 42mm.*|Keel)$/, text: 'The centre tube from nose to tail. The kingpost, the control frame and the hang loop are fixed to it.' },
@@ -351,7 +351,6 @@ function applyPose(animate = false) {
   if (other) {
     poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
-  anchors.clear();
 }
 const POSE_TIME = 700;
 /**
@@ -381,7 +380,6 @@ function stepPoses(now) {
     tiltTo(rec, m.a0 + (m.a1 - m.a0) * e);
     if (k === 1) rec.swing = null; else moving = true;
   }
-  if (moving) anchors.clear();
   return moving;
 }
 function poseOf(rec, animate = false) {
@@ -866,61 +864,95 @@ function renderChip() {
     <button type="button" class="chip-close" data-act="close" aria-label="Close (Esc)"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
 }
 
-// ------------------------------------------------------------------ names on the parts
-const anchors = new Map();
+// ------------------------------------------------------------------ labels for the customize rows
+// "Labels on the glider" names each colour row of Customize (P1 to P5, the batten pockets,
+// the frame) where it is on the glider, with its current colour as a swatch. Each sits on
+// one wing (side: the left wing is +X) at its own fraction of the span, so they spread out.
+const LABEL_ZONES = [['p1', 1, 0.55], ['p2', -1, 0.35], ['p3', 1, 0.3], ['p4', -1, 0.75], ['p5', 1, 0.8], ['pockets', -1, 0.55], ['frame', -1, 0.12]];
 const labelEls = new Map();
-const conceptPart = (c) => [...record.parts.values()].find((p) => c.re.test(p.name)) || null;
-function extreme(part, dir) {
-  const v = new THREE.Vector3(), best = new THREE.Vector3();
-  let top = -Infinity;
-  for (const m of part.meshes) {
-    const pos = m.geometry.attributes.position;
+/**
+ * A point on the zone's own surface in the model's frame, so it holds for every pose: the
+ * vertex nearest the middle of the zone's parts in a strip across one wing at `at` of the span.
+ */
+function zoneAnchor(rec, zone, side, at) {
+  rec.zoneAnchors ??= {};
+  if (zone in rec.zoneAnchors) return rec.zoneAnchors[zone];
+  const meshes = rec.tints[zone]?.meshes || [];
+  const toModel = new THREE.Matrix4().copy(rec.root.matrixWorld).invert(), m4 = new THREE.Matrix4();
+  const xs = [], ys = [], zs = [], v = new THREE.Vector3();
+  for (const m of meshes) {
     m.updateWorldMatrix(true, false);
-    for (let i = 0; i < pos.count; i += 3) {
-      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
-      const s = v.dot(dir);
-      if (s > top) { top = s; best.copy(v); }
+    m4.multiplyMatrices(toModel, m.matrixWorld);
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 3) { v.fromBufferAttribute(pos, i).applyMatrix4(m4); xs.push(v.x); ys.push(v.y); zs.push(v.z); }
+  }
+  let span = 0;
+  for (const x of xs) span = Math.max(span, Math.abs(x));
+  const pick = (i) => Math.abs(xs[i] * side / span - at) < 0.06;
+  const c = new THREE.Vector3();
+  let n = 0;
+  for (let i = 0; i < xs.length; i++) if (pick(i)) { c.x += xs[i]; c.y += ys[i]; c.z += zs[i]; n++; }
+  let anchor = null;
+  if (n) {
+    c.divideScalar(n);
+    let best = Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      if (!pick(i)) continue;
+      const d = (xs[i] - c.x) ** 2 + (ys[i] - c.y) ** 2 + (zs[i] - c.z) ** 2;
+      if (d < best) { best = d; anchor = new THREE.Vector3(xs[i], ys[i], zs[i]); }
     }
   }
-  return best;
-}
-function anchorOf(c) {
-  if (!anchors.has(c.id)) {
-    const part = conceptPart(c), d = new THREE.Vector3(...c.at.dir).normalize();
-    anchors.set(c.id, part ? extreme(part, d.clone().negate()).lerp(extreme(part, d), c.at.f) : null);
-  }
-  return anchors.get(c.id);
+  return (rec.zoneAnchors[zone] = anchor);
 }
 function buildLabels() {
   const host = $('#labels');
   host.innerHTML = '';
   labelEls.clear();
-  for (const c of CONCEPTS) {
-    const part = conceptPart(c);
-    if (!part) continue;
+  for (const [zone] of LABEL_ZONES) {
+    if (!record.tints[zone]?.meshes.length) continue;
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'label';
     el.tabIndex = -1;
-    el.innerHTML = `<b>${esc(c.name)}</b>`;
-    el.onclick = () => select(part);
+    el.innerHTML = `<span class="label-tag"><span class="sw"><i></i></span><b>${esc(ZONES[zone].name)}</b></span>`;
+    el.onclick = () => showRow(zone);
     host.append(el);
-    labelEls.set(c.id, el);
+    labelEls.set(zone, el);
   }
+  syncLabelSwatches();
+}
+/** Each label's swatch looks like the option chosen in its row. */
+function syncLabelSwatches() {
+  for (const [zone, el] of labelEls) {
+    const on = document.querySelector(`.sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
+    if (!on) continue;
+    sw.className = on.className.replace(/\bon\b/, '').trim();
+    sw.style.cssText = on.style.cssText;
+  }
+}
+/** Opens Customize at the row of a label. */
+function showRow(zone) {
+  if (state.panel !== 'custom') { state.panel = 'custom'; syncPanel(); }
+  const row = zone === 'frame' ? $('#frame-row') : document.querySelector(`[data-row="${zone}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
 }
 const tmp = new THREE.Vector3();
 function updateLabels() {
   if (!record || !state.names) return;
   const placed = [];
-  const items = CONCEPTS.filter((c) => labelEls.has(c.id) && anchorOf(c)).map((c) => ({ c, p: anchorOf(c) }))
-    .sort((a, b) => a.p.distanceTo(rig.camera.position) - b.p.distanceTo(rig.camera.position));
-  for (const { c, p } of items) {
-    const el = labelEls.get(c.id), part = conceptPart(c);
+  const items = LABEL_ZONES.filter(([z]) => labelEls.has(z)).map(([z, side, at]) => {
+    const a = zoneAnchor(record, z, side, at);
+    return a && { z, p: a.clone().applyMatrix4(record.root.matrixWorld) };
+  }).filter(Boolean).sort((a, b) => a.p.distanceTo(rig.camera.position) - b.p.distanceTo(rig.camera.position));
+  for (const { z, p } of items) {
+    const el = labelEls.get(z);
     tmp.copy(p).project(rig.camera);
     const x = (tmp.x + 1) / 2 * innerWidth, y = (1 - tmp.y) / 2 * innerHeight;
-    let ok = part.meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1 && !(other && state.compare && x > state.split * innerWidth - 20);
+    let ok = record.tints[z].meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1 && !(other && state.compare && x > state.split * innerWidth - 20);
     if (ok) {
-      const w = c.name.length * 8 + 12, r = { x0: x - w / 2, x1: x + w / 2, y0: y - 44, y1: y };
+      const w = ZONES[z].name.length * 8 + 34, r = { x0: x - w / 2, x1: x + w / 2, y0: y - 44, y1: y };
       if (placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) ok = false; else placed.push(r);
     }
     el.style.opacity = ok ? 1 : 0;
@@ -991,6 +1023,7 @@ function syncPanel() {
     const c = !m ? null : m.map ? new THREE.Color(.../\(blue\)/.test(m.name) ? BAKED.blue : /\(colour\)/.test(m.name) ? BAKED.red : BAKED.white) : m.userData.original;
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
   }
+  syncLabelSwatches();
   if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
