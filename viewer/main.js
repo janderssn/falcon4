@@ -359,10 +359,10 @@ function limitCamera() {
   const c = rig.controls;
   if (!lim) { c.maxPolarAngle = Math.PI; return; }
   const g = record.ground, t = c.target;
-  if (lim.x) {
-    t.x = THREE.MathUtils.clamp(t.x, lim.x[0] + 0.5, lim.x[1] - 0.5);
-    t.z = THREE.MathUtils.clamp(t.z, lim.z[0] + 0.5, lim.z[1] - 0.5);
-    t.y = Math.min(t.y, g + lim.maxY - 0.5);
+  if (lim.halfX) {
+    t.x = THREE.MathUtils.clamp(t.x, -lim.halfX + 1, lim.halfX - 1);
+    t.z = THREE.MathUtils.clamp(t.z, -lim.halfZ + 1, lim.halfZ - 1);
+    t.y = Math.min(t.y, g + lim.maxY - 1);
   }
   t.y = Math.max(t.y, g + lim.minY + 0.1);
   const d = Math.max(rig.camera.position.distanceTo(t), 1e-3);
@@ -376,11 +376,9 @@ function clampCamera() {
   let s = 1;
   if (cam.y < g + lim.minY && off.y < 0) s = Math.min(s, (g + lim.minY - t.y) / off.y);
   if (lim.maxY && cam.y > g + lim.maxY && off.y > 0) s = Math.min(s, (g + lim.maxY - t.y) / off.y);
-  if (lim.x) {
-    for (const [axis, [lo, hi]] of [['x', lim.x], ['z', lim.z]]) {
-      if (cam[axis] < lo && off[axis] < 0) s = Math.min(s, (lo - t[axis]) / off[axis]);
-      if (cam[axis] > hi && off[axis] > 0) s = Math.min(s, (hi - t[axis]) / off[axis]);
-    }
+  if (lim.halfX) {
+    if (Math.abs(cam.x) > lim.halfX && off.x) s = Math.min(s, (Math.sign(off.x) * lim.halfX - t.x) / off.x);
+    if (Math.abs(cam.z) > lim.halfZ && off.z) s = Math.min(s, (Math.sign(off.z) * lim.halfZ - t.z) / off.z);
   }
   if (s < 1) cam.copy(t).addScaledVector(off, Math.max(s, 0.02));
 }
