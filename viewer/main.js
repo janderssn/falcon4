@@ -84,7 +84,6 @@ const pick = (key, list) => {
 };
 const state = {
   model: params.get('model'),
-  controlFrame: params.get('controlFrame') === 'litestream' ? 'litestream' : 'standard',
   scene: SCENES[params.get('scene')] ? params.get('scene') : 'studio',
   colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, pick(z, fabricsFor(z))])),
   seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
@@ -152,40 +151,25 @@ function loaderText(title, note, p, retry = false) {
 }
 
 // ------------------------------------------------------------------ gliders
-function sourceFor(id) {
-  return catalog.sources.get(`${id}:${state.controlFrame}`) || catalog.sources.get(id);
-}
-let modelRequest = 0;
-async function setModel(id, first = false, controlFrame = state.controlFrame) {
-  const request = ++modelRequest;
-  state.controlFrame = controlFrame;
+async function setModel(id, first = false) {
+  const source = catalog.sources.get(id);
   state.model = id;
-  const source = sourceFor(id);
   syncPanel();
   if (!first) toast(`Loading the ${source.label} build…`, true);
   let rec;
   try {
     rec = await loadModel(source, (f, loaded) => {
-      if (request !== modelRequest) return;
       const pct = f == null ? null : Math.round(f * 100);
       if (first) loaderText('Falcon 4', pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
       else if (pct != null && pct < 100) toast(`Loading the ${source.label} build · ${pct} %`, true);
     });
   } catch (e) {
-    if (request !== modelRequest) return;
     console.error(e);
     if (first) { loaderText('The glider didn’t load', `Check the connection and try again. ${e.message}`, 0, true); $('#ld-retry').onclick = () => location.reload(); }
-    else {
-      state.model = record.source.modelId;
-      if (catalog.sources.has(`${state.model}:litestream`)) state.controlFrame = record.source.controlFrame;
-      syncPanel();
-      saveUrlSoon();
-      toast(`The ${source.label} configuration didn’t load. Select it to try again.`);
-    }
+    else toast(`The ${source.label} build didn’t load`);
     return;
   }
-  if (request !== modelRequest) return;
-  const keepSelection = record?.source.modelId === id && state.selSide === 'A' && rec.parts.has(state.sel);
+  if (state.model !== id) return;
   if (record && record !== rec) record.root.removeFromParent();
   if (other) { other.root.removeFromParent(); other = null; }   // the other build changes too
   record = rec;
@@ -194,7 +178,7 @@ async function setModel(id, first = false, controlFrame = state.controlFrame) {
   applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
   scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
-  if (!keepSelection) state.sel = null;
+  state.sel = null;
   applyLook();
   buildLabels();
   renderChip();
@@ -209,7 +193,7 @@ async function setModel(id, first = false, controlFrame = state.controlFrame) {
   } else toast(`${source.title} · ${source.description}`);
   if (state.compare) setCompare(true); else syncCompare();
   syncPanel();
-  trimCache([source.id, state.compare && sourceFor(otherId())?.id]);
+  trimCache([id]);
   saveUrlSoon();
 }
 
@@ -430,16 +414,13 @@ async function setCompare(on) {
   }
   const id = otherId();
   syncCompare();
-  const source = sourceFor(id);
-  if (other?.source.id === source.id) return;
+  if (other?.source.id === id) return;
+  const source = catalog.sources.get(id);
   toast(`Loading the ${source.label} build to compare…`, true);
   let rec;
   try { rec = await loadModel(source, (f) => { if (f != null && f < 1) toast(`Loading the ${source.label} build · ${Math.round(f * 100)} %`, true); }); }
-  catch (e) {
-    if (!state.compare || sourceFor(otherId())?.id !== source.id) return;
-    console.error(e); toast(`The ${source.label} build didn’t load`); setCompare(false); return;
-  }
-  if (!state.compare || sourceFor(otherId())?.id !== source.id) return;
+  catch (e) { console.error(e); toast(`The ${source.label} build didn’t load`); state.compare = false; syncCompare(); return; }
+  if (!state.compare || otherId() !== id) return;
   other?.root.removeFromParent();
   other = rec;
   prepareTints(other);
@@ -458,8 +439,8 @@ function syncCompare() {
   $('#swipe').hidden = !on;
   if (on) {
     $('#swipe').style.left = `${state.split * 100}%`;
-    $('#swipe-a').textContent = record.source.short;
-    $('#swipe-b').textContent = other.source.short;
+    $('#swipe-a').textContent = catalog.sources.get(state.model).label;
+    $('#swipe-b').textContent = catalog.sources.get(otherId()).label;
   }
 }
 function wireSwipe() {
@@ -1068,17 +1049,9 @@ function syncPanel() {
   $('#scene-art').style.backgroundImage = thumb(`scene-${state.scene}`);
   $('#scene-cap').textContent = SCENES[state.scene].label;
   for (const t of document.querySelectorAll('#scene-fly .tile')) t.classList.toggle('on', t.dataset.scene === state.scene);
-  $('#control-frame-row').hidden = !catalog?.sources.has(`${state.model}:litestream`);
-  for (const b of document.querySelectorAll('.frame-opt')) {
-    const on = b.dataset.frame === state.controlFrame;
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-checked', String(on));
-  }
-  $('#control-frame-name').textContent = state.controlFrame === 'litestream' ? 'Litestream' : 'Standard';
-  const src = record?.source;
-  $('#litestream-credit').hidden = src?.controlFrame !== 'litestream';
+  const src = catalog?.sources.get(state.model);
   if (src) {
-    $('#subtitle').textContent = `Wills Wing · 170 · ${src.label} build` + (src.controlFrame === 'litestream' ? ' · Litestream' : '');
+    $('#subtitle').textContent = `Wills Wing · 170 · ${src.label} build`;
     $('#download').href = src.glb;
     $('#download').download = src.download;
   }
@@ -1168,13 +1141,9 @@ function wireUi() {
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
-  for (const b of document.querySelectorAll('.frame-opt')) b.onclick = () => {
-    if (b.dataset.frame !== state.controlFrame) setModel(state.model, false, b.dataset.frame);
-  };
   $('#btn-reset').onclick = () => {
     state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
-    if (state.controlFrame !== 'standard') setModel(state.model, false, 'standard');
     applyLook(); syncPanel(); saveUrlSoon();
   };
   $('#btn-share').onclick = async () => {
@@ -1240,7 +1209,6 @@ function saveUrl() {
   if (!record || THUMB) return;
   const q = new URLSearchParams();
   q.set('model', state.model);
-  if (state.controlFrame !== 'standard') q.set('controlFrame', state.controlFrame);
   if (state.scene !== 'studio') q.set('scene', state.scene);
   for (const [z, id] of Object.entries(state.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
   if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
