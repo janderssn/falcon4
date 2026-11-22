@@ -194,14 +194,9 @@ body.nolabels #labels { display: none; }
 /* ---- plan views (2D): view bar at the top centre, and the four-view split */
 #viewbar { left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; transition: left .28s ease, opacity .45s ease; }
 body.panel-open #viewbar { left: calc(50% - var(--panel) / 2); }
-#viewbar button { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px 0 9px; border-radius: 999px; background: none; border: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+#viewbar button { display: flex; align-items: center; height: 34px; padding: 0 13px; border-radius: 999px; background: none; border: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 #viewbar button:hover { color: var(--ink); background: rgba(255, 255, 255, .08); }
 #viewbar button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
-#viewbar.text-only .ic { display: none; }
-#viewbar.text-only button { padding: 0 13px; }
-#viewbar.icon-only span { display: none; }
-#viewbar.icon-only button { padding: 0 10px; }
-#viewbar.icon-only .ic { width: 22px; height: 22px; }
 #viewbar .sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line); }
 body.plan #toast { top: 80px; }
 #quad { position: fixed; z-index: 3; display: grid; grid-template: 1fr 1fr / 1fr 1fr; pointer-events: none; }
@@ -213,7 +208,8 @@ body.plan #toast { top: 80px; }
 body.quad #labels { display: none; }
 @media (max-width: 760px) {
   #viewbar { top: 60px; left: 50%; }
-  #viewbar span { display: none; }
-  #viewbar button { padding: 0 9px; }
+  #viewbar { max-width: calc(100vw - 20px); }
+  #viewbar button { padding: 0 8px; font-size: 12px; }
+  #viewbar .sep { margin: 0 2px; }
   body.plan #toast { top: 112px; }
 }
