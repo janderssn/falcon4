@@ -51,6 +51,17 @@ const CONCEPTS = [
   { id: 'basebar', name: 'Basebar', at: { dir: [1, 0, 0], f: 0.5 }, re: /^(Control frame base tube|Basetube \(speedbar\))$/, text: 'The bar the pilot holds. Push out to slow down, pull in to speed up.' },
   { id: 'batten', name: 'Batten', at: { dir: [0, 0, 1], f: 0.1 }, re: /^(L cambered batten 4|Batten L 4)$/, text: 'Curved ribs in pockets in the sail; their shape gives the wing its airfoil.' },
 ];
+// Batten parts that tie into the sail: the strings at the batten ends hide with the sail
+// or the battens, and the grommets they run through are sewn into the sail.
+const SAIL_EYELET = /^Batten string grommet |^[LR] batten \d+ leech eyelet /;
+const BATTEN_TIE = /^Batten string (?!grommet)|^[LR] batten \d+ (double purchase|knotted pull loop|pull-loop knot)$/;
+/** How a part shows: 'eyelet' and 'tie' as above, 'batten' for the rest of the battens, or null. */
+function battenRole(part) {
+  if (part.group !== '03' || /washout/i.test(part.name)) return null;
+  if (SAIL_EYELET.test(part.name)) return 'eyelet';
+  if (BATTEN_TIE.test(part.name)) return 'tie';
+  return 'batten';
+}
 const GROUP_TEXT = {
   '01': 'Part of the sail.', '02': 'Part of the main frame.', '03': 'Part of the battens and washout.', '04': 'A lower wire: carries the flight loads.',
   '05': 'An upper wire or bridle: holds the wing up on the ground.', '06': 'Hardware that joins the parts.', '07': 'Webbing: the hang loop and its backup.',
@@ -77,6 +88,7 @@ const state = {
   colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, pick(z, fabricsFor(z))])),
   seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
   wires: params.get('wires') !== '0',
+  battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   compare: params.get('compare') === '1',
   split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
@@ -247,6 +259,11 @@ function lookOf(rec, side) {
     let mat = selected ? M.selected : M.base;
     let visible = true;
     if (part.group === '04' || part.group === '05') visible = state.wires;
+    const role = mesh.userData.battenRole === undefined ? (mesh.userData.battenRole = battenRole(part)) : mesh.userData.battenRole;
+    const sailGone = state.seeThrough >= 0.98;
+    if (role === 'batten') visible = state.battens;
+    else if (role === 'tie') visible = state.battens && !sailGone;
+    else if (role === 'eyelet') visible = !sailGone;
     // See-through sail, or a clear laminate panel.
     const laminate = clear[mesh.userData.zone];
     const ghost = (part.group === '01' && state.seeThrough > 0) || laminate !== undefined;
@@ -662,6 +679,7 @@ function syncPanel() {
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
+  $('#opt-battens').checked = state.battens;
   $('#opt-names').checked = state.names;
   $('#opt-grid').checked = state.grid;
   $('#opt-grid').disabled = state.scene !== 'studio';
@@ -753,10 +771,11 @@ function wireUi() {
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
+  $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
   $('#btn-reset').onclick = () => {
     state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
-    state.seeThrough = DEFAULTS.seeThrough; state.wires = true;
+    state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
   $('#btn-share').onclick = async () => {
@@ -807,7 +826,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&names=1&grid=1&shadows=0&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&shadows=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -825,6 +844,7 @@ function saveUrl() {
   for (const [z, id] of Object.entries(state.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
   if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
+  if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');

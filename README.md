@@ -44,7 +44,8 @@ The viewer is a glider configurator:
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
   panel (the clear and tinted laminates are see-through), plus the batten pockets;
   choose the frame finish; make the sail see-through to look at the frame; show or
-  hide the wires and bridles; put names on the main parts. *As built* (the first
+  hide the wires and bridles, and the battens (the batten strings hide with the
+  sail or the battens); put names on the main parts. *As built* (the first
   swatch in each row) restores the original colour. Colours are approximate and for
   show only; Wills Wing's own picker notes the same.
 - **Pose** (bottom of the view): standing on the control bar, or resting on the keel
