@@ -213,7 +213,7 @@ async function setModel(id, first = false) {
 function prepareTints(rec) {
   if (rec.tints) return;
   rec.tints = {};
-  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), fabric: undefined };
+  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), plain: clothUniforms(), fabric: undefined };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
@@ -235,7 +235,8 @@ function prepareTints(rec) {
       const baked = /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
       const tinted = Boolean(m.map);
       m.onBeforeCompile = (s) => {
-        if (cloth) patchCloth(s, t.cloth, m);
+        // Only the sail panels take the panel's cloth; pockets coloured with it stay woven.
+        if (cloth) patchCloth(s, /^Sail P/.test(name) ? t.cloth : t.plain, m);
         if (!tinted) return;
         s.uniforms.uTint = t.uTint; s.uniforms.uTintOn = t.uTintOn; s.uniforms.uBaked = { value: new THREE.Color(...baked) };
         s.fragmentShader = s.fragmentShader
@@ -273,7 +274,10 @@ function lookOf(rec, side) {
     const id = state.colours[zone] || null;
     if (sail && id !== t.fabric) {
       t.fabric = id;
-      setCloth(t.cloth, t.meshes.flatMap((mesh) => Object.values(mesh.userData.materials)), id, fabric?.opacity ?? 1);
+      const panel = (mesh) => /^Sail P/.test(mesh.userData.materials.base.name);
+      const mats = (list) => list.flatMap((mesh) => Object.values(mesh.userData.materials));
+      setCloth(t.cloth, mats(t.meshes.filter(panel)), id, fabric?.opacity ?? 1);
+      setCloth(t.plain, mats(t.meshes.filter((mesh) => !panel(mesh))), null);
     }
     if (colour) t.uTint.value.copy(colour);
     for (const mesh of t.meshes) {

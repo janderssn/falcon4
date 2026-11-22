@@ -30,12 +30,14 @@ export function clothKind(id) {
 /** Fibre colour of a laminate: black in the "B" (clear-black) and Technora cloths. */
 const darkFibres = (id) => /^uvpxb|^uvp2lxb|^uvodl|^odl/.test(id || '');
 
+// Woven cloth reflects little and softly: at full strength the studio's light glances off
+// a dark colour at shallow angles and leaves a milky veil that reads as see-through.
 const LOOK = {
-  [CLOTH.dacron]: { roughness: 0.55, clearcoat: 0 },
-  [CLOTH.ripstop]: { roughness: 0.6, clearcoat: 0 },
+  [CLOTH.dacron]: { roughness: 0.7, specular: 0.35, clearcoat: 0 },
+  [CLOTH.ripstop]: { roughness: 0.74, specular: 0.35, clearcoat: 0 },
   // Film: glossy on top (clear coat), blurred through (base roughness).
-  [CLOTH.laminate]: { roughness: 0.42, clearcoat: 1, clearcoatRoughness: 0.08 },
-  [CLOTH.technora]: { roughness: 0.42, clearcoat: 1, clearcoatRoughness: 0.08 },
+  [CLOTH.laminate]: { roughness: 0.42, specular: 1, clearcoat: 1, clearcoatRoughness: 0.08 },
+  [CLOTH.technora]: { roughness: 0.42, specular: 1, clearcoat: 1, clearcoatRoughness: 0.08 },
 };
 
 /** Uniforms one panel's meshes share; set them with setCloth. */
@@ -56,6 +58,7 @@ export function setCloth(uniforms, materials, id, opacity = 1) {
   const film = kind >= CLOTH.laminate ? THREE.MathUtils.clamp(1 - opacity * 0.5, 0, 0.97) : 0;
   for (const m of materials) {
     m.roughness = look.roughness;
+    m.specularIntensity = look.specular;
     m.clearcoat = look.clearcoat;
     m.clearcoatRoughness = look.clearcoatRoughness ?? 0;
     m.transmission = film;
