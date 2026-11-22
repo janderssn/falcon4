@@ -25,21 +25,22 @@
   <p id="subtitle">Wills Wing · 170</p>
 </header>
 
-<button type="button" id="btn-custom" class="hud pillbtn glass" aria-controls="custom" aria-expanded="false" title="Customize (C)">
+<div id="topbtns" class="hud">
+<button type="button" id="btn-custom" class="pillbtn glass" aria-controls="custom" aria-expanded="false" title="Customize (C)">
   <svg viewBox="0 0 24 24" class="ic"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Customize</span>
 </button>
+<button type="button" id="btn-settings" class="icon" aria-controls="settings" aria-expanded="false" title="Settings (S)" aria-label="Settings">
+  <svg viewBox="0 0 24 24" class="ic"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+</button>
+</div>
 
-<aside id="custom" class="hud glass" aria-label="Customize the glider" hidden>
+<aside id="custom" class="hud glass sheet" aria-label="Customize the glider" hidden>
   <header>
     <h2>Customize</h2>
     <button type="button" id="btn-reset" class="textbtn" title="Back to the default colours">Reset</button>
-    <button type="button" id="btn-close" class="icon" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <button type="button" class="icon btn-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </header>
   <div class="body">
-    <section>
-      <h3>Glider</h3>
-      <div id="builds" class="builds"></div>
-    </section>
     <section>
       <h3>Sail colours</h3>
       <div id="sail-rows"></div>
@@ -64,6 +65,24 @@
       <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
       <p class="note">Reconstructions from the owner's manual, factory drawings and photos; colours are for show. Some shapes and sizes are estimated. Don't use the model for maintenance.</p>
     </footer>
+  </div>
+</aside>
+
+<aside id="settings" class="hud glass sheet" aria-label="Settings" hidden>
+  <header>
+    <h2>Settings</h2>
+    <button type="button" class="icon btn-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </header>
+  <div class="body">
+    <section>
+      <h3>Build</h3>
+      <div id="builds" class="builds" role="radiogroup" aria-label="Build"></div>
+    </section>
+    <section>
+      <h3>Display</h3>
+      <label class="switch"><input type="checkbox" id="opt-grid"><i></i><span>Floor grid<small class="hint">In the studio</small></span></label>
+      <label class="switch"><input type="checkbox" id="opt-shadows" checked><i></i><span>Shadows</span></label>
+    </section>
   </div>
 </aside>
 

@@ -83,8 +83,10 @@ const state = {
   selSide: 'A',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
-  wind: 1, shadows: true, sel: null, tour: false,
-  panel: !small && !THUMB,
+  grid: params.get('grid') === '1',                // settings: floor grid in the studio
+  shadows: params.get('shadows') !== '0',          // settings: shadows
+  wind: 1, sel: null, tour: false,
+  panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
 };
 let catalog, record, renderer, rig, scenes;
 let other = null;                                   // the second build, shown right of the divider when comparing
@@ -104,6 +106,8 @@ async function boot() {
   loaderText('Falcon 4', 'Setting up…', 0.05);
   scenes = new Scenes(renderer, scene, { grass: Number(params.get('grass')) || (small ? 70000 : 170000) });
   scenes.hours = state.hours;
+  scenes.setShadows(state.shadows);
+  scenes.setGrid(state.grid);
   wireUi();
   resize();
   addEventListener('resize', resize);
@@ -499,8 +503,9 @@ function resize() {
 /** Centre the glider in the part of the screen the panel leaves free. */
 function shiftView() {
   const w = innerWidth, h = innerHeight;
-  const dx = state.panel && !small ? ($('#custom').offsetWidth + 16) / 2 : 0;
-  const dy = state.panel && small ? $('#custom').offsetHeight / 2 : 0;
+  const sheet = state.panel && $(`#${state.panel}`);
+  const dx = sheet && !small ? (sheet.offsetWidth + 16) / 2 : 0;
+  const dy = sheet && small ? sheet.offsetHeight / 2 : 0;
   for (const cam of [rig.perspective, rig.orthographic]) {
     if (dx || dy) cam.setViewOffset(w, h, dx, dy, w, h); else cam.clearViewOffset();
     cam.updateProjectionMatrix();
@@ -611,7 +616,7 @@ function updateLabels() {
   }
 }
 
-// ------------------------------------------------------------------ customize panel
+// ------------------------------------------------------------------ customize and settings panels
 const thumb = (name) => `url('./thumbs/${name}.jpg')`;
 function swatches(zone) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
@@ -631,11 +636,12 @@ function buildPanel() {
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
 function syncPanel() {
-  document.body.classList.toggle('panel-open', state.panel);
-  $('#custom').hidden = !state.panel;
+  document.body.classList.toggle('panel-open', Boolean(state.panel));
+  for (const id of ['custom', 'settings']) {
+    $(`#${id}`).hidden = state.panel !== id;
+    $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
+  }
   if (rig) shiftView();
-  $('#btn-custom').classList.toggle('on', state.panel);
-  $('#btn-custom').setAttribute('aria-expanded', String(state.panel));
   for (const b of document.querySelectorAll('.build')) b.classList.toggle('on', b.dataset.model === state.model);
   for (const b of document.querySelectorAll('.sw')) {
     const on = (state.colours[b.dataset.zone] || '') === b.dataset.colour;
@@ -657,6 +663,9 @@ function syncPanel() {
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
   $('#opt-names').checked = state.names;
+  $('#opt-grid').checked = state.grid;
+  $('#opt-grid').disabled = state.scene !== 'studio';
+  $('#opt-shadows').checked = state.shadows;
   document.body.classList.toggle('nolabels', !state.names);
   $('#light').hidden = state.scene !== 'hill';
   $('#scene-art').style.backgroundImage = thumb(`scene-${state.scene}`);
@@ -671,6 +680,12 @@ function syncPanel() {
   $('#btn-2d').classList.toggle('on', rig?.projection === 'orthographic');
   $('#btn-2d').textContent = rig?.projection === 'orthographic' ? '3D' : '2D';
   $('#btn-tour').classList.toggle('on', state.tour);
+}
+
+/** Opens one side panel (closing the other), or closes it if it is already open. */
+function togglePanel(id) {
+  state.panel = id && state.panel !== id ? id : null;
+  syncPanel();
 }
 
 function setTime(h) {
@@ -703,8 +718,9 @@ function wireUi() {
   setTime(state.hours);
   $('#time').addEventListener('input', (e) => setTime(Number(e.target.value)));
   $('#wind').addEventListener('input', (e) => { state.wind = Number(e.target.value); scenes.setWind(state.wind); });
-  $('#btn-custom').onclick = () => { state.panel = !state.panel; syncPanel(); };
-  $('#btn-close').onclick = () => { state.panel = false; syncPanel(); };
+  $('#btn-custom').onclick = () => togglePanel('custom');
+  $('#btn-settings').onclick = () => togglePanel('settings');
+  for (const b of document.querySelectorAll('.btn-close')) b.onclick = () => togglePanel(null);
   $('#btn-tour').onclick = () => (state.tour ? stopTour() : startTour());
   $('#btn-compare').onclick = () => setCompare(!state.compare);
   wireSwipe();
@@ -727,10 +743,14 @@ function wireUi() {
   });
   $('#custom').addEventListener('click', (e) => {
     const sw = e.target.closest('.sw');
-    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); return; }
+    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
+  });
+  $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
     if (build && build.dataset.model !== state.model) setModel(build.dataset.model);
   });
+  $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
+  $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
@@ -770,7 +790,8 @@ function wireUi() {
     userActive();
     const k = e.key.toLowerCase();
     if (e.key === 'Escape') { if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
-    if (k === 'c') { state.panel = !state.panel; syncPanel(); }
+    if (k === 'c') togglePanel('custom');
+    else if (k === 's') togglePanel('settings');
     else if (k === 't') toggle2d();
     else if (k === 'n') frontView();
     else if (k === 'f') (state.tour ? stopTour() : startTour());
@@ -786,7 +807,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&names=1&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&names=1&grid=1&shadows=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -807,6 +828,8 @@ function saveUrl() {
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
+  if (state.grid) q.set('grid', '1');
+  if (!state.shadows) q.set('shadows', '0');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));
   q.set('cam', [...p.target.toArray().map((v) => r(v)), ...p.dir.toArray().map((v) => r(v, 4)), r(p.size), rig.projection === 'orthographic' ? 'o' : 'p'].join(','));
