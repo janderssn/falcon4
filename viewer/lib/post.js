@@ -16,6 +16,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 class SolidAOPass extends GTAOPass {
   constructor(...args) {
     super(...args);
+    // The sail is double sided: drawn one-sided, its back faces would be missing from the
+    // depth, and the frame inside would darken the cloth in front of it as if seen through.
+    this.normalMaterial.side = THREE.DoubleSide;
     // The renderer writes a logarithmic depth buffer (for the long views in the hill scene);
     // the AO and denoise shaders expect plain depth, so they decode it first.
     this.logDepth = { uLogFar: { value: 0 }, uLogNear: { value: 0.1 }, uLogFarZ: { value: 100 } };
