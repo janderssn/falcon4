@@ -125,7 +125,6 @@ async function load(source, progress) {
 // into other meshes that shared a material in the GLB.
 function prepareMaterials(mesh) {
   const base = mesh.material.clone();
-  toneAluminium(base);
   const make = (emissive, intensity) => {
     const m = base.clone();
     if (m.emissive) { m.emissive.set(emissive); m.emissiveIntensity = intensity; }
@@ -139,19 +138,6 @@ function prepareMaterials(mesh) {
     base, selected: make('#d0832a', 0.45), hover: make('#3f8fe0', 0.45), related: make('#2fb39a', 0.35), ghost,
   };
   mesh.material = base;
-}
-
-/**
- * Bare aluminium from the builds is close to a mirror of the bright studio light, so the
- * tubes read as white. Clear-anodised tube is a duller, satin grey: cap its brightness and
- * give it a satin finish. Colours picked for the frame replace this as before.
- */
-const ALU_MAX = 0.32, ALU_ROUGH = 0.5;
-function toneAluminium(m) {
-  if (!(m.metalness > 0.5) || !/alumin|6061|7075/i.test(m.name) || !m.color) return;
-  const l = m.color.r * 0.2126 + m.color.g * 0.7152 + m.color.b * 0.0722;
-  if (l > ALU_MAX) m.color.multiplyScalar(ALU_MAX / l);
-  m.roughness = Math.max(m.roughness, ALU_ROUGH);
 }
 
 export function dispose(record) {
