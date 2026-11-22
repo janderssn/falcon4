@@ -40,8 +40,7 @@ The viewer is a glider configurator:
 - **Settings** (gear, top right corner, `S`): pick the build (Astra or Opus), the colour
   profile (the Wills Wing colour picker's colours, or calibrated to the real cloth where
   measured: Blue 7304, Red 3125, White 170), turn the floor grid in the studio on or off,
-  turn the shadows on or off, and turn the studio effects (ambient occlusion, a faint glow
-  on highlights, multisampled edges) on or off; they start off on phones.
+  and turn the shadows on or off.
 - **Sail cloth:** each panel's material follows its fabric, matched to photos of the real
   cloth. Woven polyester (Dacron) is opaque with a plain resin finish; the MT cloths add a
   diamond ripstop of paired threads; the laminates are glossy film over an opaque scrim and

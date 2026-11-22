@@ -4,8 +4,7 @@ import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/c
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
 import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
-import { Post } from './lib/post.js';
-import { clothUniforms, setCloth, toCloth, patchCloth } from './lib/cloth.js';
+import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha } from './lib/cloth.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -103,12 +102,11 @@ const state = {
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
-  fx: params.has('fx') ? params.get('fx') === '1' : !small,   // settings: studio effects (post-processing)
   wind: 1, sel: null, tour: false,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
   panel: null,                                     // the open side panel: 'custom', 'settings' or none
 };
-let catalog, record, renderer, rig, scenes, post;
+let catalog, record, renderer, rig, scenes;
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
 const canvas = $('#scene');
@@ -120,7 +118,6 @@ async function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   rig = new CameraRig(canvas);
-  if (!THUMB) post = new Post(renderer, scene, rig.camera);
   rig.controls.maxDistance = 40;
   rig.controls.addEventListener('start', userActive);
   rig.addEventListener('change', saveUrlSoon);
@@ -267,16 +264,16 @@ function lookOf(rec, side) {
   for (const [zone, t] of Object.entries(rec.tints)) {
     const fabric = fabricOf(zone, state.colours[zone]);
     const colour = fabric?.colour;
-    // Sail laminates let light through their film (lib/cloth.js); other clear parts fade.
+    // Clear laminates: hazy film between opaque fibres (lib/cloth.js).
     const sail = SAIL_ZONES.includes(zone);
-    if (fabric && fabric.opacity < 1 && !sail) clear[zone] = fabric.opacity;
+    if (fabric && fabric.opacity < 1) clear[zone] = sail ? filmAlpha(fabric.opacity) : fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
     const id = state.colours[zone] || null;
     if (sail && id !== t.fabric) {
       t.fabric = id;
       const panel = (mesh) => /^Sail P/.test(mesh.userData.materials.base.name);
       const mats = (list) => list.flatMap((mesh) => Object.values(mesh.userData.materials));
-      setCloth(t.cloth, mats(t.meshes.filter(panel)), id, fabric?.opacity ?? 1);
+      setCloth(t.cloth, mats(t.meshes.filter(panel)), id);
       setCloth(t.plain, mats(t.meshes.filter((mesh) => !panel(mesh))), null);
     }
     if (colour) t.uTint.value.copy(colour);
@@ -302,7 +299,9 @@ function lookOf(rec, side) {
     else if (role === 'tie') visible = state.battens && !sailGone;
     else if (role === 'eyelet') visible = !sailGone;
     // See-through sail, or a clear laminate panel.
-    const laminate = clear[mesh.userData.zone];
+    // In a sail zone only the panels are laminate; pockets coloured with them stay woven.
+    const inSail = SAIL_ZONES.includes(mesh.userData.zone);
+    const laminate = !inSail || /^Sail P/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
     const ghost = (part.group === '01' && state.seeThrough > 0) || laminate !== undefined;
     if (ghost) {
       const seeThrough = part.group === '01' ? 1 - state.seeThrough * 0.92 : 1;
@@ -844,13 +843,11 @@ function loop(now) {
     renderer.render(scene, rig.camera);
     renderer.setScissorTest(false);
     record.root.visible = true; other.root.visible = true;
-  } else if (post && state.fx) post.render(rig.camera, { ao: !rig.morph });
-  else renderer.render(scene, rig.camera);
+  } else renderer.render(scene, rig.camera);
   updateLabels();
 }
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
-  post?.setSize(innerWidth, innerHeight, renderer.getPixelRatio());
   rig.setAspect(innerWidth / innerHeight);
 }
 // ------------------------------------------------------------------ clicking a part
@@ -1081,7 +1078,6 @@ function syncPanel() {
   $('#backdrop-hint').hidden = state.scene === 'studio';
   document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
   $('#opt-shadows').checked = state.shadows;
-  $('#opt-fx').checked = state.fx;
   $('#opt-spot').checked = state.spot;
   $('#opt-spot').disabled = state.scene !== 'studio';
   $('#spot-hint').textContent = state.scene === 'studio' ? 'Soft light under the glider' : 'In the studio';
@@ -1184,7 +1180,6 @@ function wireUi() {
   });
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
-  $('#opt-fx').addEventListener('change', (e) => { state.fx = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
@@ -1268,7 +1263,6 @@ function saveUrl() {
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
   if (state.profile === 'calibrated') q.set('colors', 'cal');
-  if (state.fx !== !small) q.set('fx', state.fx ? '1' : '0');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');

@@ -7,13 +7,15 @@
 // - 205MT / 240MT: the same cloth with a ripstop of heavier paired threads in diamonds.
 // - PX laminates (UVPXB05/10, UVP2LX): polyester film over a square scrim and an X-ply.
 //   The fibres are opaque (black in the "B" cloths, white otherwise); between them the film
-//   is see-through but hazy, so what is behind shows blurred and low in contrast.
+//   is see-through but hazy, so what is behind shows low in contrast.
 // - ODL (Technora): the same, with a rectangular Technora scrim and a black Technora X-ply
 //   at 22 degrees.
 //
 // The fibres are drawn in the shader at their real size in metres, projected onto the
-// panel's plane, and fade to their average where they get smaller than a pixel. The film's
-// see-through uses three's transmission, blurred by the roughness.
+// panel's plane, and fade to their average where they get smaller than a pixel. The film
+// is blended (the viewer's see-through path, with its alpha from filmAlpha); three's
+// transmission would blur it, but it also smears whatever is in front, like the frame
+// tubes, into the film.
 import * as THREE from 'three';
 
 export const CLOTH = { dacron: 0, ripstop: 1, laminate: 2, technora: 3 };
@@ -35,7 +37,7 @@ const darkFibres = (id) => /^uvpxb|^uvp2lxb|^uvodl|^odl/.test(id || '');
 const LOOK = {
   [CLOTH.dacron]: { roughness: 0.7, specular: 0.35, clearcoat: 0 },
   [CLOTH.ripstop]: { roughness: 0.74, specular: 0.35, clearcoat: 0 },
-  // Film: glossy on top (clear coat), blurred through (base roughness).
+  // Film: glossy on top (clear coat).
   [CLOTH.laminate]: { roughness: 0.42, specular: 1, clearcoat: 1, clearcoatRoughness: 0.08 },
   [CLOTH.technora]: { roughness: 0.42, specular: 1, clearcoat: 1, clearcoatRoughness: 0.08 },
 };
@@ -46,24 +48,23 @@ export function clothUniforms() {
 }
 
 /**
- * Sets a panel's cloth: the fabric id and how see-through its film is (the fabric's
- * opacity in fabrics.js: 1 is an opaque film, lower lets more through).
+ * How opaque a laminate's film is, from the fabric's opacity in fabrics.js (Wills Wing's
+ * picker value: 1 is an opaque film, lower lets more through). The film is never fully
+ * clear: it scatters a little and is hazy. The fibres on top are opaque.
  */
-export function setCloth(uniforms, materials, id, opacity = 1) {
+export const filmAlpha = (opacity) => THREE.MathUtils.clamp(0.25 + 0.6 * opacity, 0, 1);
+
+/** Sets a panel's cloth from the chosen fabric id. */
+export function setCloth(uniforms, materials, id) {
   const kind = clothKind(id);
   const look = LOOK[kind];
   uniforms.uCloth.value = kind;
   uniforms.uFibre.value.set(darkFibres(id) ? 0x101112 : 0xe9e9e4);
-  // The film itself scatters little: most of what isn't fibre lets light through.
-  const film = kind >= CLOTH.laminate ? THREE.MathUtils.clamp(1 - opacity * 0.5, 0, 0.97) : 0;
   for (const m of materials) {
     m.roughness = look.roughness;
     m.specularIntensity = look.specular;
     m.clearcoat = look.clearcoat;
     m.clearcoatRoughness = look.clearcoatRoughness ?? 0;
-    m.transmission = film;
-    m.thickness = 0;
-    m.ior = 1.6;   // polyester film
   }
 }
 
@@ -144,7 +145,8 @@ export function patchCloth(shader, uniforms, material) {
         float xply = max(clothRun(cp, 1.0472, 0.02, 0.0008), clothRun(cp, 2.0944, 0.02, 0.0008));
         clothFibre = max(scrim, xply);
       }
-      diffuseColor.rgb = mix(diffuseColor.rgb, uFibre, clothFibre);`)
+      diffuseColor.rgb = mix(diffuseColor.rgb, uFibre, clothFibre);
+      diffuseColor.a = mix(diffuseColor.a, 1.0, clothFibre);   // no light through a fibre`)
     // MT ripstop: pairs of heavier threads 1 mm apart in 7 mm diamonds, 0.12 mm proud.
     // Laminate fibres stand a little proud of the film too.
     .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -158,9 +160,5 @@ export function patchCloth(shader, uniforms, material) {
         diffuseColor.rgb *= 1.0 + rib * 0.06;
         roughnessFactor = min(1.0, roughnessFactor + rib * 0.1);
       }
-      if (uCloth > 1.5) normal = clothBump(-vViewPosition, normal, clothFibre * 0.00006, faceDirection);`)
-    // No light gets through a fibre: only the film between them transmits.
-    .replace('#include <transmission_fragment>', THREE.ShaderChunk.transmission_fragment.replace(
-      'material.transmission = transmission;',
-      'material.transmission = transmission * (1.0 - clothFibre);'));
+      if (uCloth > 1.5) normal = clothBump(-vViewPosition, normal, clothFibre * 0.00006, faceDirection);`);
 }
