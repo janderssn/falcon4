@@ -481,7 +481,7 @@ function toggle2d() {
 // ------------------------------------------------------------------ plan views (2D)
 // In 2D a bar at the top looks straight along an axis, or splits the screen into four
 // views, each with its own pan and zoom. The nose points to +Z, the left wing to +X.
-const PLAN = { front: [0, 0, 1], top: [0, 1, -1e-4], bottom: [0, -1, 1e-4], left: [1, 0, 0], right: [-1, 0, 0] };
+const PLAN = { front: [0, 0, 1], back: [0, 0, -1], top: [0, 1, -1e-4], bottom: [0, -1, 1e-4], left: [1, 0, 0], right: [-1, 0, 0] };
 const QUAD = [PLAN.top, PLAN.front, PLAN.left, [0.42, 0.32, 1]];   // top left, top right, bottom left, bottom right (3D)
 const SPLIT_TIME = 650;
 // split: how far the four views are open (0 one view, 1 four), and where it is going.
@@ -492,9 +492,53 @@ function planView(name) {
   if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
   stopTour();
   if (name === 'quad') return setQuad(!plan.quad);
+  viewFrom(PLAN[name]);
+}
+/** A 2D view looking from `dir` (from the glider towards the camera), framing the glider. */
+function viewFrom(dir) {
+  if (!record) return;
+  if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
+  stopTour();
   setQuad(false);
-  rig.animateTo(planFrame(PLAN[name]), !reduced, fitSize);
+  rig.animateTo(planFrame(dir), !reduced, fitSize);
   userActive();
+}
+/** Turns the camera around the target, in degrees: yaw about the vertical, pitch up or down. */
+function orbit(yaw, pitch) {
+  if (!record || plan.quad) return;
+  stopTour();
+  const p = rig.pose(), d = p.dir;
+  const lim = THREE.MathUtils.degToRad(89.9);
+  const el = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) + THREE.MathUtils.degToRad(pitch), -lim, lim);
+  const az = Math.atan2(d.x, d.z) + THREE.MathUtils.degToRad(yaw);
+  p.dir = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
+  rig.animateTo(p, !reduced);
+  userActive();
+}
+/**
+ * Blender's numpad: 1 front, 3 right, 7 top (Ctrl for back, left, bottom), 9 the opposite
+ * side, 5 2D/3D, 0 the start view, 2 4 6 8 turn 15 degrees, . the selected part, + - zoom.
+ * By key position (e.code), so the number row keeps its own keys and NumLock doesn't matter.
+ */
+function numpadKey(e) {
+  const m = /^Numpad(\d|Decimal|Add|Subtract)$/.exec(e.code);
+  if (!m || e.metaKey || e.altKey) return false;
+  const k = m[1], ctrl = e.ctrlKey;
+  if (k === '1') planView(ctrl ? 'back' : 'front');
+  else if (k === '3') planView(ctrl ? 'left' : 'right');
+  else if (k === '7') planView(ctrl ? 'bottom' : 'top');
+  else if (k === '9') { if (record && !plan.quad) viewFrom(rig.pose().dir.negate()); }
+  else if (k === '5') { rig.setProjection(rig.projection === 'orthographic' ? 'perspective' : 'orthographic', !reduced); syncPanel(); userActive(); }
+  else if (k === '0') frontView();
+  else if (k === '4') orbit(-15, 0);
+  else if (k === '6') orbit(15, 0);
+  else if (k === '8') orbit(0, 15);
+  else if (k === '2') orbit(0, -15);
+  else if (k === 'Decimal') { if (state.sel) focusPart(selRec().parts.get(state.sel)); }
+  else if (k === 'Add') zoom(0.7);
+  else if (k === 'Subtract') zoom(1.4);
+  else return false;
+  return true;
 }
 /**
  * Pose that frames the glider from `dir`: on the whole screen, or in a quarter of it in
@@ -1068,6 +1112,7 @@ function wireUi() {
   });
   document.addEventListener('keydown', (e) => {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'checkbox' && e.target.type !== 'range') return;
+    if (numpadKey(e)) { e.preventDefault(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     userActive();
     const k = e.key.toLowerCase();

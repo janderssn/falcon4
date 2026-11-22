@@ -56,6 +56,9 @@ The viewer is a glider configurator:
   ground on the hill and inside the hangar; in the studio you can look up from below.
 - **View** (bottom right): fly around (`F`), back to the start view (`N`), plan view
   from above (`T`), zoom. Drag to turn, right-drag to move, scroll to zoom.
+- **Numpad** as in Blender: `1` front, `3` right, `7` top (with `Ctrl`: back, left,
+  bottom), `9` the opposite side, `5` 2D/3D, `0` the start view, `2` `4` `6` `8` turn
+  15°, `.` the selected part, `+` `-` zoom. The number row keeps switching scenes.
 - Click a part to see what it is, with its Wills Wing part number where the build
   has one; double-click to go to it.
 - **Copy link to this glider** puts the whole configuration in the link: build,
