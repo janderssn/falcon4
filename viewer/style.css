@@ -215,6 +215,7 @@ body.panel-open #viewbar { left: calc(50% - var(--panel) / 2); }
 #viewbar button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 #viewbar .sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line); }
 body.plan #toast { top: 80px; }
+body.plan #posebar { opacity: 0; pointer-events: none; }   /* plan views always show the glider standing */
 #quad { position: fixed; z-index: 3; display: grid; grid-template: 1fr 1fr / 1fr 1fr; pointer-events: none; }
 #quad span { position: relative; padding: 12px 14px; }
 #quad b { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); font-size: 10.5px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }

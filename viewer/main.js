@@ -338,16 +338,35 @@ function restingPose(rec) {
     tail: { pivot: new THREE.Vector3(0, minY, back), angle: -tail },      // tail down: the other way
   };
 }
-function applyPose() {
-  if (record) poseOf(record);
+/** The plan views always show the glider standing, so its axes line up with the views. */
+const restPose = () => (rig?.projection === 'orthographic' ? 'bar' : state.pose);
+function applyPose(animate = false) {
+  if (record) poseOf(record, animate);
   if (other) {
-    poseOf(other);                                   // on the same floor (y = 0) as the first
+    poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
   anchors.clear();
 }
-function poseOf(rec) {
+const POSE_TIME = 700;
+/** Swings the builds from their last pose to the new one; true while they move. */
+function stepPoses(now) {
+  let moving = false;
+  for (const rec of [record, other]) {
+    const m = rec?.swing;
+    if (!m) continue;
+    const k = Math.min((now - m.start) / POSE_TIME, 1), e = k * k * (3 - 2 * k);
+    rec.root.quaternion.slerpQuaternions(m.q0, m.q1, e);
+    rec.root.position.lerpVectors(m.p0, m.p1, e);
+    rec.root.updateMatrixWorld(true);
+    if (k === 1) rec.swing = null; else moving = true;
+  }
+  if (moving) anchors.clear();
+  return moving;
+}
+function poseOf(rec, animate = false) {
+  const q0 = rec.root.quaternion.clone(), p0 = rec.root.position.clone();
   if (!rec.rest) rec.rest = restingPose(rec);
-  const { pivot, angle } = rec.rest[state.pose] || { pivot: rec.rest.nose.pivot, angle: 0 };   // standing: no tilt
+  const { pivot, angle } = rec.rest[restPose()] || { pivot: rec.rest.nose.pivot, angle: 0 };   // standing: no tilt
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
   rec.root.quaternion.copy(q);
   rec.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
@@ -358,6 +377,13 @@ function poseOf(rec) {
   // Exact bounds: the quick box of rotated parts reaches below the glider.
   rec.box.setFromObject(rec.root, true);
   rec.ground = 0;
+  // The box above is the one of the new pose, so views frame where the glider ends up.
+  rec.swing = null;
+  if (animate && (!q0.equals(rec.root.quaternion) || !p0.equals(rec.root.position))) {
+    rec.swing = { q0, p0, q1: rec.root.quaternion.clone(), p1: rec.root.position.clone(), start: performance.now() };
+    rec.root.quaternion.copy(q0); rec.root.position.copy(p0);
+    rec.root.updateMatrixWorld(true);
+  }
 }
 
 // ------------------------------------------------------------------ compare
@@ -419,7 +445,7 @@ function wireSwipe() {
 }
 function setPose(pose) {
   state.pose = pose;
-  applyPose();
+  applyPose(!reduced);
   syncPanel();
   saveUrlSoon();
 }
@@ -429,15 +455,15 @@ function setPose(pose) {
 function frontView(animate = !reduced) {
   if (!record) return;
   const cam = parseCamera(DEFAULTS.cam);
-  rig.setProjection(cam ? cam.projection : 'perspective');
-  rig.animateTo(cam ? cam.pose : rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate);
+  rig.setProjection(cam ? cam.projection : 'perspective', animate);
+  rig.animateTo(cam ? cam.pose : rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate, fitSize);
   syncPanel();
 }
 function zoom(f) { const p = rig.pose(); p.size *= f; rig.animateTo(p, !reduced); userActive(); }
 function toggle2d() {
   const ortho = rig.projection !== 'orthographic';
-  rig.setProjection(ortho ? 'orthographic' : 'perspective');
-  if (ortho && record) rig.animateTo(planFrame(PLAN.top), !reduced);
+  rig.setProjection(ortho ? 'orthographic' : 'perspective', !reduced);
+  if (ortho && record) rig.animateTo(planFrame(PLAN.top), !reduced, fitSize);
   else if (record) frontView();
   syncPanel();
   userActive();
@@ -447,14 +473,16 @@ function toggle2d() {
 // views that share one centre and zoom. The nose points to +Z, the left wing to +X.
 const PLAN = { front: [0, 0, 1], top: [0, 1, -1e-4], bottom: [0, -1, 1e-4], left: [1, 0, 0], right: [-1, 0, 0] };
 const QUAD = [PLAN.top, PLAN.front, PLAN.left, [0.42, 0.32, 1]];   // top left, top right, bottom left, bottom right (3D)
-const plan = { quad: false, view: null, area: '', cams: null, fit: [1, 1, 1, 1] };
+const SPLIT_TIME = 650;
+// split: how far the four views are open (0 one view, 1 four), and where it is going.
+const plan = { quad: false, view: null, cams: null, fit: [1, 1, 1, 1], flat: false, wall: null, split: 0, splitFrom: 0, splitStart: 0 };
 function planView(name) {
   if (!record) return;
-  if (rig.projection !== 'orthographic') rig.setProjection('orthographic');
+  if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
   stopTour();
   if (name === 'quad') return setQuad(!plan.quad);
   setQuad(false);
-  rig.animateTo(planFrame(PLAN[name]), !reduced);
+  rig.animateTo(planFrame(PLAN[name]), !reduced, fitSize);
   userActive();
 }
 /** Pose that frames the glider from `dir` in the part of the screen the panel leaves free. */
@@ -462,27 +490,53 @@ function planFrame(dir, margin = 1.15) {
   const a = viewArea();
   return rig.frame(record.box, dir, margin, a.w / a.h);
 }
+/** The size that shows the whole glider from dir, for transitions to zoom out to. */
+const fitSize = (dir) => planFrame(dir, 1.25).size;
 function setQuad(on) {
   if (on === plan.quad) return;
   plan.quad = on;
   rig.controls.enableRotate = !on;
   rig.controls.zoomToCursor = !on;
+  plan.splitFrom = plan.split;
+  plan.splitStart = performance.now();
   if (on) {
     if (state.compare) setCompare(false);
-    // Each quarter frames the glider on its own; zooming scales them all alike.
+    // Each quarter frames the glider on its own; zooming scales them all alike. The top
+    // left quarter grows out of the current view while it turns to the top view.
     const fit = QUAD.map((d) => planFrame(d, 1.2));
     plan.fit = fit.map((f) => f.size);
-    rig.animateTo({ target: fit[0].target, dir: new THREE.Vector3(...PLAN.top), size: plan.fit[0] }, false);
+    rig.animateTo({ target: fit[0].target, dir: new THREE.Vector3(...PLAN.top), size: plan.fit[0] }, !reduced, fitSize);
+  } else {
+    // The top left quarter shows the top view; the single view grows back out of it.
+    rig.transition = null;
+    rig.setPose({ ...rig.pose(), dir: new THREE.Vector3(...PLAN.top) });
   }
+  if (reduced) plan.split = on ? 1 : 0;
   syncPlan();
+}
+/** Moves the split towards open or closed; true while it moves. */
+function stepSplit(now) {
+  const to = plan.quad ? 1 : 0;
+  if (plan.split === to) return false;
+  const k = Math.min((now - plan.splitStart) / SPLIT_TIME, 1), e = k * k * (3 - 2 * k);
+  plan.split = k === 1 ? to : plan.splitFrom + (to - plan.splitFrom) * e;
+  return true;
 }
 function syncPlan() {
   const on = rig?.projection === 'orthographic';
   if (!on && plan.quad) setQuad(false);
+  if (rig && on !== plan.flat) {
+    plan.flat = on;
+    applyPose(!reduced);
+    // In 2D a drag moves the drawing; right-drag still turns it.
+    const c = rig.controls;
+    c.mouseButtons = on ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+      : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    c.touches = on ? { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE } : { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+  }
   document.body.classList.toggle('plan', on);
   document.body.classList.toggle('quad', plan.quad);
   $('#viewbar').hidden = !on;
-  $('#quad').hidden = !plan.quad;
   const dir = rig?.pose().dir;
   const view = plan.quad ? 'quad' : on && dir ? Object.keys(PLAN).find((k) => dir.dot(new THREE.Vector3(...PLAN[k]).normalize()) > 0.9995) || null : null;
   if (view === plan.view) return;
@@ -495,7 +549,7 @@ function wirePlan() {
   rig.addEventListener('change', syncPlan);
   // In four views, a drag pans the quarter it starts in.
   canvas.addEventListener('pointerdown', (e) => {
-    const v = plan.quad && viewAt(e.clientX, e.clientY);
+    const v = plan.quad && plan.split === 1 && viewAt(e.clientX, e.clientY);
     if (v && v.index < 3) { rig.transition = null; rig.setPose({ ...rig.pose(), dir: new THREE.Vector3(...QUAD[v.index]).normalize() }); }
   }, true);
   syncPlan();
@@ -507,13 +561,18 @@ function viewArea() {
   if (!sheet) return { x: 0, y: 0, w, h };
   return small ? { x: 0, y: 0, w, h: h - sheet.offsetHeight } : { x: 0, y: 0, w: w - sheet.offsetWidth - 16, h };
 }
+/** The four quarters as { x, y, w, h } in CSS pixels from the top left, for a split of s. */
+function cells(s = plan.split) {
+  const a = viewArea(), cw = Math.round(a.w * (1 - s / 2)), ch = Math.round(a.h * (1 - s / 2));
+  return [[0, 0, cw, ch], [cw, 0, a.w - cw, ch], [0, ch, cw, a.h - ch], [cw, ch, a.w - cw, a.h - ch]]
+    .map(([x, y, w, h]) => ({ x: a.x + x, y: a.y + y, w, h }));
+}
 /** The camera under a screen point and the point in its view (-1..1). */
 function viewAt(x, y) {
   if (!plan.quad) return { camera: rig.camera, index: -1, ndc: new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1) };
-  const a = viewArea(), cw = a.w / 2, ch = a.h / 2;
-  const col = x - a.x < cw ? 0 : 1, row = y - a.y < ch ? 0 : 1, index = row * 2 + col;
-  const u = (x - a.x - col * cw) / cw, v = (y - a.y - row * ch) / ch;
-  return { camera: quadCams()[index], index, ndc: new THREE.Vector2(u * 2 - 1, -v * 2 + 1) };
+  const index = cells().findIndex((c) => x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h);
+  const c = cells()[Math.max(index, 0)];
+  return { camera: cellCam(Math.max(index, 0), c.w / c.h), index, ndc: new THREE.Vector2(((x - c.x) / c.w) * 2 - 1, -((y - c.y) / c.h) * 2 + 1) };
 }
 /** The camera distance that keeps a plan view clear of the scene around the glider. */
 const reachOf = () => (record ? record.box.getSize(new THREE.Vector3()).length() / 2 + 2 : 10);
@@ -521,43 +580,74 @@ function closeIn(cam) {
   const t = rig.controls.target, off = cam.position.clone().sub(t);
   if (off.lengthSq() > 0) cam.position.copy(t).addScaledVector(off.normalize(), reachOf());
 }
-function quadCams() {
+/**
+ * The studio grid stands up behind the glider in the views from the side, so Front, Left
+ * and Right get the same metre grid as Top. It is a copy of the floor grid, sharing its
+ * material, so it takes the colours of the studio background.
+ */
+function placeWallGrid(dir, flat) {
+  const floor = scenes.indoor.built?.studio?.grid;
+  const on = flat && floor && scenes.current === 'studio' && (floor.visible || scenes.backdrop === 'blueprint') && Math.abs(dir.y) < 0.7;
+  if (!on) { if (plan.wall) plan.wall.visible = false; return; }
+  if (!plan.wall) { plan.wall = floor.clone(); scene.add(plan.wall); }
+  const w = plan.wall, t = rig.controls.target, back = reachOf() - 1;
+  w.visible = true;
+  if (Math.abs(dir.x) > Math.abs(dir.z)) {
+    w.rotation.set(0, Math.PI / 2, 0);
+    w.position.set(t.x - Math.sign(dir.x) * back, 0, floor.position.z);
+  } else {
+    w.rotation.set(0, 0, 0);
+    w.position.set(floor.position.x, 0, t.z - Math.sign(dir.z) * back);
+  }
+  w.updateMatrixWorld();
+}
+/** The camera of quarter i (top, front, left, 3D) for a quarter of the given aspect. */
+function cellCam(i, aspect) {
   if (!plan.cams) plan.cams = [0, 1, 2].map(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 400)).concat(new THREE.PerspectiveCamera(38, 1, 0.01, 2000));
-  const { target, size } = rig.pose(), a = viewArea(), aspect = a.w / a.h, k = size / plan.fit[0];
-  const reach = reachOf();
-  plan.cams.forEach((cam, i) => {
-    const dir = new THREE.Vector3(...QUAD[i]).normalize();
-    if (cam.isOrthographicCamera) {
-      // Close in, so walls and roof of the hangar stay behind the camera.
-      cam.position.copy(target).addScaledVector(dir, reach);
-      const s = plan.fit[i] * k;
-      Object.assign(cam, { top: s / 2, bottom: -s / 2, left: -s * aspect / 2, right: s * aspect / 2 });
-    } else {
-      cam.aspect = aspect;
-      cam.position.copy(target).addScaledVector(dir, (plan.fit[i] * k) / (2 * Math.tan(THREE.MathUtils.degToRad(19))) + reach * 0.1);
-    }
-    cam.lookAt(target);
-    cam.updateProjectionMatrix();
-  });
-  return plan.cams;
+  const cam = plan.cams[i], { target, size } = rig.pose(), k = size / plan.fit[0], s = plan.fit[i] * k;
+  const dir = new THREE.Vector3(...QUAD[i]).normalize(), reach = reachOf();
+  if (cam.isOrthographicCamera) {
+    // Close in, so walls and roof of the hangar stay behind the camera.
+    cam.position.copy(target).addScaledVector(dir, reach);
+    Object.assign(cam, { top: s / 2, bottom: -s / 2, left: -s * aspect / 2, right: s * aspect / 2 });
+  } else {
+    cam.aspect = aspect;
+    cam.position.copy(target).addScaledVector(dir, s / (2 * Math.tan(THREE.MathUtils.degToRad(19))) + reach * 0.1);
+  }
+  cam.lookAt(target);
+  cam.updateProjectionMatrix();
+  return cam;
 }
 function renderQuad() {
-  const a = viewArea(), cams = quadCams(), cw = Math.floor(a.w / 2), ch = Math.floor(a.h / 2);
-  const key = `${a.x},${a.y},${a.w},${a.h}`;
-  if (key !== plan.area) {
-    plan.area = key;
-    Object.assign($('#quad').style, { left: `${a.x}px`, top: `${a.y}px`, width: `${a.w}px`, height: `${a.h}px` });
-  }
+  const list = cells(), split = plan.split, moving = split < 1;
+  const el = $('#quad'), a = viewArea();
+  el.hidden = false;
+  Object.assign(el.style, { left: `${a.x}px`, top: `${a.y}px`, width: `${a.w}px`, height: `${a.h}px`,
+    gridTemplateColumns: `${list[0].w}px 1fr`, gridTemplateRows: `${list[0].h}px 1fr`, opacity: split });
   renderer.setScissorTest(true);
-  cams.forEach((cam, i) => {
-    const x = a.x + (i % 2) * cw, y = innerHeight - a.y - a.h + (i < 2 ? a.h - ch : 0);
-    const w = i % 2 ? a.w - cw : cw, h = i < 2 ? ch : a.h - ch;
-    renderer.setViewport(x, y, w, h);
-    renderer.setScissor(x, y, w, h);
+  list.forEach((c, i) => {
+    if (c.w < 1 || c.h < 1) return;
+    const x = c.x, y = innerHeight - c.y - c.h;
+    renderer.setViewport(x, y, c.w, c.h);
+    renderer.setScissor(x, y, c.w, c.h);
+    let cam;
+    if (i === 0 && moving) {
+      for (const cam of [rig.perspective, rig.orthographic]) cam.clearViewOffset();
+      // While the split opens or closes, the top left quarter is the main view itself,
+      // so it hands over to the single view without a jump.
+      rig.setAspect(c.w / c.h);
+      rig.setPose(rig.pose());
+      cam = rig.camera;
+      placeWallGrid(rig.pose().dir, rig.projection === 'orthographic');
+    } else {
+      cam = cellCam(i, c.w / c.h);
+      placeWallGrid(new THREE.Vector3(...QUAD[i]), cam.isOrthographicCamera);
+    }
     renderer.render(scene, cam);
   });
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, innerWidth, innerHeight);
+  if (moving) { rig.setAspect(innerWidth / innerHeight); shiftView(); rig.setPose(rig.pose()); }
 }
 
 function focusPart(part) {
@@ -601,7 +691,7 @@ function clampCamera() {
 // Fly-around on request; a slow turn on its own after a while without input.
 let lastInput = performance.now();
 function userActive() { lastInput = performance.now(); if (!state.tour) rig.controls.autoRotate = false; }
-function startTour() { state.tour = true; rig.setProjection('perspective'); rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 1.6; syncPanel(); }
+function startTour() { state.tour = true; rig.setProjection('perspective', !reduced); rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 1.6; syncPanel(); }
 function stopTour() { state.tour = false; rig.controls.autoRotate = false; rig.controls.autoRotateSpeed = 0.35; syncPanel(); }
 
 // ------------------------------------------------------------------ render loop
@@ -615,12 +705,18 @@ function loop(now) {
   if (!THUMB && !state.tour && !rig.transition && now - lastInput > 30000 && rig.projection === 'perspective') { rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 0.35; }
   // Plan views may look from any side, even up from under the ground: the camera sits
   // just outside the glider, so floors, walls and the roof stay behind it.
-  const flat = rig.projection === 'orthographic';
-  if (flat) rig.controls.maxPolarAngle = Math.PI; else limitCamera();
+  // While the projection changes the camera is placed by the rig alone.
+  const flat = rig.projection === 'orthographic' && !rig.morph;
+  rig.orthoDistance = reachOf();
+  if (flat || rig.morph) rig.controls.maxPolarAngle = Math.PI; else limitCamera();
   rig.update(now, dt);
-  if (flat) closeIn(rig.camera); else clampCamera();
+  if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera();
+  stepSplit(now);
+  stepPoses(now);
   scenes.update(rig.camera, (now - clock0) / 1000);
-  if (plan.quad) renderQuad();
+  const split = plan.quad || plan.split > 0;
+  if (!split) { $('#quad').hidden = true; placeWallGrid(rig.pose().dir, rig.projection === 'orthographic'); }
+  if (split) renderQuad();
   else if (other && state.compare) {
     // Left of the divider the chosen build, right of it the other one.
     const w = renderer.domElement.width / renderer.getPixelRatio(), h = renderer.domElement.height / renderer.getPixelRatio();
