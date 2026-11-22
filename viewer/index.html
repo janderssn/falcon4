@@ -62,6 +62,7 @@
       <label class="slider"><span>Wind</span><input id="wind" type="range" min="0" max="2.5" step="0.05" value="1"></label>
     </section>
     <footer>
+      <button type="button" id="btn-order" class="wide">Review order and price</button>
       <button type="button" id="btn-share" class="wide">Copy link to this glider</button>
       <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
       <p class="note">Reconstructions from the owner's manual, factory drawings and photos; colours are for show. Some shapes and sizes are estimated. Don't use the model for maintenance.</p>
@@ -142,6 +143,7 @@
 <div id="quad" aria-hidden="true" hidden><span><b>Top</b></span><span><b>Front</b></span><span><b>Left</b></span><span><b>3D</b></span></div>
 <div id="swipe" class="hud" role="slider" tabindex="0" aria-label="Divider between the two builds" hidden><span class="swipe-tag left" id="swipe-a"></span><span class="swipe-grip" aria-hidden="true"></span><span class="swipe-tag right" id="swipe-b"></span></div>
 <div id="labels" aria-hidden="true"></div>
+<div id="order" role="dialog" aria-modal="true" aria-labelledby="order-title" hidden></div>
 <div id="toast" role="status"></div>
 <button type="button" id="btn-showhud">Show the controls</button>
 <script type="module" src="/main.js"></script>

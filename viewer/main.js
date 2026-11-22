@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
-import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
-import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost } from './lib/cloth.js';
+import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
+import { openOrder } from './lib/order.js';
+import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
 import { FilmBlur } from './lib/frost.js';
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -882,6 +883,58 @@ function renderFrost(camera) {
   frost.uFrostOn.value = 1;
 }
 
+// ------------------------------------------------------------------ order summary
+const orderOptions = new Set();   // options ticked in the order, kept while the page is open
+function showOrder() {
+  if (!record) return;
+  saveUrl();
+  // A picture of the glider as it is on screen.
+  if (frostActive) renderFrost(rig.camera);
+  renderer.render(scene, rig.camera);
+  const image = renderer.domElement.toDataURL('image/jpeg', 0.88);
+  const builtHex = (z) => document.querySelector(`.sw.original[data-zone="${z}"]`)?.style.getPropertyValue('--c') || '#ccc';
+  const panels = ['p1', 'p2', 'p3', 'p4', 'p5'].filter((z) => record.tints[z]?.meshes.length).map((z) => {
+    const id = state.colours[z];
+    const f = id && fabricsFor(z).find((c) => c[0] === id);
+    return { zone: z, name: ZONES[z].name, asBuilt: builtHex(z), fabric: f ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
+  });
+  const fill = (p) => (p.fabric ? p.fabric.hex : p.asBuilt);
+  const by = Object.fromEntries(panels.map((p) => [p.zone, p]));
+  const extras = [];
+  if (state.colours.pockets) extras.push({ name: 'Batten pockets', value: fabricOf('pockets', state.colours.pockets)?.name });
+  if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
+  openOrder({
+    title: 'Wills Wing Falcon 4 170',
+    subtitle: `${record.source.label} build · ${state.profile === 'calibrated' ? 'calibrated colours' : 'Wills Wing picker colours'}`,
+    image, diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
+  }, orderOptions);
+}
+
+/**
+ * The sail from above and below as a flat plan, each panel in its colour: P1 along the leading
+ * edge, then P2, P3 and P4 back to the trailing edge; P5 under the front of the wing.
+ */
+function planSvg(panel) {
+  const W = 220, nose = [W / 2, 8], tip = [6, 74], root = [W / 2, 58], tipTe = [12, 84];
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const at = (s, f) => lerp(lerp(nose, tip, s), lerp(root, tipTe, s), f);   // s: root to tip, f: LE to TE
+  const band = (f0, f1) => {
+    const pts = [];
+    for (let i = 0; i <= 8; i++) pts.push(at(i / 8, f0));
+    for (let i = 8; i >= 0; i--) pts.push(at(i / 8, f1));
+    return [pts.map((p) => p.join(',')).join(' '), pts.map(([x, y]) => `${W - x},${y}`).join(' ')];
+  };
+  const draw = (z, f0, f1) => {
+    const p = panel(z);
+    if (!p) return '';
+    return band(f0, f1).map((pts) => `<polygon points="${pts}" fill="${p.fill}" fill-opacity="${p.opacity < 1 ? 0.35 + p.opacity * 0.5 : 1}"/>`).join('');
+  };
+  const top = draw('p1', 0, 0.2) + draw('p2', 0.2, 0.42) + draw('p3', 0.42, 0.78) + draw('p4', 0.78, 1);
+  const under = draw('p5', 0, 0.45) + `<g opacity=".35">${draw('p3', 0.45, 0.78)}${draw('p4', 0.78, 1)}</g>`;
+  const svg = (inner, label) => `<figure><svg viewBox="0 0 ${W} 92" role="img" aria-label="${label}"><g stroke="rgba(255,255,255,.55)" stroke-width=".6">${inner}</g></svg><figcaption>${label}</figcaption></figure>`;
+  return svg(top, 'Top') + svg(under, 'Bottom');
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   rig.setAspect(innerWidth / innerHeight);
@@ -1027,10 +1080,25 @@ function updateLabels() {
 
 // ------------------------------------------------------------------ customize and settings panels
 const thumb = (name) => `url('./thumbs/${name}.jpg')`;
+// A swatch shows what it is without hovering: plain colours as dots, the heavier woven cloths
+// with their ripstop, laminates with their scrim (dark in the "B" cloths); a "$" marks a cloth
+// that costs extra, and a light ring keeps dark swatches visible on the dark panel.
+const luma = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
+function swatch(zone, [id, name, hex, opacity]) {
+  const kind = clothKind(id);
+  const sail = SAIL_ZONES.includes(zone) && zone !== 'pockets';
+  const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
+    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark', sail && isUpgrade(id) && 'extra'].filter(Boolean).join(' ');
+  const label = sail && isUpgrade(id) ? `${name} (extra cost)` : name;
+  return `<button type="button" class="${cls}" data-zone="${zone}" data-colour="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`;
+}
 function swatches(zone) {
+  const all = fabricsFor(zone);
+  const colours = all.filter((f) => clothKind(f[0]) === 0), cloths = all.filter((f) => clothKind(f[0]) > 0);
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
-    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`).join('')}
+    ${colours.map((f) => swatch(zone, f)).join('')}
+    ${cloths.length ? `<span class="sw-group">Cloth</span>${cloths.map((f) => swatch(zone, f)).join('')}` : ''}
   </div>`;
 }
 function buildPanel() {
@@ -1039,7 +1107,7 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name"><span>${ZONES[z].name}${ORDER.colouredPanel.zones.includes(z) ? `<em class="cost" data-cost="${z}" hidden>+$${ORDER.colouredPanel.price}</em>` : ''}</span><small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
   $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame')}</div>`;
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
@@ -1064,6 +1132,21 @@ function placeBars() {
     el.style.left = `${Math.max(w / 2 + gap, Math.min(W / 2, edge - gap - w / 2))}px`;
   }
 }
+/** The chosen fabric's name in each row header (or the one under the pointer), and cost tags. */
+function syncNames(hover = null) {
+  for (const el of document.querySelectorAll('[data-name]')) {
+    const z = el.dataset.name;
+    if (hover && hover.dataset.zone === z) { el.textContent = hover.title; el.classList.add('peek'); continue; }
+    const id = state.colours[z];
+    el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
+    el.classList.remove('peek');
+  }
+  for (const el of document.querySelectorAll('[data-cost]')) {
+    const id = state.colours[el.dataset.cost];
+    el.hidden = !id || id === ORDER.colouredPanel.standard;
+  }
+}
+
 function syncPanel() {
   document.body.classList.toggle('panel-open', Boolean(state.panel));
   placeBars();
@@ -1086,10 +1169,7 @@ function syncPanel() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
-  for (const el of document.querySelectorAll('[data-name]')) {
-    const z = el.dataset.name, id = state.colours[z];
-    el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
-  }
+  syncNames();
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
@@ -1228,6 +1308,11 @@ function wireUi() {
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
+  $('#custom').addEventListener('pointerover', (e) => { const b = e.target.closest('.sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('pointerout', (e) => { if (e.target.closest('.sw')) syncNames(); });
+  $('#custom').addEventListener('focusin', (e) => { const b = e.target.closest('.sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('focusout', (e) => { if (e.target.closest('.sw')) syncNames(); });
+  $('#btn-order').onclick = showOrder;
   $('#btn-share').onclick = async () => {
     saveUrl();
     try { await navigator.clipboard.writeText(location.href); toast('Link copied: it opens this glider just like this'); }

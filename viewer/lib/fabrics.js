@@ -109,3 +109,29 @@ export const CALIBRATED = {
   'red-3125': '#e53f30',
   'white-170': '#eeeee9',
 };
+
+// What a Falcon 4 order costs on top of the glider, from the Wills Wing Falcon 4 page
+// (willswing.com/hang-gliders/falcon-4/, options table and text, read 2026-11-22). Prices in
+// USD where the page gives one; null: quoted by the dealer. "See Notes" in the colour picker
+// data is left out (custom requests go through a dealer), as are the Monarch pattern and
+// custom sail patterns.
+export const ORDER = {
+  // Colour choice is free on P1, P4 and P5; a coloured P2 or P3 costs extra (white is standard).
+  colouredPanel: { part: '01A-A6', price: 75, zones: ['p2', 'p3'], standard: 'white-170' },
+  // Heavier woven cloth or laminate instead of V170, per panel (price on request).
+  upgrades: {
+    mt205: { p1: '01A-A2', p4: '01A-A31' },
+    heavy: { p1: '01A-A29', p4: '01A-A321' },      // UVPX or 240MT
+    uvpx: { p3: '01A-A37', p4: '01A-A37', p1: '01A-A53', p2: '01A-A53' },
+  },
+  options: [
+    { id: 'litestream', name: 'Litestream control bar', note: 'Streamlined or round speedbar basetube', part: '01A-B6', price: 300 },
+    { id: 'carbon', name: 'Carbon speedbar', note: 'For the Litestream bar', part: '01A-B3', price: null },
+    { id: 'wheels', name: 'Control bar wheel kit', note: 'Slipstream / Litestream bar', part: '70M-1240', price: null },
+    { id: 'shortpack', name: 'Short-pack airframe', note: 'Breaks down to 6½ ft (170)', part: '01A-B9', price: 250 },
+    { id: 'container', name: 'Deluxe transport / storage container', note: 'Foam liner in a ballistic-cloth bag', part: '45G-1310', price: null },
+  ],
+};
+
+/** Woven heavier cloth or laminate: an upgrade over V170 with its own (quoted) charge. */
+export const isUpgrade = (id) => /mt$/.test(id || '') || /^uv/.test(id || '');
