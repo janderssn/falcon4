@@ -63,7 +63,7 @@ const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } 
   colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
   seeThrough: 0.1,
   pose: 'tail',
-  cam: '-0.279,1.089,-2.549,-0.3601,0.1682,0.9176,3.276,p',
+  cam: '-0.279,0.824,-2.549,-0.3601,0.1682,0.9176,3.276,p',
 };
 const pick = (key, list) => {
   const v = params.get(key);
@@ -318,11 +318,7 @@ function restingPose(rec) {
 function applyPose() {
   if (record) poseOf(record);
   if (other) {
-    poseOf(other);
-    // The second build stands on the same floor as the first.
-    other.root.position.y += record.ground - other.ground;
-    other.root.updateMatrixWorld(true);
-    other.box.setFromObject(other.root, true);
+    poseOf(other);                                   // on the same floor (y = 0) as the first
   }
   anchors.clear();
 }
@@ -332,11 +328,13 @@ function poseOf(rec) {
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
   rec.root.quaternion.copy(q);
   rec.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
+  // The ground is where the basebar touches it, in every pose, and it is at y = 0 for
+  // every build: the builds' own origins differ, so without this they jump when switching.
+  rec.root.position.y -= pivot.y;
   rec.root.updateMatrixWorld(true);
   // Exact bounds: the quick box of rotated parts reaches below the glider.
   rec.box.setFromObject(rec.root, true);
-  // The ground is where the basebar touches it, in every pose.
-  rec.ground = pivot.y;
+  rec.ground = 0;
 }
 
 // ------------------------------------------------------------------ compare
