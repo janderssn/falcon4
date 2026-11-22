@@ -224,7 +224,7 @@ function prepareTints(rec) {
     const cloth = SAIL_ZONES.includes(zone);
     if (cloth) {
       const M = mesh.userData.materials;
-      for (const key of Object.keys(M)) { const old = M[key]; M[key] = toCloth(old, mesh.geometry); old.dispose(); }
+      for (const key of Object.keys(M)) { const old = M[key]; M[key] = toCloth(old, mesh); old.dispose(); }
       mesh.material = M.base;
       mesh.receiveShadow = true;   // frame and batten shadows on the cloth (and through it, backlit)
     }

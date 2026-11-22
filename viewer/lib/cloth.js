@@ -82,23 +82,69 @@ export function setCloth(uniforms, materials, id, opacity = 1) {
 }
 
 /**
- * A MeshPhysicalMaterial copy of a sail material. The detail is projected onto the
- * plane across the mesh's average normal, so a grid keeps its size over the panel.
+ * A MeshPhysicalMaterial copy of a sail material. Its mesh gets cloth coordinates in metres
+ * (clothUv, once per geometry) for the fibres and ripstop to follow.
  */
-export function toCloth(m, geometry) {
+export function toCloth(m, mesh) {
   const c = new THREE.MeshPhysicalMaterial();
   for (const key of ['name', 'map', 'color', 'emissive', 'emissiveIntensity', 'side', 'alphaTest', 'transparent', 'opacity', 'depthWrite', 'metalness', 'roughness']) {
     if (m[key] === undefined) continue;
     if (m[key]?.isColor) c[key].copy(m[key]); else c[key] = m[key];
   }
   c.userData = { ...m.userData };
-  const n = averageNormal(geometry);
-  const u = new THREE.Vector3(1, 0, 0);
-  if (Math.abs(n.dot(u)) > 0.9) u.set(0, 0, 1);
-  u.sub(n.clone().multiplyScalar(u.dot(n))).normalize();
-  const v = new THREE.Vector3().crossVectors(n, u);
-  c.userData.clothAxes = { u, v };
+  addClothUv(mesh);
   return c;
+}
+
+/**
+ * Cloth coordinates in metres. From the mesh's UVs where it has them: the sail's are its
+ * panels laid flat, so the pattern follows the cloth, also where it wraps round the
+ * leading edge. Each axis is scaled by the panel's average metres per UV unit. Without
+ * UVs, a projection onto the plane across the panel (fine for flat panels only).
+ */
+function addClothUv(mesh) {
+  const g = mesh.geometry;
+  if (g.attributes.clothUv) return;
+  const pos = g.attributes.position, uv = g.attributes.uv;
+  const scale = mesh.getWorldScale(new THREE.Vector3());
+  const k = (scale.x + scale.y + scale.z) / 3;   // the model is scaled evenly
+  const out = new Float32Array(pos.count * 2);
+  const s = uv && metresPerUv(g);
+  if (s) {
+    for (let i = 0; i < pos.count; i++) { out[2 * i] = uv.getX(i) * s.u * k; out[2 * i + 1] = uv.getY(i) * s.v * k; }
+  } else {
+    const n = averageNormal(g);
+    const u = new THREE.Vector3(1, 0, 0);
+    if (Math.abs(n.dot(u)) > 0.9) u.set(0, 0, 1);
+    u.sub(n.clone().multiplyScalar(u.dot(n))).normalize();
+    const v = new THREE.Vector3().crossVectors(n, u), p = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) { p.fromBufferAttribute(pos, i); out[2 * i] = p.dot(u) * k; out[2 * i + 1] = p.dot(v) * k; }
+  }
+  g.setAttribute('clothUv', new THREE.BufferAttribute(out, 2));
+}
+
+/** Average length (model units) of one UV unit along u and along v, weighted by area. */
+function metresPerUv(g) {
+  const pos = g.attributes.position, uv = g.attributes.uv, idx = g.index;
+  const n = idx ? idx.count : pos.count;
+  const at = (i) => (idx ? idx.getX(i) : i);
+  const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), p2 = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), t = new THREE.Vector3(), b = new THREE.Vector3(), x = new THREE.Vector3();
+  let su = 0, sv = 0, w = 0;
+  for (let i = 0; i + 2 < n; i += 3) {
+    const a = at(i), c = at(i + 1), d = at(i + 2);
+    p0.fromBufferAttribute(pos, a); p1.fromBufferAttribute(pos, c); p2.fromBufferAttribute(pos, d);
+    e1.subVectors(p1, p0); e2.subVectors(p2, p0);
+    const du1 = uv.getX(c) - uv.getX(a), dv1 = uv.getY(c) - uv.getY(a);
+    const du2 = uv.getX(d) - uv.getX(a), dv2 = uv.getY(d) - uv.getY(a);
+    const r = du1 * dv2 - du2 * dv1;
+    if (Math.abs(r) < 1e-12) continue;
+    t.copy(e1).multiplyScalar(dv2).addScaledVector(e2, -dv1).divideScalar(r);   // d position / d u
+    b.copy(e2).multiplyScalar(du1).addScaledVector(e1, -du2).divideScalar(r);   // d position / d v
+    const area = x.crossVectors(e1, e2).length();
+    su += t.length() * area; sv += b.length() * area; w += area;
+  }
+  return w > 0 ? { u: su / w, v: sv / w } : null;
 }
 
 // Panels are double sided and curve through less than a half turn: turned to face up,
@@ -120,11 +166,10 @@ function averageNormal(geometry) {
  * see-through material).
  */
 export function patchCloth(shader, uniforms, material, canFrost = false) {
-  const { u, v } = material.userData.clothAxes;
-  Object.assign(shader.uniforms, uniforms, { uClothU: { value: u }, uClothV: { value: v } }, canFrost ? frost : {});
+  Object.assign(shader.uniforms, uniforms, canFrost ? frost : {});
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nuniform vec3 uClothU; uniform vec3 uClothV; varying vec2 vClothUv;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvClothUv = vec2(dot(position, uClothU), dot(position, uClothV));');
+    .replace('#include <common>', '#include <common>\nattribute vec2 clothUv; varying vec2 vClothUv;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvClothUv = clothUv;');
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', `#include <common>
       uniform float uCloth; uniform vec3 uFibre; uniform float uFilm; varying vec2 vClothUv;
