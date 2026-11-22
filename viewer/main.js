@@ -457,9 +457,12 @@ function planView(name) {
   rig.animateTo(planFrame(PLAN[name]), !reduced);
   userActive();
 }
-/** Pose that frames the glider from `dir` in the part of the screen the panel leaves free. */
-function planFrame(dir, margin = 1.15) {
-  const a = viewArea();
+/**
+ * Pose that frames the glider from `dir`: on the whole screen (the panels draw over the
+ * scene and don't move it), or in a quarter of the free area in four views.
+ */
+function planFrame(dir, margin = 1.15, quad = false) {
+  const a = quad ? viewArea() : { w: innerWidth, h: innerHeight };
   return rig.frame(record.box, dir, margin, a.w / a.h);
 }
 function setQuad(on) {
@@ -470,7 +473,7 @@ function setQuad(on) {
   if (on) {
     if (state.compare) setCompare(false);
     // Each quarter frames the glider on its own; zooming scales them all alike.
-    const fit = QUAD.map((d) => planFrame(d, 1.2));
+    const fit = QUAD.map((d) => planFrame(d, 1.2, true));
     plan.fit = fit.map((f) => f.size);
     rig.animateTo({ target: fit[0].target, dir: new THREE.Vector3(...PLAN.top), size: plan.fit[0] }, false);
   }
@@ -640,20 +643,7 @@ function loop(now) {
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   rig.setAspect(innerWidth / innerHeight);
-  shiftView();
 }
-/** Centre the glider in the part of the screen the panel leaves free. */
-function shiftView() {
-  const w = innerWidth, h = innerHeight;
-  const sheet = state.panel && $(`#${state.panel}`);
-  const dx = sheet && !small ? (sheet.offsetWidth + 16) / 2 : 0;
-  const dy = sheet && small ? sheet.offsetHeight / 2 : 0;
-  for (const cam of [rig.perspective, rig.orthographic]) {
-    if (dx || dy) cam.setViewOffset(w, h, dx, dy, w, h); else cam.clearViewOffset();
-    cam.updateProjectionMatrix();
-  }
-}
-
 // ------------------------------------------------------------------ clicking a part
 const raycaster = new THREE.Raycaster();
 function pickPart(e) {
@@ -784,7 +774,6 @@ function syncPanel() {
     $(`#${id}`).hidden = state.panel !== id;
     $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
   }
-  if (rig) shiftView();
   for (const b of document.querySelectorAll('.build')) b.classList.toggle('on', b.dataset.model === state.model);
   for (const b of document.querySelectorAll('.sw')) {
     const on = (state.colours[b.dataset.zone] || '') === b.dataset.colour;
