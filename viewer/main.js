@@ -4,6 +4,8 @@ import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/c
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
 import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
+import { Post } from './lib/post.js';
+import { clothKind, clothUniforms, setClothKind, toCloth, patchCloth } from './lib/cloth.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -101,11 +103,12 @@ const state = {
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
+  fx: params.has('fx') ? params.get('fx') === '1' : !small,   // settings: studio effects (post-processing)
   wind: 1, sel: null, tour: false,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
   panel: null,                                     // the open side panel: 'custom', 'settings' or none
 };
-let catalog, record, renderer, rig, scenes;
+let catalog, record, renderer, rig, scenes, post;
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
 const canvas = $('#scene');
@@ -117,6 +120,7 @@ async function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   rig = new CameraRig(canvas);
+  if (!THUMB) post = new Post(renderer, scene, rig.camera);
   rig.controls.maxDistance = 40;
   rig.controls.addEventListener('start', userActive);
   rig.addEventListener('change', saveUrlSoon);
@@ -209,19 +213,30 @@ async function setModel(id, first = false) {
 function prepareTints(rec) {
   if (rec.tints) return;
   rec.tints = {};
-  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [] };
+  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), kind: -1 };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
     if (!zone) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
+    // Sail cloth becomes a physical material whose look follows the cloth type (lib/cloth.js).
+    const cloth = SAIL_ZONES.includes(zone);
+    if (cloth) {
+      const M = mesh.userData.materials;
+      for (const key of Object.keys(M)) { const old = M[key]; M[key] = toCloth(old, mesh.geometry); old.dispose(); }
+      mesh.material = M.base;
+      mesh.receiveShadow = true;   // frame and batten shadows on the cloth (and through it, backlit)
+    }
     for (const m of Object.values(mesh.userData.materials)) {
       m.userData.original = m.color.clone();
       m.userData.originalRough = m.roughness;
-      if (!m.map) continue;
+      if (!m.map && !cloth) continue;
       const baked = /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
+      const tinted = Boolean(m.map);
       m.onBeforeCompile = (s) => {
+        if (cloth) patchCloth(s, t.cloth, m);
+        if (!tinted) return;
         s.uniforms.uTint = t.uTint; s.uniforms.uTintOn = t.uTintOn; s.uniforms.uBaked = { value: new THREE.Color(...baked) };
         s.fragmentShader = s.fragmentShader
           .replace('#include <common>', '#include <common>\nuniform vec3 uTint; uniform float uTintOn; uniform vec3 uBaked;')
@@ -231,7 +246,7 @@ function prepareTints(rec) {
               diffuseColor.rgb = uTint * clamp(dot(diffuseColor.rgb, W) / max(dot(uBaked, W), 0.02), 0.0, 1.5);
             }`);
       };
-      m.customProgramCacheKey = () => 'tint';
+      m.customProgramCacheKey = () => (cloth ? 'cloth' : '') + (tinted ? 'tint' : '');
       m.needsUpdate = true;
     }
   }
@@ -253,6 +268,11 @@ function lookOf(rec, side) {
     const colour = fabric?.colour;
     if (fabric && fabric.opacity < 1) clear[zone] = fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
+    const kind = SAIL_ZONES.includes(zone) ? clothKind(state.colours[zone]) : -1;
+    if (kind !== t.kind) {
+      t.kind = kind;
+      if (kind >= 0) setClothKind(t.cloth, t.meshes.flatMap((mesh) => Object.values(mesh.userData.materials)), kind);
+    }
     if (colour) t.uTint.value.copy(colour);
     for (const mesh of t.meshes) {
       mesh.userData.zone = zone;
@@ -818,11 +838,13 @@ function loop(now) {
     renderer.render(scene, rig.camera);
     renderer.setScissorTest(false);
     record.root.visible = true; other.root.visible = true;
-  } else renderer.render(scene, rig.camera);
+  } else if (post && state.fx) post.render(rig.camera, { ao: !rig.morph });
+  else renderer.render(scene, rig.camera);
   updateLabels();
 }
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
+  post?.setSize(innerWidth, innerHeight, renderer.getPixelRatio());
   rig.setAspect(innerWidth / innerHeight);
 }
 // ------------------------------------------------------------------ clicking a part
@@ -1053,6 +1075,7 @@ function syncPanel() {
   $('#backdrop-hint').hidden = state.scene === 'studio';
   document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
   $('#opt-shadows').checked = state.shadows;
+  $('#opt-fx').checked = state.fx;
   $('#opt-spot').checked = state.spot;
   $('#opt-spot').disabled = state.scene !== 'studio';
   $('#spot-hint').textContent = state.scene === 'studio' ? 'Soft light under the glider' : 'In the studio';
@@ -1155,6 +1178,7 @@ function wireUi() {
   });
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
+  $('#opt-fx').addEventListener('change', (e) => { state.fx = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
@@ -1238,6 +1262,7 @@ function saveUrl() {
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
   if (state.profile === 'calibrated') q.set('colors', 'cal');
+  if (state.fx !== !small) q.set('fx', state.fx ? '1' : '0');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');

@@ -2,6 +2,7 @@
 // The studio and the hangar are generated in code, like the meadow.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Meadow } from './meadow.js';
 
 /** Backgrounds for the studio, chosen in Settings. */
@@ -207,9 +208,18 @@ const BUILDERS = { studio: buildStudio, hangar: buildHangar };
 function buildStudio(envs) {
   const group = new THREE.Group();
   envs.root.add(group);
+  // Reflections and fill light from a real photo studio: Poly Haven "Studio Small 09" by
+  // Sergej Majboroda (CC0), env/studio_small_09_1k.hdr. Three's room stands in while it loads.
   const room = new RoomEnvironment();
   const envMap = envs.pmrem.fromScene(room, 0.04).texture;
   room.dispose();
+  new HDRLoader().loadAsync('./env/studio_small_09_1k.hdr').then((hdr) => {
+    hdr.mapping = THREE.EquirectangularReflectionMapping;
+    const studio = envs.built.studio;
+    studio.envMap = envs.pmrem.fromEquirectangular(hdr).texture;
+    hdr.dispose();
+    if (envs.current === 'studio') envs.set('studio', envs.sun.castShadow);
+  }, (e) => console.warn('Studio HDRI unavailable; using the room light.', e));
   const catcher = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.28 }));
   catcher.rotation.x = -Math.PI / 2;
   catcher.receiveShadow = true;
