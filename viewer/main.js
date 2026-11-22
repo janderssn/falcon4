@@ -838,7 +838,8 @@ function loop(now) {
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
   const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
-  if (fb !== frostActive) { frostActive = fb; frost.uFrostOn.value = fb ? 1 : 0; applyLook(); }
+  if (fb !== frostActive) { frostActive = fb; applyLook(); }
+  frost.uFrostOn.value = 0;   // on only for a frame whose blurred picture is fresh (renderFrost)
   if (!split) { $('#quad').hidden = true; placeWallGrid(rig.pose().dir, rig.projection === 'orthographic'); }
   if (split) renderQuad();
   else if (other && state.compare) {
@@ -871,13 +872,14 @@ function renderFrost(camera) {
     if (o.userData.frost) films.push(o);
     else if (m && !Array.isArray(m) && (m.transparent || m.colorWrite === false)) hide.push(o);
   });
-  if (!films.length) return;   // no laminate in sight
+  if (!films.length) return;   // no laminate in sight: nothing reads the picture
   // Sail panels hold the blurred texture: unbound while drawing (a feedback loop makes
   // WebGL skip those draws).
   frost.uFrostColor.value = null;
   const size = filmBlur.render(renderer, scene, camera, films, hide);
   frost.uFrostColor.value = filmBlur.texture;
   frost.uFrostSize.value.copy(size);
+  frost.uFrostOn.value = 1;
 }
 
 function resize() {

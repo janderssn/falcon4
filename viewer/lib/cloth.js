@@ -70,7 +70,8 @@ export function setCloth(uniforms, materials, id, opacity = 1) {
   const kind = clothKind(id);
   const look = LOOK[kind];
   uniforms.uCloth.value = kind;
-  uniforms.uFilm.value = kind >= CLOTH.laminate ? filmAlpha(opacity) : 1;
+  // Opaque films (UVP2LX-White) let nothing through; only the clear ones show what is behind.
+  uniforms.uFilm.value = kind >= CLOTH.laminate && opacity < 1 ? filmAlpha(opacity) : 1;
   uniforms.uFibre.value.set(darkFibres(id) ? 0x101112 : 0xe9e9e4);
   for (const m of materials) {
     m.roughness = look.roughness;
