@@ -78,12 +78,16 @@ const state = {
   seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
   wires: params.get('wires') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  compare: params.get('compare') === '1',
+  split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
+  selSide: 'A',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
   wind: 1, shadows: true, sel: null, tour: false,
   panel: !small && !THUMB,
 };
 let catalog, record, renderer, rig, scenes;
+let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
 const canvas = $('#scene');
 
@@ -143,6 +147,7 @@ async function setModel(id, first = false) {
   }
   if (state.model !== id) return;
   if (record && record !== rec) record.root.removeFromParent();
+  if (other) { other.root.removeFromParent(); other = null; }   // the other build changes too
   record = rec;
   prepareTints(record);
   scene.add(record.root);
@@ -162,6 +167,7 @@ async function setModel(id, first = false) {
     lastInput = performance.now();            // the slow idle turn counts from when the glider appears
     if (THUMB) runThumb();
   } else toast(`${source.title} · ${source.description}`);
+  if (state.compare) setCompare(true); else syncCompare();
   syncPanel();
   trimCache([id]);
   saveUrlSoon();
@@ -210,9 +216,12 @@ function fabricOf(zone, id) {
 }
 
 function applyLook() {
-  if (!record) return;
+  if (record) lookOf(record, 'A');
+  if (other) lookOf(other, 'B');
+}
+function lookOf(rec, side) {
   const clear = {};
-  for (const [zone, t] of Object.entries(record.tints)) {
+  for (const [zone, t] of Object.entries(rec.tints)) {
     const fabric = fabricOf(zone, state.colours[zone]);
     const colour = fabric?.colour;
     if (fabric && fabric.opacity < 1) clear[zone] = fabric.opacity;
@@ -228,9 +237,9 @@ function applyLook() {
     }
   }
   // Sail see-through and wires.
-  for (const mesh of record.meshes) {
+  for (const mesh of rec.meshes) {
     const part = mesh.userData.part, M = mesh.userData.materials;
-    const selected = part.name === state.sel;
+    const selected = part.name === state.sel && state.selSide === side;
     let mat = selected ? M.selected : M.base;
     let visible = true;
     if (part.group === '04' || part.group === '05') visible = state.wires;
@@ -307,18 +316,84 @@ function restingPose(rec) {
   };
 }
 function applyPose() {
-  if (!record) return;
-  if (!record.rest) record.rest = restingPose(record);
-  const { pivot, angle } = record.rest[state.pose] || { pivot: record.rest.nose.pivot, angle: 0 };   // standing: no tilt
-  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
-  record.root.quaternion.copy(q);
-  record.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
-  record.root.updateMatrixWorld(true);
-  // Exact bounds: the quick box of rotated parts reaches below the glider.
-  record.box.setFromObject(record.root, true);
-  // The ground is where the basebar touches it, in every pose.
-  record.ground = pivot.y;
+  if (record) poseOf(record);
+  if (other) {
+    poseOf(other);
+    // The second build stands on the same floor as the first.
+    other.root.position.y += record.ground - other.ground;
+    other.root.updateMatrixWorld(true);
+    other.box.setFromObject(other.root, true);
+  }
   anchors.clear();
+}
+function poseOf(rec) {
+  if (!rec.rest) rec.rest = restingPose(rec);
+  const { pivot, angle } = rec.rest[state.pose] || { pivot: rec.rest.nose.pivot, angle: 0 };   // standing: no tilt
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
+  rec.root.quaternion.copy(q);
+  rec.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
+  rec.root.updateMatrixWorld(true);
+  // Exact bounds: the quick box of rotated parts reaches below the glider.
+  rec.box.setFromObject(rec.root, true);
+  // The ground is where the basebar touches it, in every pose.
+  rec.ground = pivot.y;
+}
+
+// ------------------------------------------------------------------ compare
+/** The build that is not the current one. */
+const otherId = () => catalog.models.map((m) => m.id).find((id) => id !== state.model);
+async function setCompare(on) {
+  state.compare = on && Boolean(otherId());
+  if (!state.compare) {
+    other?.root.removeFromParent();
+    other = null;
+    if (state.selSide === 'B') { state.sel = null; state.selSide = 'A'; renderChip(); }
+    syncCompare();
+    saveUrlSoon();
+    return;
+  }
+  const id = otherId();
+  syncCompare();
+  if (other?.source.id === id) return;
+  const source = catalog.sources.get(id);
+  toast(`Loading the ${source.label} build to compare…`, true);
+  let rec;
+  try { rec = await loadModel(source, (f) => { if (f != null && f < 1) toast(`Loading the ${source.label} build · ${Math.round(f * 100)} %`, true); }); }
+  catch (e) { console.error(e); toast(`The ${source.label} build didn’t load`); state.compare = false; syncCompare(); return; }
+  if (!state.compare || otherId() !== id) return;
+  other?.root.removeFromParent();
+  other = rec;
+  prepareTints(other);
+  scene.add(other.root);
+  applyPose();
+  applyLook();
+  syncCompare();
+  toast(`Drag the divider to compare ${catalog.sources.get(state.model).label} and ${source.label}`);
+  saveUrlSoon();
+}
+function syncCompare() {
+  const on = state.compare && Boolean(other);
+  document.body.classList.toggle('comparing', on);
+  $('#btn-compare').classList.toggle('on', state.compare);
+  $('#btn-compare').setAttribute('aria-pressed', String(state.compare));
+  $('#swipe').hidden = !on;
+  if (on) {
+    $('#swipe').style.left = `${state.split * 100}%`;
+    $('#swipe-a').textContent = catalog.sources.get(state.model).label;
+    $('#swipe-b').textContent = catalog.sources.get(otherId()).label;
+  }
+}
+function wireSwipe() {
+  const el = $('#swipe');
+  let drag = false;
+  const move = (x) => { state.split = Math.min(0.95, Math.max(0.05, x / innerWidth)); el.style.left = `${state.split * 100}%`; saveUrlSoon(); };
+  el.addEventListener('pointerdown', (e) => { drag = true; el.setPointerCapture(e.pointerId); e.preventDefault(); });
+  el.addEventListener('pointermove', (e) => { if (drag) move(e.clientX); });
+  el.addEventListener('pointerup', () => { drag = false; });
+  el.addEventListener('keydown', (e) => {
+    const step = e.key === 'ArrowLeft' ? -0.02 : e.key === 'ArrowRight' ? 0.02 : 0;
+    if (step) { e.preventDefault(); move((state.split + step) * innerWidth); }
+  });
 }
 function setPose(pose) {
   state.pose = pose;
@@ -402,7 +477,20 @@ function loop(now) {
   rig.update(now, dt);
   clampCamera();
   scenes.update(rig.camera, (now - clock0) / 1000);
-  renderer.render(scene, rig.camera);
+  if (other && state.compare) {
+    // Left of the divider the chosen build, right of it the other one.
+    const w = renderer.domElement.width / renderer.getPixelRatio(), h = renderer.domElement.height / renderer.getPixelRatio();
+    const x = Math.round(state.split * w);
+    renderer.setScissorTest(true);
+    record.root.visible = true; other.root.visible = false;
+    renderer.setScissor(0, 0, x, h);
+    renderer.render(scene, rig.camera);
+    record.root.visible = false; other.root.visible = true;
+    renderer.setScissor(x, 0, w - x, h);
+    renderer.render(scene, rig.camera);
+    renderer.setScissorTest(false);
+    record.root.visible = true; other.root.visible = true;
+  } else renderer.render(scene, rig.camera);
   updateLabels();
 }
 function resize() {
@@ -426,11 +514,16 @@ const raycaster = new THREE.Raycaster();
 function pickPart(e) {
   const r = canvas.getBoundingClientRect();
   raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), rig.camera);
-  const meshes = record.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
-  return raycaster.intersectObjects(meshes, false)[0]?.object.userData.part || null;
+  const side = other && state.compare && e.clientX > state.split * innerWidth ? 'B' : 'A';
+  const rec = side === 'B' ? other : record;
+  const meshes = rec.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
+  const part = raycaster.intersectObjects(meshes, false)[0]?.object.userData.part || null;
+  if (part) part.side = side;
+  return part;
 }
 function select(part) {
   state.sel = part ? part.name : null;
+  state.selSide = part?.side || 'A';
   applyLook();
   renderChip();
 }
@@ -441,14 +534,15 @@ function firstSentence(text) {
   const s = cut > 0 ? text.slice(0, cut) : text;
   return s.length > 150 ? `${s.slice(0, 147)}…` : s;
 }
+const selRec = () => (state.selSide === 'B' && other ? other : record);
 function renderChip() {
   const chip = $('#chip');
-  const part = state.sel && record?.parts.get(state.sel);
+  const part = state.sel && selRec()?.parts.get(state.sel);
   if (!part) { chip.hidden = true; return; }
   const concept = CONCEPTS.find((c) => c.re.test(part.name));
   chip.hidden = false;
   chip.innerHTML = `<div class="chip-text"><b>${esc(concept ? concept.name : part.name)}</b>
-    <span class="chip-meta">${concept ? `${esc(part.name)} · ` : ''}${esc(CATEGORIES[part.group])}${part.info.part_no ? ` · <span class="pn">${esc(part.info.part_no)}</span>` : ''}</span>
+    <span class="chip-meta">${other && state.compare ? `${esc(selRec().source.label)} · ` : ''}${concept ? `${esc(part.name)} · ` : ''}${esc(CATEGORIES[part.group])}${part.info.part_no ? ` · <span class="pn">${esc(part.info.part_no)}</span>` : ''}</span>
     <span class="chip-lead">${esc(concept ? concept.text : firstSentence(part.info.description) || GROUP_TEXT[part.group])}</span></div>
     <button type="button" class="chip-btn" data-act="focus" title="Go to it">Go to it</button>
     <button type="button" class="chip-close" data-act="close" aria-label="Close (Esc)"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
@@ -506,7 +600,7 @@ function updateLabels() {
     const el = labelEls.get(c.id), part = conceptPart(c);
     tmp.copy(p).project(rig.camera);
     const x = (tmp.x + 1) / 2 * innerWidth, y = (1 - tmp.y) / 2 * innerHeight;
-    let ok = part.meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1;
+    let ok = part.meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1 && !(other && state.compare && x > state.split * innerWidth - 20);
     if (ok) {
       const w = c.name.length * 8 + 12, r = { x0: x - w / 2, x1: x + w / 2, y0: y - 44, y1: y };
       if (placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) ok = false; else placed.push(r);
@@ -612,6 +706,8 @@ function wireUi() {
   $('#btn-custom').onclick = () => { state.panel = !state.panel; syncPanel(); };
   $('#btn-close').onclick = () => { state.panel = false; syncPanel(); };
   $('#btn-tour').onclick = () => (state.tour ? stopTour() : startTour());
+  $('#btn-compare').onclick = () => setCompare(!state.compare);
+  wireSwipe();
   $('#btn-front').onclick = () => { stopTour(); frontView(); };
   $('#btn-2d').onclick = toggle2d;
   $('#btn-zin').onclick = () => zoom(0.7);
@@ -652,7 +748,7 @@ function wireUi() {
   $('#chip').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'close') select(null);
-    if (act === 'focus' && state.sel) focusPart(record.parts.get(state.sel));
+    if (act === 'focus' && state.sel) focusPart(selRec().parts.get(state.sel));
   });
   let down = null;
   canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; userActive(); $('#scene-fly').hidden = true; });
@@ -678,6 +774,7 @@ function wireUi() {
     else if (k === 't') toggle2d();
     else if (k === 'n') frontView();
     else if (k === 'f') (state.tour ? stopTour() : startTour());
+    else if (k === 'v') setCompare(!state.compare);
     else if (k === '+' || k === '=') zoom(0.7);
     else if (k === '-') zoom(1.4);
     else if (k === 'h') document.body.classList.toggle('nohud');
@@ -708,6 +805,7 @@ function saveUrl() {
   if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
+  if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));
