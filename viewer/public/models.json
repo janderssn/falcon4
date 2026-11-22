@@ -17,7 +17,7 @@
           "glb": "models/astra/litestream/model.glb",
           "parts": "models/astra/litestream/parts.json",
           "download": "falcon4-170-astra-litestream.glb",
-          "version": "86feb369"
+          "version": "2a12d812"
         }
       }
     },
