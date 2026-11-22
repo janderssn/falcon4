@@ -1,6 +1,7 @@
 // Model list (models.json), model loading, parts index and statistics.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 export const CATEGORIES = {
   '01': 'Sail & cloth', '02': 'Main frame', '03': 'Battens & washout', '04': 'Lower wires',
@@ -63,7 +64,7 @@ async function load(source, progress) {
   const partsIndex = await response.json();
   const byNode = new Map(Object.entries(partsIndex).map(([name, group]) => [THREE.PropertyBinding.sanitizeNodeName(name), { name, group }]));
   let bytes = 0;
-  const gltf = await new GLTFLoader().loadAsync(source.glb, (e) => {
+  const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(source.glb, (e) => {
     bytes = e.total || e.loaded;
     progress(e.total ? e.loaded / e.total : null, e.loaded);
   });
