@@ -73,8 +73,8 @@ const GROUP_TEXT = {
 const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
   colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
   seeThrough: 0.1,
-  pose: 'bar',
-  cam: '-0.279,0.824,-2.549,-0.3601,0.1682,0.9176,3.276,p',
+  pose: 'tail',
+  cam: '-1.181,0.903,-2.922,-0.3601,0.1682,0.9176,3.593,p',
 };
 const pick = (key, list) => {
   const v = params.get(key);
@@ -100,7 +100,7 @@ const state = {
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
   wind: 1, sel: null, tour: false,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
-  panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
+  panel: null,                                     // the open side panel: 'custom', 'settings' or none
 };
 let catalog, record, renderer, rig, scenes;
 let other = null;                                   // the second build, shown right of the divider when comparing
@@ -127,6 +127,10 @@ async function boot() {
   wireUi();
   resize();
   addEventListener('resize', resize);
+  addEventListener('resize', placeBars);
+  // A bar that appears (the chip, the plan-view bar) or changes width is placed again.
+  const ro = new ResizeObserver(() => placeBars());
+  for (const sel of ['#posebar', '#chip', '#viewbar']) if ($(sel)) ro.observe($(sel));
   try { catalog = await loadCatalog(); }
   catch (e) { loaderText('The glider list didn’t load', e.message, 0, true); return; }
   const ids = catalog.models.map((m) => m.id);
@@ -941,8 +945,29 @@ function buildPanel() {
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
+/**
+ * The pose bar, the part chip and the plan-view bar stay centred on the screen when a side
+ * panel opens, and move left only as far as they must to clear it: the pose bar and the chip
+ * clear the view controls beside the panel, the plan-view bar the panel itself.
+ * Small screens lay these out in style.css.
+ */
+const narrow = matchMedia('(max-width: 760px)');
+function placeBars() {
+  const open = Boolean(state.panel) && !narrow.matches;
+  const panel = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 340;
+  const gap = 12, W = innerWidth;
+  const bars = [['#posebar', W - (panel + 32) - 40], ['#chip', W - (panel + 32) - 40], ['#viewbar', W - 16 - panel]];
+  for (const [sel, edge] of bars) {
+    const el = $(sel);
+    if (!el) continue;
+    if (!open) { el.style.left = ''; continue; }
+    const w = el.offsetWidth;
+    el.style.left = `${Math.max(w / 2 + gap, Math.min(W / 2, edge - gap - w / 2))}px`;
+  }
+}
 function syncPanel() {
   document.body.classList.toggle('panel-open', Boolean(state.panel));
+  placeBars();
   for (const id of ['custom', 'settings']) {
     $(`#${id}`).hidden = state.panel !== id;
     $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
