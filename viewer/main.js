@@ -95,13 +95,16 @@ const state = {
   selSide: 'A',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
-  grid: params.get('grid') === '1',                // settings: floor grid in the studio
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
   wind: 1, sel: null, tour: false,
+  grid: false,                                     // settings: floor grid in the studio, set below
   panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
 };
+// The grid starts on for Blueprint and off for the others; the link only says when it differs.
+const gridDefault = (bg) => bg === 'blueprint';
+state.grid = params.has('grid') ? params.get('grid') === '1' : gridDefault(state.backdrop);
 let catalog, record, renderer, rig, scenes;
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
@@ -918,8 +921,7 @@ function syncPanel() {
   $('#opt-battens').checked = state.battens;
   $('#opt-names').checked = state.names;
   $('#opt-grid').checked = state.grid;
-  $('#opt-grid').disabled = state.scene !== 'studio' || state.backdrop === 'blueprint';
-  $('#grid-hint').textContent = state.backdrop === 'blueprint' ? 'Blueprint has its own' : 'In the studio';
+  $('#opt-grid').disabled = state.scene !== 'studio';
   for (const b of document.querySelectorAll('[data-backdrop]')) {
     const on = b.dataset.backdrop === state.backdrop;
     b.classList.toggle('on', on);
@@ -1017,6 +1019,8 @@ function wireUi() {
     const bd = e.target.closest('[data-backdrop]');
     if (bd && bd.dataset.backdrop !== state.backdrop) {
       state.backdrop = bd.dataset.backdrop;
+      state.grid = gridDefault(state.backdrop);      // each background starts with its own grid setting
+      scenes.setGrid(state.grid);
       scenes.setBackdrop(state.backdrop);
       syncPanel();
       saveUrlSoon();
@@ -1104,7 +1108,7 @@ function saveUrl() {
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
-  if (state.grid) q.set('grid', '1');
+  if (state.grid !== gridDefault(state.backdrop)) q.set('grid', state.grid ? '1' : '0');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');

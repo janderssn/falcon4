@@ -164,7 +164,7 @@ class Environments {
     const studio = this.built.studio;
     if (!studio) return;
     const u = studio.floor.material.uniforms;
-    u.uGrid.value = on || studio.backdrop === 'blueprint' ? 1 : 0;         // the blueprint always has its grid
+    u.uGrid.value = on ? 1 : 0;
     u.uSpot.value = this.spotOn ? 1 : 0;
     studio.floor.visible = u.uGrid.value + u.uSpot.value > 0;
   }
