@@ -10,8 +10,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const params = new URLSearchParams(location.search);
 const THUMB = params.get('thumb');                   // set by tools/thumbs.mjs to render the thumbnails
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const narrow = matchMedia('(max-width: 760px)');           // phone layout: the panel is a sheet at the bottom
-const small = narrow.matches;                              // at load: sets the start state and the grass density
+const small = matchMedia('(max-width: 760px)').matches;   // at load: sets the start state and the grass density
 
 // ------------------------------------------------------------------ what can be tweaked
 // Sail and frame zones. The sail panels follow the Wills Wing Falcon colour picker:
@@ -459,8 +458,8 @@ function planView(name) {
   userActive();
 }
 /**
- * Pose that frames the glider from `dir`: on the whole screen (the panels draw over the
- * scene and don't move it), or in a quarter of the free area in four views.
+ * Pose that frames the glider from `dir`: on the whole screen, or in a quarter of it in
+ * four views. The panels draw over the scene and don't move it.
  */
 function planFrame(dir, margin = 1.15, quad = false) {
   const a = quad ? viewArea() : { w: innerWidth, h: innerHeight };
@@ -504,12 +503,9 @@ function wirePlan() {
   }, true);
   syncPlan();
 }
-/** The free part of the screen (the open panel covers the rest), in CSS pixels. */
+/** The area the views are drawn in, in CSS pixels: the whole screen (the panels draw over it). */
 function viewArea() {
-  const sheet = state.panel && $(`#${state.panel}`);
-  const w = innerWidth, h = innerHeight;
-  if (!sheet) return { x: 0, y: 0, w, h };
-  return narrow.matches ? { x: 0, y: 0, w, h: h - sheet.offsetHeight } : { x: 0, y: 0, w: w - sheet.offsetWidth - 16, h };
+  return { x: 0, y: 0, w: innerWidth, h: innerHeight };
 }
 /** The camera under a screen point and the point in its view (-1..1). */
 function viewAt(x, y) {
