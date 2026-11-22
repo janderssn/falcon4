@@ -2,7 +2,7 @@ import './style.css';
 import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
-import { Scenes, SCENES } from './lib/scenes.js';
+import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
 import { FALCON_FABRICS } from './lib/fabrics.js';
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -96,6 +96,7 @@ const state = {
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio
+  backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   wind: 1, sel: null, tour: false,
   panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
@@ -120,6 +121,7 @@ async function boot() {
   scenes.hours = state.hours;
   scenes.setShadows(state.shadows);
   scenes.setGrid(state.grid);
+  scenes.setBackdrop(state.backdrop);
   wireUi();
   resize();
   addEventListener('resize', resize);
@@ -682,7 +684,16 @@ function syncPanel() {
   $('#opt-battens').checked = state.battens;
   $('#opt-names').checked = state.names;
   $('#opt-grid').checked = state.grid;
-  $('#opt-grid').disabled = state.scene !== 'studio';
+  $('#opt-grid').disabled = state.scene !== 'studio' || state.backdrop === 'blueprint';
+  $('#grid-hint').textContent = state.backdrop === 'blueprint' ? 'Blueprint has its own' : 'In the studio';
+  for (const b of document.querySelectorAll('[data-backdrop]')) {
+    const on = b.dataset.backdrop === state.backdrop;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+    b.disabled = state.scene !== 'studio';
+  }
+  $('#backdrop-hint').hidden = state.scene === 'studio';
+  document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
   $('#opt-shadows').checked = state.shadows;
   document.body.classList.toggle('nolabels', !state.names);
   $('#light').hidden = state.scene !== 'hill';
@@ -766,6 +777,13 @@ function wireUi() {
   $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
     if (build && build.dataset.model !== state.model) setModel(build.dataset.model);
+    const bd = e.target.closest('[data-backdrop]');
+    if (bd && bd.dataset.backdrop !== state.backdrop) {
+      state.backdrop = bd.dataset.backdrop;
+      scenes.setBackdrop(state.backdrop);
+      syncPanel();
+      saveUrlSoon();
+    }
   });
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
@@ -826,7 +844,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&shadows=0&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&bg=blueprint&shadows=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -849,6 +867,7 @@ function saveUrl() {
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
+  if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));
