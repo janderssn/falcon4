@@ -40,11 +40,12 @@ The viewer is a glider configurator:
 - **Settings** (gear, top right corner, `S`): pick the build (Astra or Opus), the colour
   profile (the Wills Wing colour picker's colours, or calibrated to the real cloth where
   measured: Blue 7304, Red 3125, White 170), turn the floor grid in the studio on or off,
-  and turn the shadows on or off.
+  turn the shadows on or off, and turn film blur on or off: clear laminates show what is
+  just behind them sharp and blur what is further away (off on phones by default).
 - **Sail cloth:** each panel's material follows its fabric, matched to photos of the real
   cloth. Woven polyester (Dacron) is opaque with a plain resin finish; the MT cloths add a
   diamond ripstop of paired threads; the laminates are glossy film over an opaque scrim and
-  X-ply (black in the "B" cloths), and the film shows what is behind it blurred. The studio light is Poly Haven's "Studio Small 09" HDRI (CC0).
+  X-ply (black in the "B" cloths), and the hazy film shows what is behind it. The studio light is Poly Haven's "Studio Small 09" HDRI (CC0).
 - **Customize** (top right, `C`): colour the sail
   panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2 forward, P3 middle,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
