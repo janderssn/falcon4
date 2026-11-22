@@ -53,8 +53,10 @@ The viewer is a glider configurator:
   choose the frame finish; make the sail see-through to look at the frame; show or
   hide the wires and bridles, and the battens (the batten strings hide with the
   sail or the battens); label where each colour row goes on the glider, with the
-  colour chosen in it (click a label to go to its row). *As built* (the first
-  swatch in each row) restores the original colour. Colours are approximate and for
+  colour chosen in it. Each part is one line with its colour and fabric (and any extra
+  cost); click a line to choose. *As built* (the first swatch in each list) restores the
+  original colour. **Order form** lays the glider out as a printed order request with
+  part numbers and the known prices. Colours are approximate and for
   show only; Wills Wing's own picker notes the same.
 - **Pose** (bottom of the view): tail down, standing on the control bar, or nose
   down - resting on the keel, rocked over the basebar until the tail or the nose
@@ -67,8 +69,8 @@ The viewer is a glider configurator:
 - **Numpad** as in Blender: `1` front, `3` right, `7` top (with `Ctrl`: back, left,
   bottom), `9` the opposite side, `5` 2D/3D, `0` the start view, `2` `4` `6` `8` turn
   15°, `.` the selected part, `+` `-` zoom. The number row keeps switching scenes.
-- Click a part to see what it is, with its Wills Wing part number where the build
-  has one; double-click to go to it.
+- Click a sail panel, the pockets or the frame (or its label) to open Customize with only
+  that part's choices; **All parts** shows the rest.
 - **Copy link to this glider** puts the whole configuration in the link: build,
   colours, scene, settings, time of day and camera.
 - The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite

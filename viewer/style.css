@@ -245,17 +245,17 @@ body.quad #labels { display: none; }
 
 /* ---------------------------------------------------------------- swatches: cloths, quietly */
 .sw-gap { width: 1px; height: 18px; margin: 0 4px; align-self: center; background: var(--line); }
-.sw.dark i { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .45), 0 1px 3px rgba(0, 0, 0, .35); }
-.sw.cloth-mt i {
+:is(.sw, .cur).dark i { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .45), 0 1px 3px rgba(0, 0, 0, .35); }
+:is(.sw, .cur).cloth-mt i {
   background:
     repeating-linear-gradient(35deg, transparent 0 5px, rgba(60, 70, 80, .16) 5px 6px),
     repeating-linear-gradient(-35deg, transparent 0 5px, rgba(60, 70, 80, .16) 5px 6px),
     var(--c);
 }
-.sw.cloth-lam { --fib: rgba(255, 255, 255, .55); }
-.sw.cloth-lam.fib-dark { --fib: rgba(10, 12, 14, .55); }
-.sw.cloth-lam.fib-grey { --fib: rgba(80, 90, 100, .28); }
-.sw.cloth-lam i {
+:is(.sw, .cur).cloth-lam { --fib: rgba(255, 255, 255, .55); }
+:is(.sw, .cur).cloth-lam.fib-dark { --fib: rgba(10, 12, 14, .55); }
+:is(.sw, .cur).cloth-lam.fib-grey { --fib: rgba(80, 90, 100, .28); }
+:is(.sw, .cur).cloth-lam i {
   background:
     linear-gradient(var(--fib) .6px, transparent .6px) 0 0 / 4px 4px,
     linear-gradient(90deg, var(--fib) .6px, transparent .6px) 0 0 / 4px 4px,
@@ -348,3 +348,35 @@ body.quad #labels { display: none; }
   .sheet-paper { width: auto; padding: 0; box-shadow: none; }
   .of-opt:not(.on) { display: none; }
 }
+
+/* ---------------------------------------------------------------- customize: one line per part */
+.row { margin: 0 -6px 2px; border-radius: 12px; }
+.row-head {
+  width: 100%; display: grid; grid-template-columns: 24px 1fr auto 14px; align-items: center; gap: 10px;
+  padding: 7px 6px; border: 0; border-radius: 10px; background: none; color: var(--ink); font-size: 13px; text-align: left;
+}
+.row-head:hover { background: rgba(255, 255, 255, .06); }
+.row-head small { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.row-head small.peek { color: var(--ink); }
+.cur { width: 22px; height: 22px; display: grid; place-items: center; position: relative; }
+.cur i { width: 20px; height: 20px; border-radius: 50%; background: var(--c, #888); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22), 0 1px 3px rgba(0, 0, 0, .35); }
+.cur.clear i { background: linear-gradient(color-mix(in srgb, var(--c) calc(var(--o) * 100%), transparent), color-mix(in srgb, var(--c) calc(var(--o) * 100%), transparent)), repeating-conic-gradient(#8a8f94 0 25%, #d9dde0 0 50%) 0 0 / 8px 8px; }
+.cur.original i { background: conic-gradient(var(--c, #888) 0 75%, transparent 0); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5); }
+.chev { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s ease; }
+.row.open .chev { transform: rotate(180deg); }
+.row:not(.open) > .swatches { display: none; }
+.row.open { background: rgba(255, 255, 255, .04); }
+.row.open > .swatches { padding: 4px 6px 10px 6px; }
+/* One part only: the other sections step aside. */
+#custom.focus section:not(:has(.row.focused)), #custom.focus .body > footer { display: none; }
+#custom.focus section h3 { display: none; }
+#custom.focus { bottom: auto; max-height: calc(100% - 32px); }   /* one part: as tall as its swatches */
+#custom.focus #btn-reset { display: none; }
+.row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-head small { max-width: 130px; }
+/* Part name over the chosen fabric, so neither is cut short. */
+.row-head { grid-template-columns: 24px 1fr 14px; grid-template-areas: "cur title chev" "cur sub chev"; row-gap: 1px; padding: 6px 6px; }
+.row-head .cur { grid-area: cur; }
+.row-head .row-title { grid-area: title; }
+.row-head small { grid-area: sub; max-width: none; }
+.row-head .chev { grid-area: chev; }

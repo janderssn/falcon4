@@ -9,7 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M4 28 20 10 36 28 20 22Z' fill='%23d8f08a'/%3E%3C/svg%3E">
 </head>
 <body>
-<canvas id="scene" tabindex="0" aria-label="3D hang glider. Drag to turn, right-drag to move, scroll to zoom. Click a part to see what it is."></canvas>
+<canvas id="scene" tabindex="0" aria-label="3D hang glider. Drag to turn, right-drag to move, scroll to zoom. Click a part of the sail or frame to change its colour."></canvas>
 
 <div id="loader" role="status" aria-live="polite">
   <div class="ld-center">
@@ -37,6 +37,7 @@
 <aside id="custom" class="hud glass sheet" aria-label="Customize the glider" hidden>
   <header>
     <h2>Customize</h2>
+    <button type="button" id="btn-allparts" class="textbtn" hidden>All parts</button>
     <button type="button" id="btn-reset" class="textbtn" title="Back to the default colours">Reset</button>
     <button type="button" class="icon btn-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </header>

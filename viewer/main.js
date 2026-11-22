@@ -950,6 +950,20 @@ function pickPart(e) {
   if (part) part.side = side;
   return part;
 }
+/** The Customize zone (P1 to P5, pockets, frame) of the part under the pointer, if any. */
+function pickZone(e) {
+  const r = canvas.getBoundingClientRect();
+  const view = viewAt(e.clientX - r.left, e.clientY - r.top);
+  raycaster.setFromCamera(view.ndc, view.camera);
+  const rec = other && state.compare && e.clientX > state.split * innerWidth ? other : record;
+  const meshes = rec.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
+  for (const hit of raycaster.intersectObjects(meshes, false)) {
+    const z = hit.object.userData.zone;
+    if (z) return z;
+    if (hit.object.userData.part?.group === '01') return null;   // other sail parts hide what is behind
+  }
+  return null;
+}
 function select(part) {
   state.sel = part ? part.name : null;
   state.selSide = part?.side || 'A';
@@ -1039,19 +1053,36 @@ function buildLabels() {
 /** Each label's swatch looks like the option chosen in its row. */
 function syncLabelSwatches() {
   for (const [zone, el] of labelEls) {
-    const on = document.querySelector(`.sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
+    const on = document.querySelector(`.swatches .sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
     if (!on) continue;
     sw.className = on.className.replace(/\bon\b/, '').trim();
     sw.style.cssText = on.style.cssText;
   }
 }
-/** Opens Customize at the row of a label. */
+// Customize lists each part on one line (its colour and fabric); a line opens to its swatches.
+// Clicking a part of the glider, or its label, opens Customize with only that part.
+const ui = { focus: null, open: null };
+/** Opens Customize with only one part's choices (a zone of ZONES). */
 function showRow(zone) {
-  if (state.panel !== 'custom') { state.panel = 'custom'; syncPanel(); }
-  const row = zone === 'frame' ? $('#frame-row') : document.querySelector(`[data-row="${zone}"]`);
-  if (!row) return;
-  row.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  ui.focus = zone; ui.open = zone;
+  state.panel = 'custom';
+  syncPanel();
+  const row = document.querySelector(`[data-row="${zone}"]`);
+  if (row) { row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash'); }
+}
+/** The rows: which part is open, which are shown, and each line's current swatch. */
+function syncRows() {
+  const custom = $('#custom');
+  custom.classList.toggle('focus', Boolean(ui.focus));
+  $('#btn-allparts').hidden = !ui.focus;
+  for (const row of document.querySelectorAll('#custom [data-row]')) {
+    const z = row.dataset.row, open = ui.open === z;
+    row.classList.toggle('open', open);
+    row.classList.toggle('focused', ui.focus === z);
+    row.querySelector('.row-head').setAttribute('aria-expanded', String(open));
+    const on = row.querySelector(`.swatches .sw.on`), cur = row.querySelector('.cur');
+    if (on) { cur.className = `cur ${on.className.replace(/\b(on|sw)\b/g, '').trim()}`; cur.style.cssText = on.style.cssText; }
+  }
 }
 const tmp = new THREE.Vector3();
 function updateLabels() {
@@ -1105,8 +1136,11 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
-  $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame')}</div>`;
+  const row = (z, name) => `<div class="row" data-row="${z}">
+    <button type="button" class="row-head" data-toggle="${z}" aria-expanded="false"><span class="cur" data-cur="${z}"><i></i></span><span class="row-title">${name}</span><small data-name="${z}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    ${swatches(z)}</div>`;
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
+  $('#frame-row').innerHTML = row('frame', 'Tubes');
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -1173,7 +1207,8 @@ function syncPanel() {
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
   }
   syncLabelSwatches();
-  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
+  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length || Boolean(ui.focus && ui.focus !== row.dataset.row);
+  syncRows();
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
@@ -1246,7 +1281,8 @@ function wireUi() {
   setTime(state.hours);
   $('#time').addEventListener('input', (e) => setTime(Number(e.target.value)));
   $('#wind').addEventListener('input', (e) => { state.wind = Number(e.target.value); scenes.setWind(state.wind); });
-  $('#btn-custom').onclick = () => togglePanel('custom');
+  $('#btn-custom').onclick = () => { ui.focus = null; ui.open = null; togglePanel('custom'); };
+  $('#btn-allparts').onclick = () => { ui.focus = null; syncPanel(); };
   $('#btn-settings').onclick = () => togglePanel('settings');
   for (const b of document.querySelectorAll('.btn-close')) b.onclick = () => togglePanel(null);
   $('#btn-tour').onclick = () => (state.tour ? stopTour() : startTour());
@@ -1270,8 +1306,14 @@ function wireUi() {
     setScene(t.dataset.scene);
   });
   $('#custom').addEventListener('click', (e) => {
-    const sw = e.target.closest('.sw');
-    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
+    const head = e.target.closest('[data-toggle]');
+    if (head) { ui.open = ui.open === head.dataset.toggle ? null : head.dataset.toggle; syncRows(); return; }
+    const sw = e.target.closest('.swatches .sw');
+    if (sw) {
+      state.colours[sw.dataset.zone] = sw.dataset.colour || null;
+      if (!ui.focus) ui.open = null;   // the list closes again; a single part stays open
+      applyLook(); syncPanel(); saveUrlSoon();
+    }
   });
   $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
@@ -1304,10 +1346,10 @@ function wireUi() {
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
-  $('#custom').addEventListener('pointerover', (e) => { const b = e.target.closest('.sw'); if (b) syncNames(b); });
-  $('#custom').addEventListener('pointerout', (e) => { if (e.target.closest('.sw')) syncNames(); });
-  $('#custom').addEventListener('focusin', (e) => { const b = e.target.closest('.sw'); if (b) syncNames(b); });
-  $('#custom').addEventListener('focusout', (e) => { if (e.target.closest('.sw')) syncNames(); });
+  $('#custom').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('pointerout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
+  $('#custom').addEventListener('focusin', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('focusout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
   $('#btn-order').onclick = showOrder;
   $('#btn-share').onclick = async () => {
     saveUrl();
@@ -1322,11 +1364,13 @@ function wireUi() {
   });
   let down = null;
   canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; userActive(); $('#scene-fly').hidden = true; });
+  // A click on a part that can be coloured opens its choices in Customize. (The part card,
+  // select() and renderChip(), stays for a parts view.)
   canvas.addEventListener('pointerup', (e) => {
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || !record) return;
-    select(pickPart(e));
+    const zone = pickZone(e);
+    if (zone) showRow(zone);
   });
-  canvas.addEventListener('dblclick', (e) => { const part = record && pickPart(e); if (part) { select(part); focusPart(part); } });
   canvas.addEventListener('wheel', userActive, { passive: true });
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
