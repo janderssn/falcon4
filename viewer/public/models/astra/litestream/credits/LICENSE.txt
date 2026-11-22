@@ -1,0 +1,31 @@
+CERN Open Hardware License Version 2 - Permissive
+
+Copyright 1973-2026 Steven Pearson and Michael W. Meier
+(formerly Sport Kites, Inc. dba Wills Wing)
+
+This source describes Open Hardware and is licensed under the CERN-OHL-P v2
+
+You may redistribute and modify this source and make products using it under
+the terms of the CERN-OHL-P v2 (https://ohwr.org/cern_ohl_p_v2.txt).
+
+This source is distributed WITHOUT ANY EXPRESS OR IMPLIED WARRANTY,
+INCLUDING OF MERCHANTABILITY, SATISFACTORY QUALITY AND FITNESS FOR A
+PARTICULAR PURPOSE. Please see the CERN-OHL-P v2 for applicable conditions.
+
+Source location: https://github.com/Pearson00/WillsWing
+
+As per CERN-OHL-P v2 section 4, should You produce hardware based on this
+source, You must maintain the Source Location visible on the external case
+of the Wills Wing hang glider designs or other products you make using this
+source.
+
+Notice: Sport Kites, Inc. dba Wills Wing was dissolved in 2025. All
+intellectual property rights are retained by Steven Pearson and Michael W. Meier
+as creators and successor rights holders. All hang glider designs,
+documentation, and related materials in this repository were originally
+created by Steven Pearson and Michael W. Meier. These historical designs are
+being made available for educational, research, and development purposes.
+Please see the accompanying SAFETY.md file for critical safety information
+regarding the use of these designs.
+
+See https://www.willswing.com/ip-notice/ for full intellectual property details.
