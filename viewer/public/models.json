@@ -5,11 +5,11 @@
       "id": "astra",
       "label": "Astra",
       "title": "Astra build",
-      "description": "631 parts \u00b7 round control frame \u00b7 resting on the ground",
+      "description": "669 parts \u00b7 round control frame \u00b7 resting on the ground",
       "glb": "models/astra/model.glb",
       "parts": "models/astra/parts.json",
       "download": "falcon4-170-astra.glb",
-      "version": "7c9c2c2"
+      "version": "b609a2ae"
     },
     {
       "id": "opus",
