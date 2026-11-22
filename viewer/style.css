@@ -163,7 +163,9 @@ body.nohud #btn-showhud { pointer-events: auto; }
 body.nohud #btn-showhud:hover, body.nohud #btn-showhud:focus-visible { opacity: 1; }
 
 /* ---- names on the main parts */
-#labels { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+#labels { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; transition: opacity .35s ease; }
+#labels.moving { opacity: 0; transition: opacity .12s ease; }   /* hidden while the view moves */
+#labels.moving .label { pointer-events: none !important; }
 body.nolabels #labels { display: none; }
 .label { position: absolute; left: 0; top: 0; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-shadow: 0 1px 8px rgba(0, 0, 0, .8); pointer-events: auto; cursor: pointer; background: none; border: 0; padding: 0; color: var(--ink); transition: opacity .3s; }
 /* Callouts: a leader from each label to a dot on its part. */

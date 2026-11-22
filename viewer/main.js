@@ -1040,6 +1040,8 @@ function buildLabels() {
   host.innerHTML = '';
   labelEls.clear();
   leaderEls.clear();
+  labelPlace.clear();
+  labelMask.key = '';   // lay the new labels out
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.classList.add('leaders');
   host.append(svg);
@@ -1165,84 +1167,105 @@ function onGlider(x0, y0, x1, y1) {
   return false;
 }
 const DIRS = [[1, 0], [-1, 0], [0, -1], [0, 1], [0.71, -0.71], [-0.71, -0.71], [0.71, 0.71], [-0.71, 0.71]];
-const labelDirs = new Map();   // zone: the direction its label took last, to keep it there
+const LABEL_MIN = 40, LABEL_MAX = 560, LABEL_STICK = 200;
+// zone: { dx, dy, d } the spot a label took (kept while free), its target box and anchor.
+const labelPlace = new Map();
+const LABEL_SETTLE = 160;   // ms of a still view before the labels are laid out and shown again
+/**
+ * While the view moves the labels fade out; once it has been still for LABEL_SETTLE ms they are
+ * laid out for it and fade back in.
+ */
+const labelView = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), proj: 0, at: new THREE.Vector3(), atQuat: new THREE.Quaternion() };
 function updateLabels() {
   if (!record || !state.names) return;
+  const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera, now = performance.now();
+  const host = $('#labels'), V = labelView;
+  // Moving: the view turned or travelled noticeably since the last frame (the orbit's damping
+  // drifts on for a while; that counts as still), or the pose, size or panel changed.
+  const rest = `${m.elements.map((v) => v.toFixed(3))}${W}x${H}${state.panel}${state.compare}${state.split}${state.wires}${state.battens}`;
+  const proj = cam.isOrthographicCamera ? cam.zoom * (cam.top - cam.bottom) : cam.projectionMatrix.elements[5];
+  const fast = cam.position.distanceTo(V.pos) > 0.004 || cam.quaternion.angleTo(V.quat) > 0.002 || Math.abs(proj - V.proj) > 1e-3 * Math.abs(proj);
+  V.pos.copy(cam.position); V.quat.copy(cam.quaternion); V.proj = proj;
+  if (fast || rest !== labelMask.key) { labelMask.key = rest; labelMask.movedAt = now; labelMask.settled = false; host.classList.add('moving'); return; }
+  // Settled, but drifted since the layout: lay out again in place, without fading.
+  if (labelMask.settled && (cam.position.distanceTo(V.at) > 0.003 || cam.quaternion.angleTo(V.atQuat) > 0.0015)) labelMask.settled = false;
+  if (labelMask.settled || now - labelMask.movedAt < LABEL_SETTLE) return;
+  V.at.copy(cam.position); V.atQuat.copy(cam.quaternion);
+  labelMask.settled = true;
+  layoutLabels();
+  for (const [z, L] of labelPlace) {
+    if (!L.shown || !L.target) continue;
+    const el = labelEls.get(z), lead = leaderEls.get(z), r = L.target;
+    el.style.transform = `translate(${r.x0}px, ${r.y0}px)`;
+    // Leader: straight from the dot, with one sharp bend into the side of the label facing it.
+    const p = L.p, cy = (r.y0 + r.y1) / 2;
+    let pts;
+    if (!L.dx) {
+      const ex = Math.min(Math.max(p.x, r.x0 + 8), r.x1 - 8);
+      pts = `${p.x},${p.y} ${ex},${L.dy < 0 ? r.y1 + 2 : r.y0 - 2}`;
+    } else {
+      const side = L.dx > 0 ? r.x0 : r.x1, knee = side - Math.sign(L.dx) * 12;
+      pts = `${p.x},${p.y} ${knee},${cy} ${side - Math.sign(L.dx) * 3},${cy}`;
+    }
+    lead.line.setAttribute('points', pts);
+    lead.dot.setAttribute('cx', p.x);
+    lead.dot.setAttribute('cy', p.y);
+  }
+  host.classList.remove('moving');
+}
+function layoutLabels() {
   const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera;
-  // Lay out again only when the view, the pose or the size changes.
-  const key = `${cam.matrixWorld.elements.map((v) => v.toFixed(4))}${cam.projectionMatrix.elements[0].toFixed(5)}${cam.projectionMatrix.elements[5].toFixed(5)}${m.elements.map((v) => v.toFixed(4))}${W}x${H}${state.panel}${state.compare}${state.split}${state.wires}${state.battens}`;
-  if (key === labelMask.key) return;
-  labelMask.key = key;
   drawLabelMask(record);
   const panel = state.panel && !narrow.matches ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 340) + 32 : 0;
   const box = { x0: 14, y0: 84, x1: W - panel - 76, y1: H - 84 };   // clear of the title, bars and controls
   const placed = [];
   let avoidGlider = true;
-  const free = (x0, y0, x1, y1) => x0 >= box.x0 && x1 <= box.x1 && y0 >= box.y0 && y1 <= box.y1
-    && !placed.some((q) => x0 < q.x1 + 6 && x1 > q.x0 - 6 && y0 < q.y1 + 4 && y1 > q.y0 - 4)
-    && !(avoidGlider && onGlider(x0 - 4, y0 - 3, x1 + 4, y1 + 3));
-  const items = [];
+  const free = (r) => r.x0 >= box.x0 && r.x1 <= box.x1 && r.y0 >= box.y0 && r.y1 <= box.y1
+    && !placed.some((q) => r.x0 < q.x1 + 8 && r.x1 > q.x0 - 8 && r.y0 < q.y1 + 6 && r.y1 > q.y0 - 6)
+    && !(avoidGlider && onGlider(r.x0 - 6, r.y0 - 4, r.x1 + 6, r.y1 + 4));
+  // The label's near edge (or corner) d px from the anchor, in direction (dx, dy).
+  const rectAt = (it, dx, dy, d) => {
+    const cx = it.p.x + dx * d + Math.sign(dx) * it.w / 2, cy = it.p.y + dy * d + Math.sign(dy) * it.h / 2;
+    return { x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2 };
+  };
+  const along = (it, dx, dy, limit = LABEL_MAX) => {
+    for (let d = LABEL_MIN; d < limit; d += 8) { const r = rectAt(it, dx, dy, d); if (free(r)) return { d, r, dx, dy }; }
+    return null;
+  };
+  const nearest = (it) => {
+    let best = null;
+    for (const [dx, dy] of DIRS) { const c = along(it, dx, dy, best ? best.d + 8 : LABEL_MAX); if (c && (!best || c.d < best.d)) best = c; }
+    return best;
+  };
   for (const [z, side, at] of LABEL_ZONES) {
     const el = labelEls.get(z), lead = leaderEls.get(z);
     if (!el) continue;
     const a = zoneAnchor(record, z, side, at);
-    if (a) { tmp.copy(a).applyMatrix4(m).project(cam); }
+    if (a) tmp.copy(a).applyMatrix4(m).project(cam);
     const p = a && { x: (tmp.x + 1) / 2 * W, y: (1 - tmp.y) / 2 * H };
-    const ok = a && record.tints[z].meshes.some((mesh) => mesh.visible) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
-      && !(other && state.compare && p.x > state.split * W - 20);
-    el.style.opacity = ok ? 1 : 0;
-    el.style.pointerEvents = ok ? 'auto' : 'none';
-    lead.line.style.display = lead.dot.style.display = ok ? '' : 'none';
-    if (ok) items.push({ z, el, lead, p, w: el.offsetWidth, h: el.offsetHeight || 18 });
-  }
-  // The nearest free spot in one direction: the label's near edge (or corner) d px from the anchor.
-  const along = (it, dx, dy, limit = 520) => {
-    for (let d = 18; d < limit; d += 8) {
-      const cx = it.p.x + dx * d + Math.sign(dx) * it.w / 2, cy = it.p.y + dy * d + Math.sign(dy) * it.h / 2;
-      const r = { x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2 };
-      if (free(r.x0, r.y0, r.x1, r.y1)) return { d, r, dx, dy };
-    }
-    return null;
-  };
-  for (const it of items) {
-    // Stable: a label keeps its direction while that spot stays within STICK px of the nearest one.
-    const STICK = 56;
+    const shown = Boolean(a && record.tints[z].meshes.some((mesh) => mesh.visible) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+      && !(other && state.compare && p.x > state.split * W - 20));
+    el.style.opacity = shown ? 1 : 0;
+    el.style.pointerEvents = shown ? 'auto' : 'none';
+    lead.line.style.display = lead.dot.style.display = shown ? '' : 'none';
+    const L = labelPlace.get(z) || {};
+    labelPlace.set(z, L);
+    L.shown = shown;
+    if (!shown) continue;
+    const it = { p, w: el.offsetWidth, h: el.offsetHeight || 18 };
+    // Stable: the same spot while it is free; else the same direction, unless another side is
+    // much nearer; else anywhere on screen clear of the other labels.
     let best = null;
-    for (const [dx, dy] of DIRS) {
-      const c = along(it, dx, dy, best ? best.d + 8 : 520);
-      if (c && (!best || c.d < best.d)) best = c;
+    if (L.d !== undefined) { const r = rectAt(it, L.dx, L.dy, L.d); if (free(r)) best = { d: L.d, r, dx: L.dx, dy: L.dy }; }
+    if (!best) {
+      const same = L.d !== undefined ? along(it, L.dx, L.dy) : null;
+      const any = nearest(it);
+      best = same && (!any || same.d <= any.d + LABEL_STICK) ? same : any;
     }
-    const prev = labelDirs.get(it.z);
-    if (prev && best && (prev[0] !== best.dx || prev[1] !== best.dy)) {
-      const keep = along(it, prev[0], prev[1], best.d + STICK + 8);
-      if (keep) best = keep;
-    }
-    if (!best) {   // nowhere off the glider: the nearest spot on screen, clear of the other labels
-      avoidGlider = false;
-      for (const [dx, dy] of DIRS) { const c = along(it, dx, dy, best ? best.d + 8 : 520); if (c && (!best || c.d < best.d)) best = c; }
-      avoidGlider = true;
-    }
-    if (best) labelDirs.set(it.z, [best.dx, best.dy]);
-    if (!best) {   // nowhere free: beside the anchor, on the glider
-      best = { d: 0, dx: 1, dy: 0, r: { x0: it.p.x + 14, y0: it.p.y - it.h / 2, x1: it.p.x + 14 + it.w, y1: it.p.y + it.h / 2 } };
-    }
+    if (!best) { avoidGlider = false; best = nearest(it); avoidGlider = true; }
+    if (!best) best = { d: LABEL_MIN, dx: 1, dy: 0, r: rectAt(it, 1, 0, LABEL_MIN) };
     placed.push(best.r);
-    const { r } = best;
-    it.el.style.transform = `translate(${r.x0}px, ${r.y0}px)`;
-    // Leader: straight from the dot, with one sharp bend into the side of the label facing it.
-    const cy = (r.y0 + r.y1) / 2;
-    const side = best.dx > 0 ? r.x0 : best.dx < 0 ? r.x1 : null;
-    let pts;
-    if (side === null) {   // above or below: straight up or down to the label's edge
-      const ex = Math.min(Math.max(it.p.x, r.x0 + 8), r.x1 - 8);
-      pts = `${it.p.x},${it.p.y} ${ex},${best.dy < 0 ? r.y1 + 2 : r.y0 - 2}`;
-    } else {
-      const knee = side - Math.sign(best.dx) * 10;
-      pts = `${it.p.x},${it.p.y} ${knee},${cy} ${side - Math.sign(best.dx) * 3},${cy}`;
-    }
-    it.lead.line.setAttribute('points', pts);
-    it.lead.dot.setAttribute('cx', it.p.x);
-    it.lead.dot.setAttribute('cy', it.p.y);
+    Object.assign(L, { dx: best.dx, dy: best.dy, d: best.d, target: best.r, p, w: it.w, h: it.h });
   }
 }
 
