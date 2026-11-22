@@ -1044,7 +1044,7 @@ function buildLabels() {
     el.className = 'label';
     el.tabIndex = -1;
     el.innerHTML = `<span class="label-tag"><span class="sw"><i></i></span><b>${esc(ZONES[zone].name)}</b></span>`;
-    el.onclick = () => showRow(zone);
+    el.onclick = () => { const r = el.getBoundingClientRect(); showRow(zone, r.right, r.top + r.height / 2); };
     host.append(el);
     labelEls.set(zone, el);
   }
@@ -1060,29 +1060,49 @@ function syncLabelSwatches() {
   }
 }
 // Customize lists each part on one line (its colour and fabric); a line opens to its swatches.
-// Clicking a part of the glider, or its label, opens Customize with only that part.
-const ui = { focus: null, open: null };
-/** Opens Customize with only one part's choices (a zone of ZONES). */
-function showRow(zone) {
-  ui.focus = zone; ui.open = zone;
-  state.panel = 'custom';
-  syncPanel();
-  const row = document.querySelector(`[data-row="${zone}"]`);
-  if (row) { row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash'); }
+const ui = { open: null, picker: null };
+/** Copies the chosen swatch's look onto a line's (or the picker's) current-colour dot. */
+function showCurrent(cur, zone) {
+  const on = document.querySelector(`#custom .swatches .sw.on[data-zone="${zone}"]`);
+  if (on && cur) { cur.className = `cur ${on.className.replace(/\b(on|sw)\b/g, '').trim()}`; cur.style.cssText = on.style.cssText; }
 }
-/** The rows: which part is open, which are shown, and each line's current swatch. */
+/** The rows: which part is open, and each line's current swatch. */
 function syncRows() {
-  const custom = $('#custom');
-  custom.classList.toggle('focus', Boolean(ui.focus));
-  $('#btn-allparts').hidden = !ui.focus;
   for (const row of document.querySelectorAll('#custom [data-row]')) {
     const z = row.dataset.row, open = ui.open === z;
     row.classList.toggle('open', open);
-    row.classList.toggle('focused', ui.focus === z);
     row.querySelector('.row-head').setAttribute('aria-expanded', String(open));
-    const on = row.querySelector(`.swatches .sw.on`), cur = row.querySelector('.cur');
-    if (on) { cur.className = `cur ${on.className.replace(/\b(on|sw)\b/g, '').trim()}`; cur.style.cssText = on.style.cssText; }
+    showCurrent(row.querySelector('.cur'), z);
   }
+  if (ui.picker) showCurrent($('#picker .cur'), ui.picker);
+}
+
+// Clicking a part of the glider, or its label, opens a small colour picker right there.
+/** Opens the inline picker for a zone, next to a point on the screen (CSS px). */
+function showRow(zone, x = innerWidth / 2, y = innerHeight / 2) {
+  if (!ZONES[zone]) return;
+  const el = $('#picker');
+  ui.picker = zone;
+  el.innerHTML = `<header><span class="cur" aria-hidden="true"><i></i></span><span class="pk-title"><b>${esc(zone === 'frame' ? 'Frame' : ZONES[zone].name)}</b><small data-name="${zone}"></small></span>
+    <button type="button" class="pk-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+    ${swatches(zone)}`;
+  el.hidden = false;
+  syncPanel();
+  // Beside the point, flipped or nudged to stay on screen.
+  const w = el.offsetWidth, h = el.offsetHeight, gap = 14, m = 12;
+  let left = x + gap, top = y - h / 2;
+  if (left + w > innerWidth - m) left = x - gap - w;
+  left = Math.max(m, Math.min(left, innerWidth - m - w));
+  top = Math.max(m, Math.min(top, innerHeight - m - h));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.querySelector('.sw.on')?.focus({ preventScroll: true });
+}
+function closePicker() {
+  if (!ui.picker) return;
+  ui.picker = null;
+  $('#picker').hidden = true;
+  $('#picker').innerHTML = '';
 }
 const tmp = new THREE.Vector3();
 function updateLabels() {
@@ -1207,7 +1227,7 @@ function syncPanel() {
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
   }
   syncLabelSwatches();
-  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length || Boolean(ui.focus && ui.focus !== row.dataset.row);
+  if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
   syncRows();
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
@@ -1281,8 +1301,7 @@ function wireUi() {
   setTime(state.hours);
   $('#time').addEventListener('input', (e) => setTime(Number(e.target.value)));
   $('#wind').addEventListener('input', (e) => { state.wind = Number(e.target.value); scenes.setWind(state.wind); });
-  $('#btn-custom').onclick = () => { ui.focus = null; ui.open = null; togglePanel('custom'); };
-  $('#btn-allparts').onclick = () => { ui.focus = null; syncPanel(); };
+  $('#btn-custom').onclick = () => togglePanel('custom');
   $('#btn-settings').onclick = () => togglePanel('settings');
   for (const b of document.querySelectorAll('.btn-close')) b.onclick = () => togglePanel(null);
   $('#btn-tour').onclick = () => (state.tour ? stopTour() : startTour());
@@ -1311,7 +1330,7 @@ function wireUi() {
     const sw = e.target.closest('.swatches .sw');
     if (sw) {
       state.colours[sw.dataset.zone] = sw.dataset.colour || null;
-      if (!ui.focus) ui.open = null;   // the list closes again; a single part stays open
+      ui.open = null;   // the line closes again
       applyLook(); syncPanel(); saveUrlSoon();
     }
   });
@@ -1351,6 +1370,16 @@ function wireUi() {
   $('#custom').addEventListener('focusin', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
   $('#custom').addEventListener('focusout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
   $('#btn-order').onclick = showOrder;
+  // The inline picker: choosing a swatch keeps it open to try others; it closes on its button,
+  // Esc, or a press anywhere else.
+  $('#picker').addEventListener('click', (e) => {
+    if (e.target.closest('.pk-close')) return closePicker();
+    const sw = e.target.closest('.swatches .sw');
+    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
+  });
+  $('#picker').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#picker').addEventListener('pointerout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
+  document.addEventListener('pointerdown', (e) => { if (ui.picker && !e.target.closest('#picker, .label')) closePicker(); }, true);
   $('#btn-share').onclick = async () => {
     saveUrl();
     try { await navigator.clipboard.writeText(location.href); toast('Link copied: it opens this glider just like this'); }
@@ -1369,7 +1398,7 @@ function wireUi() {
   canvas.addEventListener('pointerup', (e) => {
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || !record) return;
     const zone = pickZone(e);
-    if (zone) showRow(zone);
+    if (zone) showRow(zone, e.clientX, e.clientY);
   });
   canvas.addEventListener('wheel', userActive, { passive: true });
   canvas.addEventListener('webglcontextlost', (e) => {
@@ -1384,7 +1413,7 @@ function wireUi() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     userActive();
     const k = e.key.toLowerCase();
-    if (e.key === 'Escape') { if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
+    if (e.key === 'Escape') { if (ui.picker) closePicker(); else if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
     if (k === 'c') togglePanel('custom');
     else if (k === 's') togglePanel('settings');
     else if (k === 't') toggle2d();

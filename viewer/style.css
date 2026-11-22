@@ -367,11 +367,6 @@ body.quad #labels { display: none; }
 .row:not(.open) > .swatches { display: none; }
 .row.open { background: rgba(255, 255, 255, .04); }
 .row.open > .swatches { padding: 4px 6px 10px 6px; }
-/* One part only: the other sections step aside. */
-#custom.focus section:not(:has(.row.focused)), #custom.focus .body > footer { display: none; }
-#custom.focus section h3 { display: none; }
-#custom.focus { bottom: auto; max-height: calc(100% - 32px); }   /* one part: as tall as its swatches */
-#custom.focus #btn-reset { display: none; }
 .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-head small { max-width: 130px; }
 /* Part name over the chosen fabric, so neither is cut short. */
@@ -380,3 +375,17 @@ body.quad #labels { display: none; }
 .row-head .row-title { grid-area: title; }
 .row-head small { grid-area: sub; max-width: none; }
 .row-head .chev { grid-area: chev; }
+
+/* ---------------------------------------------------------------- inline colour picker */
+#picker {
+  position: fixed; z-index: 30; width: 332px; padding: 10px 12px 12px; border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .4); animation: picker .16s ease;
+}
+@keyframes picker { from { opacity: 0; transform: scale(.97); } }
+#picker header { display: grid; grid-template-columns: 24px 1fr 28px; align-items: center; gap: 10px; margin-bottom: 8px; }
+#picker .pk-title b { display: block; font-size: 13px; font-weight: 600; }
+#picker .pk-title small { display: block; font-size: 11.5px; color: var(--muted); }
+#picker .pk-title small.peek { color: var(--ink); }
+#picker .pk-close { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); }
+#picker .pk-close:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
+#picker .pk-close .ic { width: 16px; height: 16px; }

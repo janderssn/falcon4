@@ -69,8 +69,9 @@ The viewer is a glider configurator:
 - **Numpad** as in Blender: `1` front, `3` right, `7` top (with `Ctrl`: back, left,
   bottom), `9` the opposite side, `5` 2D/3D, `0` the start view, `2` `4` `6` `8` turn
   15°, `.` the selected part, `+` `-` zoom. The number row keeps switching scenes.
-- Click a sail panel, the pockets or the frame (or its label) to open Customize with only
-  that part's choices; **All parts** shows the rest.
+- Click a sail panel, the pockets or the frame (or its label) to choose its colour in a
+  small picker right there; it stays open to try colours and closes with Esc or a click
+  elsewhere.
 - **Copy link to this glider** puts the whole configuration in the link: build,
   colours, scene, settings, time of day and camera.
 - The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite
