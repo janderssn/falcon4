@@ -1118,10 +1118,12 @@ function closePicker() {
 }
 const tmp = new THREE.Vector3();
 /**
- * Labels stand close to their part but off the glider: each takes the nearest free spot around
- * its anchor (above, below or to either side), clear of the glider, the other labels and the
- * controls, with a straight leader to a dot on the part (one sharp bend where it meets the label).
- * The glider's shape on screen comes from a small mask, drawn again when the view changes.
+ * Labels stand close to their part, with a straight leader to a dot on it (one sharp bend where
+ * it meets the label). Each label has a few candidate spots: the nearest one clear of the glider
+ * in each of 12 directions, and spots on the glider right beside the dot. They are chosen
+ * together, for short leaders that run little over the glider, never cross each other or another
+ * label, and keep a label where it was. The labels fade out while the view moves and are laid
+ * out once it is still. The glider's shape on screen comes from a small mask.
  */
 const MASK_CELL = 8;                 // CSS px per mask cell
 const GLIDER_LAYER = 2;              // the glider's solid parts (not the wires), for the mask
@@ -1166,8 +1168,7 @@ function onGlider(x0, y0, x1, y1) {
   }
   return false;
 }
-const DIRS = [[1, 0], [-1, 0], [0, -1], [0, 1], [0.71, -0.71], [-0.71, -0.71], [0.71, 0.71], [-0.71, 0.71]];
-const LABEL_MIN = 40, LABEL_MAX = 560, LABEL_STICK = 200;
+const LABEL_MIN = 40, LABEL_MAX = 560;
 // zone: { dx, dy, d } the spot a label took (kept while free), its target box and anchor.
 const labelPlace = new Map();
 const LABEL_SETTLE = 160;   // ms of a still view before the labels are laid out and shown again
@@ -1195,19 +1196,9 @@ function updateLabels() {
   layoutLabels();
   for (const [z, L] of labelPlace) {
     if (!L.shown || !L.target) continue;
-    const el = labelEls.get(z), lead = leaderEls.get(z), r = L.target;
+    const el = labelEls.get(z), lead = leaderEls.get(z), r = L.target, p = L.p;
     el.style.transform = `translate(${r.x0}px, ${r.y0}px)`;
-    // Leader: straight from the dot, with one sharp bend into the side of the label facing it.
-    const p = L.p, cy = (r.y0 + r.y1) / 2;
-    let pts;
-    if (!L.dx) {
-      const ex = Math.min(Math.max(p.x, r.x0 + 8), r.x1 - 8);
-      pts = `${p.x},${p.y} ${ex},${L.dy < 0 ? r.y1 + 2 : r.y0 - 2}`;
-    } else {
-      const side = L.dx > 0 ? r.x0 : r.x1, knee = side - Math.sign(L.dx) * 12;
-      pts = `${p.x},${p.y} ${knee},${cy} ${side - Math.sign(L.dx) * 3},${cy}`;
-    }
-    lead.line.setAttribute('points', pts);
+    lead.line.setAttribute('points', L.pts.map((q) => q.join(',')).join(' '));
     lead.dot.setAttribute('cx', p.x);
     lead.dot.setAttribute('cy', p.y);
   }
@@ -1216,27 +1207,53 @@ function updateLabels() {
 function layoutLabels() {
   const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera;
   drawLabelMask(record);
-  const panel = state.panel && !narrow.matches ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 340) + 32 : 0;
-  const box = { x0: 14, y0: 84, x1: W - panel - 76, y1: H - 84 };   // clear of the title, bars and controls
-  const placed = [];
-  let avoidGlider = true;
-  const free = (r) => r.x0 >= box.x0 && r.x1 <= box.x1 && r.y0 >= box.y0 && r.y1 <= box.y1
-    && !placed.some((q) => r.x0 < q.x1 + 8 && r.x1 > q.x0 - 8 && r.y0 < q.y1 + 6 && r.y1 > q.y0 - 6)
-    && !(avoidGlider && onGlider(r.x0 - 6, r.y0 - 4, r.x1 + 6, r.y1 + 4));
+  // On screen, clear of the title, the bars, the buttons and any open panel.
+  const huds = [...document.querySelectorAll('#title, #topbtns > *, #navstack > *, #posebar, #scene-pick, #viewbar, #chip, #custom, #settings, #picker, #swipe')]
+    .filter((el) => !el.hidden && el.offsetParent !== null).map((el) => el.getBoundingClientRect()).filter((b) => b.width && b.height);
+  const inBox = (r) => r.x0 >= 12 && r.x1 <= W - 12 && r.y0 >= 12 && r.y1 <= H - 12
+    && !huds.some((b) => r.x0 < b.right + 10 && r.x1 > b.left - 10 && r.y0 < b.bottom + 8 && r.y1 > b.top - 8);
   // The label's near edge (or corner) d px from the anchor, in direction (dx, dy).
   const rectAt = (it, dx, dy, d) => {
-    const cx = it.p.x + dx * d + Math.sign(dx) * it.w / 2, cy = it.p.y + dy * d + Math.sign(dy) * it.h / 2;
+    const cx = it.p.x + dx * d + Math.sign(Math.round(dx * 10)) * it.w / 2, cy = it.p.y + dy * d + Math.sign(Math.round(dy * 10)) * it.h / 2;
     return { x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2 };
   };
-  const along = (it, dx, dy, limit = LABEL_MAX) => {
-    for (let d = LABEL_MIN; d < limit; d += 8) { const r = rectAt(it, dx, dy, d); if (free(r)) return { d, r, dx, dy }; }
-    return null;
+  // The leader: from the dot straight to the label, with one sharp bend into its near side.
+  const leader = (p, r, dx, dy) => {
+    const cy = (r.y0 + r.y1) / 2;
+    if (Math.abs(dx) < 0.3) {   // above or below: straight to the label's edge
+      const ex = Math.min(Math.max(p.x, r.x0 + 10), r.x1 - 10);
+      return [[p.x, p.y], [ex, dy < 0 ? r.y1 + 3 : r.y0 - 3]];
+    }
+    const side = dx > 0 ? r.x0 - 3 : r.x1 + 3;
+    return [[p.x, p.y], [side - Math.sign(dx) * 12, cy], [side, cy]];
   };
-  const nearest = (it) => {
-    let best = null;
-    for (const [dx, dy] of DIRS) { const c = along(it, dx, dy, best ? best.d + 8 : LABEL_MAX); if (c && (!best || c.d < best.d)) best = c; }
-    return best;
+  const segs = (pts) => pts.slice(1).map((q, i) => [pts[i], q]);
+  const len = (pts) => segs(pts).reduce((s, [a, b]) => s + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+  // Pixels of the leader that run over the glider (past the first few, which leave the part).
+  const overGlider = (pts) => {
+    let n = 0, t = 0;
+    for (const [a, b] of segs(pts)) {
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (let s = 0; s < l; s += 4, t += 4) {
+        if (t < 14) continue;
+        const x = a[0] + (b[0] - a[0]) * s / l, y = a[1] + (b[1] - a[1]) * s / l;
+        if (onGlider(x, y, x, y)) n += 4;
+      }
+    }
+    return n;
   };
+  const cross = (a, b, c, d) => {
+    const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+    return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+  };
+  const hitsRect = ([a, b], r) => {
+    for (let s = 0; s <= 1; s += 0.1) { const x = a[0] + (b[0] - a[0]) * s, y = a[1] + (b[1] - a[1]) * s; if (x > r.x0 - 2 && x < r.x1 + 2 && y > r.y0 - 2 && y < r.y1 + 2) return true; }
+    return false;
+  };
+
+  // The labels in view, each with its candidate spots: the nearest clear spot in each of 12
+  // directions, scored on its own (leader length, leader over the glider, a change of side).
+  const items = [];
   for (const [z, side, at] of LABEL_ZONES) {
     const el = labelEls.get(z), lead = leaderEls.get(z);
     if (!el) continue;
@@ -1252,21 +1269,58 @@ function layoutLabels() {
     labelPlace.set(z, L);
     L.shown = shown;
     if (!shown) continue;
-    const it = { p, w: el.offsetWidth, h: el.offsetHeight || 18 };
-    // Stable: the same spot while it is free; else the same direction, unless another side is
-    // much nearer; else anywhere on screen clear of the other labels.
-    let best = null;
-    if (L.d !== undefined) { const r = rectAt(it, L.dx, L.dy, L.d); if (free(r)) best = { d: L.d, r, dx: L.dx, dy: L.dy }; }
-    if (!best) {
-      const same = L.d !== undefined ? along(it, L.dx, L.dy) : null;
-      const any = nearest(it);
-      best = same && (!any || same.d <= any.d + LABEL_STICK) ? same : any;
+    const it = { z, L, p, w: el.offsetWidth, h: el.offsetHeight || 18, cands: [] };
+    for (let k = 0; k < 12; k++) {
+      const ang = k * Math.PI / 6, dx = Math.round(Math.cos(ang) * 100) / 100, dy = Math.round(Math.sin(ang) * 100) / 100;
+      for (let d = LABEL_MIN; d < LABEL_MAX; d += 8) {
+        const r = rectAt(it, dx, dy, d);
+        if (!inBox(r)) break;
+        if (onGlider(r.x0 - 6, r.y0 - 4, r.x1 + 6, r.y1 + 4)) continue;
+        const pts = leader(p, r, dx, dy);
+        const same = L.dx !== undefined && Math.abs(L.dx - dx) < 0.01 && Math.abs(L.dy - dy) < 0.01;
+        it.cands.push({ dx, dy, d, r, pts, cost: len(pts) + 2.5 * overGlider(pts) + (same ? 0 : 60) });
+        break;
+      }
     }
-    if (!best) { avoidGlider = false; best = nearest(it); avoidGlider = true; }
-    if (!best) best = { d: LABEL_MIN, dx: 1, dy: 0, r: rectAt(it, 1, 0, LABEL_MIN) };
-    placed.push(best.r);
-    Object.assign(L, { dx: best.dx, dy: best.dy, d: best.d, target: best.r, p, w: it.w, h: it.h });
+    // On the glider right beside the dot: tidier than a long leader across the glider.
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, -1], [0, 1]]) {
+      const r = rectAt(it, dx, dy, 24);
+      if (inBox(r)) it.cands.push({ dx, dy, d: 24, r, pts: leader(p, r, dx, dy), cost: 420 });
+    }
+    if (!it.cands.length) { const r = rectAt(it, 1, 0, LABEL_MIN); it.cands.push({ dx: 1, dy: 0, d: LABEL_MIN, r, pts: leader(p, r, 1, 0), cost: 4000 }); }
+    it.cands.sort((x, y) => x.cost - y.cost);
+    items.push(it);
   }
+
+  // Two labels together: overlapping labels are out; crossing leaders and a leader through
+  // another label cost a lot.
+  const pair = (A, B) => {
+    const r = A.r, q = B.r;
+    if (r.x0 < q.x1 + 8 && r.x1 > q.x0 - 8 && r.y0 < q.y1 + 6 && r.y1 > q.y0 - 6) return 1e6;
+    let c = 0;
+    const sa = segs(A.pts), sb = segs(B.pts);
+    for (const s of sa) for (const t of sb) if (cross(s[0], s[1], t[0], t[1])) c += 500;
+    for (const s of sa) if (hitsRect(s, q)) c += 400;
+    for (const t of sb) if (hitsRect(t, r)) c += 400;
+    return c;
+  };
+  // Start from each label's own best, then move one label at a time to whichever of its spots
+  // lowers the total, until nothing improves.
+  const pick = items.map(() => 0);
+  const total = (i, c) => items[i].cands[c].cost + items.reduce((s, it, j) => (j === i ? s : s + pair(items[i].cands[c], it.cands[pick[j]])), 0);
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false;
+    for (let i = 0; i < items.length; i++) {
+      let best = pick[i], bestCost = total(i, pick[i]);
+      for (let c = 0; c < items[i].cands.length; c++) { const t = total(i, c); if (t < bestCost - 1) { best = c; bestCost = t; } }
+      if (best !== pick[i]) { pick[i] = best; changed = true; }
+    }
+    if (!changed) break;
+  }
+  items.forEach((it, i) => {
+    const c = it.cands[pick[i]];
+    Object.assign(it.L, { dx: c.dx, dy: c.dy, d: c.d, target: c.r, pts: c.pts, p: it.p, w: it.w, h: it.h });
+  });
 }
 
 // ------------------------------------------------------------------ customize and settings panels
