@@ -537,6 +537,8 @@ function firstSentence(text) {
   const s = cut > 0 ? text.slice(0, cut) : text;
   return s.length > 150 ? `${s.slice(0, 147)}…` : s;
 }
+/** A real part number, or '' for placeholders such as "(sail)". */
+const partNo = (part) => { const n = (part.info.part_no || '').trim(); return /^\(.*\)$/.test(n) ? '' : n; };
 const selRec = () => (state.selSide === 'B' && other ? other : record);
 function renderChip() {
   const chip = $('#chip');
@@ -545,7 +547,7 @@ function renderChip() {
   const concept = CONCEPTS.find((c) => c.re.test(part.name));
   chip.hidden = false;
   chip.innerHTML = `<div class="chip-text"><b>${esc(concept ? concept.name : part.name)}</b>
-    <span class="chip-meta">${other && state.compare ? `${esc(selRec().source.label)} · ` : ''}${concept ? `${esc(part.name)} · ` : ''}${esc(CATEGORIES[part.group])}${part.info.part_no ? ` · <span class="pn">${esc(part.info.part_no)}</span>` : ''}</span>
+    <span class="chip-meta">${other && state.compare ? `${esc(selRec().source.label)} · ` : ''}${concept ? `${esc(part.name)} · ` : ''}${esc(CATEGORIES[part.group])}${partNo(part) ? ` · <span class="pn">${esc(partNo(part))}</span>` : ''}</span>
     <span class="chip-lead">${esc(concept ? concept.text : firstSentence(part.info.description) || GROUP_TEXT[part.group])}</span></div>
     <button type="button" class="chip-btn" data-act="focus" title="Go to it">Go to it</button>
     <button type="button" class="chip-close" data-act="close" aria-label="Close (Esc)"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
