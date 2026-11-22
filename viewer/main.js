@@ -1033,10 +1033,16 @@ function zoneAnchor(rec, zone, side, at) {
   }
   return (rec.zoneAnchors[zone] = anchor);
 }
+const SVGNS = 'http://www.w3.org/2000/svg';
+const leaderEls = new Map();   // zone: { line, dot }
 function buildLabels() {
   const host = $('#labels');
   host.innerHTML = '';
   labelEls.clear();
+  leaderEls.clear();
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.classList.add('leaders');
+  host.append(svg);
   for (const [zone] of LABEL_ZONES) {
     if (!record.tints[zone]?.meshes.length) continue;
     const el = document.createElement('button');
@@ -1047,6 +1053,10 @@ function buildLabels() {
     el.onclick = () => { const r = el.getBoundingClientRect(); showRow(zone, r.right, r.top + r.height / 2); };
     host.append(el);
     labelEls.set(zone, el);
+    const line = document.createElementNS(SVGNS, 'polyline'), dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('r', '3');
+    svg.append(line, dot);
+    leaderEls.set(zone, { line, dot });
   }
   syncLabelSwatches();
 }
@@ -1105,25 +1115,134 @@ function closePicker() {
   $('#picker').innerHTML = '';
 }
 const tmp = new THREE.Vector3();
+/**
+ * Labels stand close to their part but off the glider: each takes the nearest free spot around
+ * its anchor (above, below or to either side), clear of the glider, the other labels and the
+ * controls, with a straight leader to a dot on the part (one sharp bend where it meets the label).
+ * The glider's shape on screen comes from a small mask, drawn again when the view changes.
+ */
+const MASK_CELL = 8;                 // CSS px per mask cell
+const GLIDER_LAYER = 2;              // the glider's solid parts (not the wires), for the mask
+const labelMask = { target: null, data: null, cols: 0, rows: 0, key: '', flat: new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }) };
+/** Draws the glider (no wires) as white on black, a cell per MASK_CELL px, and reads it back. */
+function drawLabelMask(rec) {
+  const cols = Math.ceil(innerWidth / MASK_CELL), rows = Math.ceil(innerHeight / MASK_CELL);
+  const M = labelMask;
+  if (!M.target || M.cols !== cols || M.rows !== rows) {
+    M.target?.dispose();
+    M.target = new THREE.WebGLRenderTarget(cols, rows);
+    M.data = new Uint8Array(cols * rows * 4);
+    M.cols = cols; M.rows = rows;
+  }
+  if (!rec.maskLayer) {
+    for (const mesh of rec.meshes) if (!['04', '05'].includes(mesh.userData.part.group)) mesh.layers.enable(GLIDER_LAYER);
+    rec.maskLayer = true;
+  }
+  const cam = rig.camera, layers = cam.layers.mask, bg = scene.background, ov = scene.overrideMaterial, fog = scene.fog;
+  const autoShadow = renderer.shadowMap.autoUpdate, clear = renderer.getClearColor(new THREE.Color()), alpha = renderer.getClearAlpha();
+  cam.layers.set(GLIDER_LAYER);
+  scene.background = null; scene.overrideMaterial = M.flat; scene.fog = null;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setClearColor(0x000000, 1);
+  renderer.setRenderTarget(M.target);
+  renderer.clear();
+  renderer.render(scene, cam);
+  renderer.readRenderTargetPixels(M.target, 0, 0, cols, rows, M.data);
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(clear, alpha);
+  renderer.shadowMap.autoUpdate = autoShadow;
+  cam.layers.mask = layers; scene.background = bg; scene.overrideMaterial = ov; scene.fog = fog;
+}
+/** True if the screen rectangle touches the glider. */
+function onGlider(x0, y0, x1, y1) {
+  const M = labelMask;
+  const c0 = Math.max(0, Math.floor(x0 / MASK_CELL)), c1 = Math.min(M.cols - 1, Math.floor(x1 / MASK_CELL));
+  const r0 = Math.max(0, Math.floor(y0 / MASK_CELL)), r1 = Math.min(M.rows - 1, Math.floor(y1 / MASK_CELL));
+  for (let r = r0; r <= r1; r++) {
+    const row = (M.rows - 1 - r) * M.cols;   // the target's rows run bottom up
+    for (let c = c0; c <= c1; c++) if (M.data[(row + c) * 4] > 0) return true;
+  }
+  return false;
+}
+const DIRS = [[1, 0], [-1, 0], [0, -1], [0, 1], [0.71, -0.71], [-0.71, -0.71], [0.71, 0.71], [-0.71, 0.71]];
+const labelDirs = new Map();   // zone: the direction its label took last, to keep it there
 function updateLabels() {
   if (!record || !state.names) return;
+  const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera;
+  // Lay out again only when the view, the pose or the size changes.
+  const key = `${cam.matrixWorld.elements.map((v) => v.toFixed(4))}${cam.projectionMatrix.elements[0].toFixed(5)}${cam.projectionMatrix.elements[5].toFixed(5)}${m.elements.map((v) => v.toFixed(4))}${W}x${H}${state.panel}${state.compare}${state.split}${state.wires}${state.battens}`;
+  if (key === labelMask.key) return;
+  labelMask.key = key;
+  drawLabelMask(record);
+  const panel = state.panel && !narrow.matches ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 340) + 32 : 0;
+  const box = { x0: 14, y0: 84, x1: W - panel - 76, y1: H - 84 };   // clear of the title, bars and controls
   const placed = [];
-  const items = LABEL_ZONES.filter(([z]) => labelEls.has(z)).map(([z, side, at]) => {
+  let avoidGlider = true;
+  const free = (x0, y0, x1, y1) => x0 >= box.x0 && x1 <= box.x1 && y0 >= box.y0 && y1 <= box.y1
+    && !placed.some((q) => x0 < q.x1 + 6 && x1 > q.x0 - 6 && y0 < q.y1 + 4 && y1 > q.y0 - 4)
+    && !(avoidGlider && onGlider(x0 - 4, y0 - 3, x1 + 4, y1 + 3));
+  const items = [];
+  for (const [z, side, at] of LABEL_ZONES) {
+    const el = labelEls.get(z), lead = leaderEls.get(z);
+    if (!el) continue;
     const a = zoneAnchor(record, z, side, at);
-    return a && { z, p: a.clone().applyMatrix4(record.root.matrixWorld) };
-  }).filter(Boolean).sort((a, b) => a.p.distanceTo(rig.camera.position) - b.p.distanceTo(rig.camera.position));
-  for (const { z, p } of items) {
-    const el = labelEls.get(z);
-    tmp.copy(p).project(rig.camera);
-    const x = (tmp.x + 1) / 2 * innerWidth, y = (1 - tmp.y) / 2 * innerHeight;
-    let ok = record.tints[z].meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1 && !(other && state.compare && x > state.split * innerWidth - 20);
-    if (ok) {
-      const w = ZONES[z].name.length * 8 + 34, r = { x0: x - w / 2, x1: x + w / 2, y0: y - 44, y1: y };
-      if (placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) ok = false; else placed.push(r);
-    }
+    if (a) { tmp.copy(a).applyMatrix4(m).project(cam); }
+    const p = a && { x: (tmp.x + 1) / 2 * W, y: (1 - tmp.y) / 2 * H };
+    const ok = a && record.tints[z].meshes.some((mesh) => mesh.visible) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+      && !(other && state.compare && p.x > state.split * W - 20);
     el.style.opacity = ok ? 1 : 0;
     el.style.pointerEvents = ok ? 'auto' : 'none';
-    el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+    lead.line.style.display = lead.dot.style.display = ok ? '' : 'none';
+    if (ok) items.push({ z, el, lead, p, w: el.offsetWidth, h: el.offsetHeight || 18 });
+  }
+  // The nearest free spot in one direction: the label's near edge (or corner) d px from the anchor.
+  const along = (it, dx, dy, limit = 520) => {
+    for (let d = 18; d < limit; d += 8) {
+      const cx = it.p.x + dx * d + Math.sign(dx) * it.w / 2, cy = it.p.y + dy * d + Math.sign(dy) * it.h / 2;
+      const r = { x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2 };
+      if (free(r.x0, r.y0, r.x1, r.y1)) return { d, r, dx, dy };
+    }
+    return null;
+  };
+  for (const it of items) {
+    // Stable: a label keeps its direction while that spot stays within STICK px of the nearest one.
+    const STICK = 56;
+    let best = null;
+    for (const [dx, dy] of DIRS) {
+      const c = along(it, dx, dy, best ? best.d + 8 : 520);
+      if (c && (!best || c.d < best.d)) best = c;
+    }
+    const prev = labelDirs.get(it.z);
+    if (prev && best && (prev[0] !== best.dx || prev[1] !== best.dy)) {
+      const keep = along(it, prev[0], prev[1], best.d + STICK + 8);
+      if (keep) best = keep;
+    }
+    if (!best) {   // nowhere off the glider: the nearest spot on screen, clear of the other labels
+      avoidGlider = false;
+      for (const [dx, dy] of DIRS) { const c = along(it, dx, dy, best ? best.d + 8 : 520); if (c && (!best || c.d < best.d)) best = c; }
+      avoidGlider = true;
+    }
+    if (best) labelDirs.set(it.z, [best.dx, best.dy]);
+    if (!best) {   // nowhere free: beside the anchor, on the glider
+      best = { d: 0, dx: 1, dy: 0, r: { x0: it.p.x + 14, y0: it.p.y - it.h / 2, x1: it.p.x + 14 + it.w, y1: it.p.y + it.h / 2 } };
+    }
+    placed.push(best.r);
+    const { r } = best;
+    it.el.style.transform = `translate(${r.x0}px, ${r.y0}px)`;
+    // Leader: straight from the dot, with one sharp bend into the side of the label facing it.
+    const cy = (r.y0 + r.y1) / 2;
+    const side = best.dx > 0 ? r.x0 : best.dx < 0 ? r.x1 : null;
+    let pts;
+    if (side === null) {   // above or below: straight up or down to the label's edge
+      const ex = Math.min(Math.max(it.p.x, r.x0 + 8), r.x1 - 8);
+      pts = `${it.p.x},${it.p.y} ${ex},${best.dy < 0 ? r.y1 + 2 : r.y0 - 2}`;
+    } else {
+      const knee = side - Math.sign(best.dx) * 10;
+      pts = `${it.p.x},${it.p.y} ${knee},${cy} ${side - Math.sign(best.dx) * 3},${cy}`;
+    }
+    it.lead.line.setAttribute('points', pts);
+    it.lead.dot.setAttribute('cx', it.p.x);
+    it.lead.dot.setAttribute('cy', it.p.y);
   }
 }
 
