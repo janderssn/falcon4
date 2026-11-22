@@ -129,7 +129,6 @@ class Environments {
     if (studio) {                                                        // centred under the glider
       studio.grid.position.set(this.center.x, 0.002, this.center.z);
       studio.floor.position.set(this.center.x, -0.004, this.center.z);
-      studio.sky.position.set(this.center.x, 0, this.center.z);
     }
   }
 
@@ -226,10 +225,10 @@ function buildStudio(envs) {
   grid.renderOrder = -1;
   grid.visible = false;
   group.add(grid);
-  const { floor, sky } = buildBlueprint();
-  group.add(floor, sky);
+  const floor = buildBlueprint();
+  group.add(floor);
   return {
-    group, grid, floor, sky, catcher, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
+    group, grid, floor, catcher, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
     sunColor: 0xfff8eb, sunIntensity: 1.6, sunDir: new THREE.Vector3(3, 8, 5).normalize(),
     hemi: [0xffffff, 0x919781, 0.6], fillIntensity: 0.5,
   };
@@ -237,13 +236,13 @@ function buildStudio(envs) {
 
 /**
  * The studio's three backgrounds. Dark and Light are a plain colour with the shadow on an
- * invisible floor; Blueprint is a cyan floor with a white grid that runs out to a hazy
- * horizon under a blue sky, like a design tool's viewport.
+ * invisible floor; Blueprint is one cyan-blue for floor and sky, with a soft pool of light
+ * and a white grid under the glider that fade out before any horizon shows.
  */
 const STUDIO_LOOKS = {
   dark: { background: '#222c38', grid: [0xdfe6ee, 1], shadow: [0x000000, 0.28], hemi: [0xffffff, 0x919781, 0.6] },
   light: { background: '#e6e9ec', grid: [0x3c4654, 1.15], shadow: [0x1c2430, 0.2], hemi: [0xffffff, 0xb9bdb3, 0.75] },
-  blueprint: { background: '#57c8f2', grid: [0xffffff, 1], shadow: [0x063a6b, 0.3], hemi: [0xe6f7ff, 0x5fb4dc, 0.75] },
+  blueprint: { background: '#1f9ee0', grid: [0xffffff, 1], shadow: [0x063a6b, 0.3], hemi: [0xe6f7ff, 0x5fb4dc, 0.75] },
 };
 function applyBackdrop(studio, name) {
   const look = STUDIO_LOOKS[name] || STUDIO_LOOKS.dark;
@@ -254,50 +253,48 @@ function applyBackdrop(studio, name) {
   studio.catcher.material.color.set(look.shadow[0]);
   studio.catcher.material.opacity = look.shadow[1];
   studio.hemi = look.hemi;
-  studio.floor.visible = studio.sky.visible = name === 'blueprint';
+  studio.floor.visible = name === 'blueprint';
 }
 
-/** Blueprint floor and sky. Both shaders blend to the same haze colour at the horizon, so they meet without a seam. */
+/**
+ * Blueprint floor: a transparent sheet over the plain blue background. It adds a soft pool of
+ * light under the glider and a white grid; both fade out with distance, so far away there is
+ * only the background colour and no horizon.
+ */
 function buildBlueprint() {
-  const uniforms = {
-    uFloor: { value: new THREE.Color('#1fa6e6') },
-    uHaze: { value: new THREE.Color('#a8e6fb') },
-    uSky: { value: new THREE.Color('#33b6ee') },
-  };
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000), new THREE.ShaderMaterial({
-    uniforms, extensions: { derivatives: true }, fog: false,
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, extensions: { derivatives: true }, fog: false,
+    uniforms: { uSpot: { value: new THREE.Color('#bdeeff') } },
     vertexShader: `#include <common>
       #include <logdepthbuf_pars_vertex>
       varying vec2 vXY;
-      varying vec3 vWorld;
       void main() {
         vXY = position.xy;
-        vec4 w = modelMatrix * vec4(position, 1.0);
-        vWorld = w.xyz;
-        gl_Position = projectionMatrix * viewMatrix * w;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         #include <logdepthbuf_vertex>
       }`,
     fragmentShader: `#include <common>
       #include <logdepthbuf_pars_fragment>
-      uniform vec3 uFloor, uHaze;
+      uniform vec3 uSpot;
       varying vec2 vXY;
-      varying vec3 vWorld;
-      // Anti-aliased grid lines that fade out where they get closer together than a few pixels.
+      // Anti-aliased grid lines that also fade where they get closer together than a few pixels.
       float lines(float step, float width) {
         vec2 p = vXY / step, d = fwidth(p);
         vec2 g = abs(fract(p - 0.5) - 0.5) / d;
         float l = 1.0 - min(min(g.x, g.y) / width, 1.0);
-        return l * (1.0 - smoothstep(0.08, 0.35, max(d.x, d.y)));
+        return l * (1.0 - smoothstep(0.05, 0.22, max(d.x, d.y)));
       }
       void main() {
         #include <logdepthbuf_fragment>
-        float dist = length(vWorld.xz - cameraPosition.xz);
-        float haze = smoothstep(15.0, 420.0, dist);
-        vec3 c = mix(uFloor, uHaze, pow(haze, 0.7));
-        float a = max(lines(1.0, 1.0) * 0.38, lines(5.0, 1.5) * 0.75);
-        a *= 1.0 - smoothstep(60.0, 380.0, dist);
-        c = mix(c, vec3(1.0), a);
-        gl_FragColor = vec4(c, 1.0);
+        float r = length(vXY);
+        float spot = exp(-r * r / 32.0);                                     // soft pool of light, ~6 m across
+        float grid = max(lines(1.0, 1.0) * 0.45, lines(5.0, 1.5) * 0.7);
+        grid *= exp(-r * r / 45.0);                                          // gone by about 14 m
+        float spotA = spot * 0.42;
+        float a = grid + spotA * (1.0 - grid);
+        if (a < 0.002) discard;
+        vec3 c = mix(uSpot, vec3(1.0), grid / max(a, 1e-4));
+        gl_FragColor = vec4(c, a);
         #include <colorspace_fragment>
       }`,
   }));
@@ -306,34 +303,7 @@ function buildBlueprint() {
   floor.renderOrder = -2;
   floor.name = 'blueprint floor';
   floor.visible = false;
-
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(2400, 48, 24), new THREE.ShaderMaterial({
-    uniforms, side: THREE.BackSide, depthWrite: false, fog: false,
-    vertexShader: `#include <common>
-      #include <logdepthbuf_pars_vertex>
-      varying vec3 vDir;
-      void main() {
-        vDir = normalize(position);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        #include <logdepthbuf_vertex>
-      }`,
-    fragmentShader: `#include <common>
-      #include <logdepthbuf_pars_fragment>
-      uniform vec3 uHaze, uSky, uFloor;
-      varying vec3 vDir;
-      void main() {
-        #include <logdepthbuf_fragment>
-        float y = vDir.y;
-        vec3 c = y >= 0.0 ? mix(uHaze, uSky, pow(smoothstep(0.0, 0.45, y), 0.6)) : mix(uHaze, uFloor, smoothstep(0.0, 0.3, -y));
-        c = mix(c, vec3(1.0), (1.0 - smoothstep(0.0, 0.006, abs(y))) * 0.7);   // a thin bright horizon line
-        gl_FragColor = vec4(c, 1.0);
-        #include <colorspace_fragment>
-      }`,
-  }));
-  sky.renderOrder = -3;
-  sky.name = 'blueprint sky';
-  sky.visible = false;
-  return { floor, sky };
+  return floor;
 }
 
 // ---------------------------------------------------------------- hangar

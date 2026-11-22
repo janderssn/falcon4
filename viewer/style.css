@@ -75,10 +75,10 @@ body.panel-open #topbtns { opacity: 0; pointer-events: none; }
 .bd-light { background: #e6e9ec; }
 .bd-blueprint {
   background:
-    linear-gradient(#33b6ee, #a8e6fb 44%, transparent 44%),
-    linear-gradient(rgba(255, 255, 255, .7) 1px, transparent 1px) 0 0 / 100% 6px,
-    linear-gradient(90deg, rgba(255, 255, 255, .7) 1px, transparent 1px) 0 0 / 9px 100%,
-    linear-gradient(#a8e6fb, #1fa6e6 70%);
+    radial-gradient(ellipse 55% 60% at 50% 62%, rgba(189, 238, 255, .55), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, .5) 1px, transparent 1px) 0 0 / 100% 6px,
+    linear-gradient(90deg, rgba(255, 255, 255, .5) 1px, transparent 1px) 0 0 / 9px 100%,
+    #1f9ee0;
 }
 .row { margin-bottom: 12px; }
 .row-name { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-bottom: 7px; }
