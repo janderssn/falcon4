@@ -121,6 +121,16 @@
     <button type="button" id="btn-zout" title="Zoom out (−)" aria-label="Zoom out"><svg viewBox="0 0 24 24" class="ic"><path d="M5.5 12h13"/></svg></button>
   </div>
 </div>
+<div id="viewbar" class="hud glass" role="group" aria-label="Plan views" hidden>
+  <button type="button" data-view="front" aria-pressed="false" title="Front: from the nose">Front</button>
+  <button type="button" data-view="top" aria-pressed="false" title="Top: from above">Top</button>
+  <button type="button" data-view="bottom" aria-pressed="false" title="Bottom: from below">Bottom</button>
+  <button type="button" data-view="left" aria-pressed="false" title="Left: from the left wing">Left</button>
+  <button type="button" data-view="right" aria-pressed="false" title="Right: from the right wing">Right</button>
+  <i class="sep" aria-hidden="true"></i>
+  <button type="button" data-view="quad" aria-pressed="false" title="Four views at once: top, front, left and 3D">4 views</button>
+</div>
+<div id="quad" aria-hidden="true" hidden><span><b>Top</b></span><span><b>Front</b></span><span><b>Left</b></span><span><b>3D</b></span></div>
 <div id="swipe" class="hud" role="slider" tabindex="0" aria-label="Divider between the two builds" hidden><span class="swipe-tag left" id="swipe-a"></span><span class="swipe-grip" aria-hidden="true"></span><span class="swipe-tag right" id="swipe-b"></span></div>
 <div id="labels" aria-hidden="true"></div>
 <div id="toast" role="status"></div>

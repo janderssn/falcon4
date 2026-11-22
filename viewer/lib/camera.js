@@ -111,7 +111,7 @@ export class CameraRig extends EventTarget {
   }
 
   /** Pose that frames a world box when seen from `dir`. */
-  frame(box, dir = this.pose().dir, margin = 1.12) {
+  frame(box, dir = this.pose().dir, margin = 1.12, aspect = this.aspect) {
     const d = new THREE.Vector3(...(Array.isArray(dir) ? dir : dir.toArray())).normalize();
     const center = box.getCenter(new THREE.Vector3());
     const up = new THREE.Vector3(0, 1, 0);
@@ -126,7 +126,7 @@ export class CameraRig extends EventTarget {
       h = Math.max(h, Math.abs(p.dot(screenUp)));
       depth = Math.max(depth, p.dot(d));
     }
-    let size = Math.max(2 * h, (2 * w) / this.aspect) * margin;
+    let size = Math.max(2 * h, (2 * w) / aspect) * margin;
     // In perspective the near half of the box looks bigger; step back for it.
     if (this.projection === 'perspective') size += 2 * depth * TAN * 0.9;
     return { target: center, dir: d, size: Math.max(size, 0.05) };
