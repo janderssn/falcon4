@@ -38,8 +38,8 @@ const darkFibres = (id) => /^uvpxb|^uvp2lxb|^uvodl|^odl/.test(id || '');
 // Woven cloth reflects little and softly: at full strength the studio's light glances off
 // a dark colour at shallow angles and leaves a milky veil that reads as see-through.
 const LOOK = {
-  [CLOTH.dacron]: { roughness: 0.7, specular: 0.35, clearcoat: 0 },
-  [CLOTH.ripstop]: { roughness: 0.74, specular: 0.35, clearcoat: 0 },
+  [CLOTH.dacron]: { roughness: 0.7, specular: 0.2, clearcoat: 0 },
+  [CLOTH.ripstop]: { roughness: 0.74, specular: 0.2, clearcoat: 0 },
   // Film: the gloss is the clear coat's sharp reflection; under it the film adds only a
   // faint, broad sheen (at full strength it lights up as a white blob under studio lights).
   [CLOTH.laminate]: { roughness: 0.6, specular: 0.15, clearcoat: 1, clearcoatRoughness: 0.08 },
