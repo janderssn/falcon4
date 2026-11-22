@@ -2,7 +2,9 @@
 // P5 undersurface), from the Wills Wing colour picker data (willswing.com/inventory,
 // assets/data/color-picker/models.json, model type 50 "Falcon"). The colours are Wills
 // Wing's screen approximations of the Pantone matches; opacity < 1 marks the clear and
-// tinted laminates. Format: [id, name, sRGB hex, opacity].
+// tinted laminates. These make the "Wills Wing" colour profile; CALIBRATED below holds the
+// "Calibrated" one.
+// Format: [id, name, sRGB hex, opacity].
 export const FALCON_FABRICS = {
   P1: [
     ["black-2100", "Black 2100", "#000000", 1.0],
@@ -17,7 +19,7 @@ export const FALCON_FABRICS = {
     ["medium-blue-7314", "Medium Blue 7314", "#47b4fa", 1.0],
     ["red-3125", "Red 3125", "#ff1721", 1.0],
     ["silver-2328", "Silver 2328", "#a8a8a8", 1.0],
-    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 1.0],
+    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 0.6],
     ["uvp2lx-white", "UVP2LX-White", "#ffffff", 1.0],
     ["uvpxb05", "UVPXB05", "#c8c8c8", 0.4],
     ["white-170", "White 170", "#ffffff", 1.0],
@@ -37,7 +39,7 @@ export const FALCON_FABRICS = {
     ["red-3125", "Red 3125", "#ff1721", 1.0],
     ["silver-2328", "Silver 2328", "#a8a8a8", 1.0],
     ["uvp2lx-clear", "UVP2LX-Clear", "#ffffff", 0.05],
-    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 1.0],
+    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 0.6],
     ["uvp2lx-white", "UVP2LX-White", "#ffffff", 1.0],
     ["uvpxb05", "UVPXB05", "#c8c8c8", 0.4],
     ["white-170", "White 170", "#ffffff", 1.0],
@@ -57,7 +59,7 @@ export const FALCON_FABRICS = {
     ["silver-2328", "Silver 2328", "#a8a8a8", 1.0],
     ["uvp2lx", "UVP2LX", "#c8c8c8", 0.4],
     ["uvp2lx-clear", "UVP2LX-Clear", "#ffffff", 0.05],
-    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 1.0],
+    ["uvp2lx-gold", "UVP2LX-Gold", "#ffb801", 0.6],
     ["uvp2lx-white", "UVP2LX-White", "#ffffff", 1.0],
     ["uvpxb05", "UVPXB05", "#c8c8c8", 0.4],
     ["white-170", "White 170", "#ffffff", 1.0],
@@ -95,4 +97,15 @@ export const FALCON_FABRICS = {
     ["silver-2328", "Silver 2328", "#a8a8a8", 1.0],
     ["white-170", "White 170", "#ffffff", 1.0],
   ],
+};
+
+// The "Calibrated" colour profile: fabrics whose colour is matched to the real cloth instead of
+// the picker's screen colour (sRGB hex). Anything not listed keeps the picker colour.
+// Blue 7304 and Red 3125 are the opus model's baked sail colours (linear 0.02, 0.10, 0.62 and
+// 0.78, 0.05, 0.03), which match photos of a real Falcon 4. White 170 Dacron reflects about
+// 85 %, not the pure white of the picker.
+export const CALIBRATED = {
+  'blue-7304': '#2759ce',
+  'red-3125': '#e53f30',
+  'white-170': '#eeeee9',
 };

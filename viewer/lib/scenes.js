@@ -2,6 +2,7 @@
 // The studio and the hangar are generated in code, like the meadow.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Meadow } from './meadow.js';
 
 /** Backgrounds for the studio, chosen in Settings. */
@@ -17,8 +18,13 @@ export const SCENES = {
   hill: { label: 'Hill' },
 };
 
-/** Strength of the 2D light from below, about the studio sun's. */
-const VIEW_LIGHT = 1.6;
+/**
+ * The 2D light from below: the studio sun mirrored under the floor, so a view from below
+ * is lit as the view from above. Not from the camera: a light along the view reflects
+ * straight back and leaves a pale veil over the sail.
+ */
+const VIEW_LIGHT = 0.8;
+const VIEW_DIR = new THREE.Vector3(3, -8, 5).normalize();
 
 /** Switches between the scenes; the meadow is only built when the hill is first chosen. */
 export class Scenes {
@@ -95,13 +101,37 @@ export class Scenes {
     this.backdrop = BACKDROPS[name] ? name : 'dark';
     this.indoor.setBackdrop(this.backdrop);
   }
+  /**
+   * Seen from below, the studio floor (grid, spotlight pool, shadow) lies between the camera
+   * and the glider and would veil it. Then it draws first, as a background, and the glider
+   * covers it.
+   */
+  floorBehind(camera) {
+    const studio = this.indoor.built?.studio;
+    if (!studio) return;
+    const below = camera.position.y < studio.group.getWorldPosition(new THREE.Vector3()).y;
+    if (below === studio.below) return;
+    studio.below = below;
+    for (const o of [studio.floor, studio.catcher]) {
+      const m = o.material;
+      m.transparent = !below;
+      m.blending = below ? THREE.CustomBlending : THREE.NormalBlending;   // still blended, in the opaque pass
+      m.depthTest = !below;
+      if (m.userData.depthWrite === undefined) m.userData.depthWrite = m.depthWrite;
+      m.depthWrite = below ? false : m.userData.depthWrite;   // or the glider would fail against it
+      o.renderOrder = below ? -10 : 0;
+      m.needsUpdate = true;
+    }
+  }
+
   update(camera, seconds) {
     if (this.current === 'hill') this.meadow.update(camera, seconds);
     const look = camera.getWorldDirection(new THREE.Vector3());
     const up = camera.isOrthographicCamera ? Math.max(0, look.y) : 0;   // 1 looking straight up
     this.viewLight.intensity = VIEW_LIGHT * up;
-    this.viewLight.position.copy(camera.position);
+    this.floorBehind(camera);
     this.viewLight.target.position.copy(camera.position).add(look);
+    this.viewLight.position.copy(this.viewLight.target.position).addScaledVector(VIEW_DIR, 20);
     this.viewLight.target.updateMatrixWorld();
   }
 }
@@ -207,9 +237,18 @@ const BUILDERS = { studio: buildStudio, hangar: buildHangar };
 function buildStudio(envs) {
   const group = new THREE.Group();
   envs.root.add(group);
+  // Reflections and fill light from a real photo studio: Poly Haven "Studio Small 09" by
+  // Sergej Majboroda (CC0), env/studio_small_09_1k.hdr. Three's room stands in while it loads.
   const room = new RoomEnvironment();
   const envMap = envs.pmrem.fromScene(room, 0.04).texture;
   room.dispose();
+  new HDRLoader().loadAsync('./env/studio_small_09_1k.hdr').then((hdr) => {
+    hdr.mapping = THREE.EquirectangularReflectionMapping;
+    const studio = envs.built.studio;
+    studio.envMap = envs.pmrem.fromEquirectangular(hdr).texture;
+    hdr.dispose();
+    if (envs.current === 'studio') envs.set('studio', envs.sun.castShadow);
+  }, (e) => console.warn('Studio HDRI unavailable; using the room light.', e));
   const catcher = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.28 }));
   catcher.rotation.x = -Math.PI / 2;
   catcher.receiveShadow = true;

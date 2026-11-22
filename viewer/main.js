@@ -3,7 +3,9 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
-import { FALCON_FABRICS } from './lib/fabrics.js';
+import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
+import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost } from './lib/cloth.js';
+import { FilmBlur } from './lib/frost.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -37,6 +39,8 @@ const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 
 const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
   : zone === 'pockets' ? FALCON_FABRICS.P3.filter((f) => f[3] === 1)
   : FALCON_FABRICS[ZONES[zone].panel]);
+// The fabric's colour in the chosen colour profile (settings): the Wills Wing picker's, or calibrated.
+const hexOf = ([id, , hex]) => (state.profile === 'calibrated' && CALIBRATED[id]) || hex;
 // Baked colours of the textured opus sail panels (linear RGB), from falcon4-opus f4/sailmat.py.
 const BAKED = { white: [0.93, 0.93, 0.9], blue: [0.02, 0.1, 0.62], red: [0.78, 0.05, 0.03] };
 
@@ -72,7 +76,7 @@ const GROUP_TEXT = {
 // what differs from this; "built" in it means the colour as built.
 const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
   colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
-  seeThrough: 0.1,
+  seeThrough: 0,
   pose: 'tail',
   cam: '-1.181,0.903,-2.922,-0.3601,0.1682,0.9176,3.593,p',
 };
@@ -95,14 +99,17 @@ const state = {
   selSide: 'A',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
+  profile: params.get('colors') === 'cal' ? 'calibrated' : 'default',   // settings: colour profile
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
+  frost: params.has('frost') ? params.get('frost') === '1' : !small,   // settings: laminates blur what is behind them
   wind: 1, sel: null, tour: false,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
   panel: null,                                     // the open side panel: 'custom', 'settings' or none
 };
 let catalog, record, renderer, rig, scenes;
+let frostActive = false;                            // film blur in use this frame (see renderFrost)
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
 const canvas = $('#scene');
@@ -206,19 +213,32 @@ async function setModel(id, first = false) {
 function prepareTints(rec) {
   if (rec.tints) return;
   rec.tints = {};
-  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [] };
+  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), plain: clothUniforms(), fabric: undefined };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
     if (!zone) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
-    for (const m of Object.values(mesh.userData.materials)) {
+    // Sail cloth becomes a physical material whose look follows the cloth type (lib/cloth.js).
+    const cloth = SAIL_ZONES.includes(zone);
+    if (cloth) {
+      const M = mesh.userData.materials;
+      for (const key of Object.keys(M)) { const old = M[key]; M[key] = toCloth(old, mesh); old.dispose(); }
+      mesh.material = M.base;
+      mesh.receiveShadow = true;   // frame and batten shadows on the cloth (and through it, backlit)
+    }
+    for (const [key, m] of Object.entries(mesh.userData.materials)) {
       m.userData.original = m.color.clone();
       m.userData.originalRough = m.roughness;
-      if (!m.map) continue;
+      if (!m.map && !cloth) continue;
       const baked = /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
+      const tinted = Boolean(m.map);
       m.onBeforeCompile = (s) => {
+        // Only the sail panels take the panel's cloth; pockets coloured with it stay woven.
+        const panel = /^Sail P/.test(name);
+        if (cloth) patchCloth(s, panel ? t.cloth : t.plain, m, panel && key !== 'ghost');
+        if (!tinted) return;
         s.uniforms.uTint = t.uTint; s.uniforms.uTintOn = t.uTintOn; s.uniforms.uBaked = { value: new THREE.Color(...baked) };
         s.fragmentShader = s.fragmentShader
           .replace('#include <common>', '#include <common>\nuniform vec3 uTint; uniform float uTintOn; uniform vec3 uBaked;')
@@ -228,7 +248,7 @@ function prepareTints(rec) {
               diffuseColor.rgb = uTint * clamp(dot(diffuseColor.rgb, W) / max(dot(uBaked, W), 0.02), 0.0, 1.5);
             }`);
       };
-      m.customProgramCacheKey = () => 'tint';
+      m.customProgramCacheKey = () => (cloth ? 'cloth' : '') + (tinted ? 'tint' : '');
       m.needsUpdate = true;
     }
   }
@@ -236,7 +256,7 @@ function prepareTints(rec) {
 
 function fabricOf(zone, id) {
   const hit = fabricsFor(zone).find((c) => c[0] === id);
-  return hit ? { colour: new THREE.Color().setStyle(hit[2]), opacity: hit[3], name: hit[1] } : null;
+  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1] } : null;
 }
 
 function applyLook() {
@@ -248,8 +268,18 @@ function lookOf(rec, side) {
   for (const [zone, t] of Object.entries(rec.tints)) {
     const fabric = fabricOf(zone, state.colours[zone]);
     const colour = fabric?.colour;
-    if (fabric && fabric.opacity < 1) clear[zone] = fabric.opacity;
+    // Clear laminates: hazy film between opaque fibres (lib/cloth.js).
+    const sail = SAIL_ZONES.includes(zone);
+    if (fabric && fabric.opacity < 1) clear[zone] = sail ? filmAlpha(fabric.opacity) : fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
+    const id = state.colours[zone] || null;
+    if (sail && id !== t.fabric) {
+      t.fabric = id;
+      const panel = (mesh) => /^Sail P/.test(mesh.userData.materials.base.name);
+      const mats = (list) => list.flatMap((mesh) => Object.values(mesh.userData.materials));
+      setCloth(t.cloth, mats(t.meshes.filter(panel)), id, fabric?.opacity ?? 1);
+      setCloth(t.plain, mats(t.meshes.filter((mesh) => !panel(mesh))), null);
+    }
     if (colour) t.uTint.value.copy(colour);
     for (const mesh of t.meshes) {
       mesh.userData.zone = zone;
@@ -273,8 +303,13 @@ function lookOf(rec, side) {
     else if (role === 'tie') visible = state.battens && !sailGone;
     else if (role === 'eyelet') visible = !sailGone;
     // See-through sail, or a clear laminate panel.
-    const laminate = clear[mesh.userData.zone];
-    const ghost = (part.group === '01' && state.seeThrough > 0) || laminate !== undefined;
+    // In a sail zone only the panels are laminate; pockets coloured with them stay woven.
+    const inSail = SAIL_ZONES.includes(mesh.userData.zone);
+    const laminate = !inSail || /^Sail P/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
+    // With film blur the laminate draws solid and shows the blurred scene behind it.
+    const frosted = laminate !== undefined && inSail && frostActive && state.seeThrough === 0;
+    mesh.userData.frost = frosted;
+    const ghost = (part.group === '01' && state.seeThrough > 0) || (laminate !== undefined && !frosted);
     if (ghost) {
       const seeThrough = part.group === '01' ? 1 - state.seeThrough * 0.92 : 1;
       if (part.group === '01' && state.seeThrough >= 0.98) visible = false;
@@ -285,7 +320,8 @@ function lookOf(rec, side) {
       if (mat.emissive) mat.emissive.set(selected ? '#d0832a' : 0x000000);
     }
     depthTwin(mesh, ghost && visible);
-    if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35 && laminate === undefined;
+    // Laminates shade what is under them too (film and fibres take about half the light).
+    if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35;
     mesh.material = mat;
     mesh.visible = visible;
   }
@@ -800,6 +836,10 @@ function loop(now) {
   stepPoses(now);
   scenes.update(rig.camera, (now - clock0) / 1000);
   const split = plan.quad || plan.split > 0;
+  // Film blur needs one camera over the whole picture: off in four views and compare.
+  const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
+  if (fb !== frostActive) { frostActive = fb; applyLook(); }
+  frost.uFrostOn.value = 0;   // on only for a frame whose blurred picture is fresh (renderFrost)
   if (!split) { $('#quad').hidden = true; placeWallGrid(rig.pose().dir, rig.projection === 'orthographic'); }
   if (split) renderQuad();
   else if (other && state.compare) {
@@ -815,9 +855,33 @@ function loop(now) {
     renderer.render(scene, rig.camera);
     renderer.setScissorTest(false);
     record.root.visible = true; other.root.visible = true;
-  } else renderer.render(scene, rig.camera);
+  } else {
+    if (frostActive) renderFrost(rig.camera);
+    renderer.render(scene, rig.camera);
+  }
   updateLabels();
 }
+// ------------------------------------------------------------------ film blur
+// Laminates show the scene behind them blurred by distance (lib/frost.js).
+const filmBlur = new FilmBlur();
+function renderFrost(camera) {
+  const films = [], hide = [];
+  scene.traverse((o) => {
+    if (!o.visible) return;
+    const m = o.material;
+    if (o.userData.frost) films.push(o);
+    else if (m && !Array.isArray(m) && (m.transparent || m.colorWrite === false)) hide.push(o);
+  });
+  if (!films.length) return;   // no laminate in sight: nothing reads the picture
+  // Sail panels hold the blurred texture: unbound while drawing (a feedback loop makes
+  // WebGL skip those draws).
+  frost.uFrostColor.value = null;
+  const size = filmBlur.render(renderer, scene, camera, films, hide);
+  frost.uFrostColor.value = filmBlur.texture;
+  frost.uFrostSize.value.copy(size);
+  frost.uFrostOn.value = 1;
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   rig.setAspect(innerWidth / innerHeight);
@@ -966,7 +1030,7 @@ const thumb = (name) => `url('./thumbs/${name}.jpg')`;
 function swatches(zone) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
-    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hex};--o:${opacity}"><i></i></button>`).join('')}
+    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`).join('')}
   </div>`;
 }
 function buildPanel() {
@@ -1013,6 +1077,15 @@ function syncPanel() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
+  for (const b of document.querySelectorAll('.sw[data-colour]:not(.original)')) {
+    const f = fabricsFor(b.dataset.zone).find((c) => c[0] === b.dataset.colour);
+    if (f) b.style.setProperty('--c', hexOf(f));
+  }
+  for (const b of document.querySelectorAll('[data-profile]')) {
+    const on = b.dataset.profile === state.profile;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
   for (const el of document.querySelectorAll('[data-name]')) {
     const z = el.dataset.name, id = state.colours[z];
     el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
@@ -1041,6 +1114,7 @@ function syncPanel() {
   $('#backdrop-hint').hidden = state.scene === 'studio';
   document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
   $('#opt-shadows').checked = state.shadows;
+  $('#opt-frost').checked = state.frost;
   $('#opt-spot').checked = state.spot;
   $('#opt-spot').disabled = state.scene !== 'studio';
   $('#spot-hint').textContent = state.scene === 'studio' ? 'Soft light under the glider' : 'In the studio';
@@ -1126,6 +1200,13 @@ function wireUi() {
   $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
     if (build && build.dataset.model !== state.model) setModel(build.dataset.model);
+    const pr = e.target.closest('[data-profile]');
+    if (pr && pr.dataset.profile !== state.profile) {
+      state.profile = pr.dataset.profile;
+      applyLook();
+      syncPanel();
+      saveUrlSoon();
+    }
     const bd = e.target.closest('[data-backdrop]');
     if (bd && bd.dataset.backdrop !== state.backdrop) {
       state.backdrop = bd.dataset.backdrop;
@@ -1136,6 +1217,7 @@ function wireUi() {
   });
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
+  $('#opt-frost').addEventListener('change', (e) => { state.frost = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
@@ -1195,7 +1277,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&bg=blueprint&shadows=0&spot=0&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&colors=cal&bg=blueprint&shadows=0&spot=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -1218,6 +1300,8 @@ function saveUrl() {
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
+  if (state.profile === 'calibrated') q.set('colors', 'cal');
+  if (state.frost !== !small) q.set('frost', state.frost ? '1' : '0');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');
