@@ -888,15 +888,11 @@ const orderOptions = new Set();   // options ticked in the order, kept while the
 function showOrder() {
   if (!record) return;
   saveUrl();
-  // A picture of the glider as it is on screen.
-  if (frostActive) renderFrost(rig.camera);
-  renderer.render(scene, rig.camera);
-  const image = renderer.domElement.toDataURL('image/jpeg', 0.88);
   const builtHex = (z) => document.querySelector(`.sw.original[data-zone="${z}"]`)?.style.getPropertyValue('--c') || '#ccc';
   const panels = ['p1', 'p2', 'p3', 'p4', 'p5'].filter((z) => record.tints[z]?.meshes.length).map((z) => {
     const id = state.colours[z];
     const f = id && fabricsFor(z).find((c) => c[0] === id);
-    return { zone: z, name: ZONES[z].name, asBuilt: builtHex(z), fabric: f ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
+    return { zone: z, label: ZONES[z].name, asBuilt: builtHex(z), fabric: f ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
   });
   const fill = (p) => (p.fabric ? p.fabric.hex : p.asBuilt);
   const by = Object.fromEntries(panels.map((p) => [p.zone, p]));
@@ -904,9 +900,9 @@ function showOrder() {
   if (state.colours.pockets) extras.push({ name: 'Batten pockets', value: fabricOf('pockets', state.colours.pockets)?.name });
   if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
   openOrder({
-    title: 'Wills Wing Falcon 4 170',
-    subtitle: `${record.source.label} build · ${state.profile === 'calibrated' ? 'calibrated colours' : 'Wills Wing picker colours'}`,
-    image, diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
+    model: 'Wills Wing Falcon 4', size: '170',
+    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker',
+    diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
   }, orderOptions);
 }
 
@@ -927,12 +923,14 @@ function planSvg(panel) {
   const draw = (z, f0, f1) => {
     const p = panel(z);
     if (!p) return '';
-    return band(f0, f1).map((pts) => `<polygon points="${pts}" fill="${p.fill}" fill-opacity="${p.opacity < 1 ? 0.35 + p.opacity * 0.5 : 1}"/>`).join('');
+    return band(f0, f1).map((pts) => `<polygon points="${pts}" fill="${p.fill}" fill-opacity="${p.opacity < 1 ? 0.25 + p.opacity * 0.5 : 1}"/>`).join('');
   };
+  const tag = (z, f) => { const [x, y] = at(0.62, f); return panel(z) ? `<text x="${W - x}" y="${y + 1.6}">${z.toUpperCase()}</text>` : ''; };
   const top = draw('p1', 0, 0.2) + draw('p2', 0.2, 0.42) + draw('p3', 0.42, 0.78) + draw('p4', 0.78, 1);
-  const under = draw('p5', 0, 0.45) + `<g opacity=".35">${draw('p3', 0.45, 0.78)}${draw('p4', 0.78, 1)}</g>`;
-  const svg = (inner, label) => `<figure><svg viewBox="0 0 ${W} 92" role="img" aria-label="${label}"><g stroke="rgba(255,255,255,.55)" stroke-width=".6">${inner}</g></svg><figcaption>${label}</figcaption></figure>`;
-  return svg(top, 'Top') + svg(under, 'Bottom');
+  const topTags = tag('p1', 0.1) + tag('p2', 0.31) + tag('p3', 0.6) + tag('p4', 0.89);
+  const under = draw('p5', 0, 0.45) + `<g fill-opacity="0">${draw('p3', 0.45, 0.78)}${draw('p4', 0.78, 1)}</g>`;
+  const svg = (inner, tags, label) => `<figure><svg viewBox="0 0 ${W} 92" role="img" aria-label="${label}"><g stroke="#1a1a1a" stroke-width=".5" stroke-linejoin="round">${inner}</g><g class="of-tags">${tags}</g></svg><figcaption>${label}</figcaption></figure>`;
+  return svg(top, topTags, 'Top surface') + svg(under, tag('p5', 0.22), 'Bottom surface');
 }
 
 function resize() {
@@ -1080,16 +1078,16 @@ function updateLabels() {
 
 // ------------------------------------------------------------------ customize and settings panels
 const thumb = (name) => `url('./thumbs/${name}.jpg')`;
-// A swatch shows what it is without hovering: plain colours as dots, the heavier woven cloths
-// with their ripstop, laminates with their scrim (dark in the "B" cloths); a "$" marks a cloth
-// that costs extra, and a light ring keeps dark swatches visible on the dark panel.
+// A swatch shows what it is: plain colours as dots; after a thin divider, the heavier woven
+// cloths with a faint ripstop and the laminates with a faint scrim (dark in the "B" cloths).
+// Dark swatches get a light ring. The row header names the swatch under the pointer.
 const luma = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
 function swatch(zone, [id, name, hex, opacity]) {
   const kind = clothKind(id);
   const sail = SAIL_ZONES.includes(zone) && zone !== 'pockets';
   const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
-    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark', sail && isUpgrade(id) && 'extra'].filter(Boolean).join(' ');
-  const label = sail && isUpgrade(id) ? `${name} (extra cost)` : name;
+    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
+  const label = sail && isUpgrade(id) ? `${name} · extra cost` : name;
   return `<button type="button" class="${cls}" data-zone="${zone}" data-colour="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`;
 }
 function swatches(zone) {
@@ -1098,7 +1096,7 @@ function swatches(zone) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
     ${colours.map((f) => swatch(zone, f)).join('')}
-    ${cloths.length ? `<span class="sw-group">Cloth</span>${cloths.map((f) => swatch(zone, f)).join('')}` : ''}
+    ${cloths.length ? `<span class="sw-gap" aria-hidden="true"></span>${cloths.map((f) => swatch(zone, f)).join('')}` : ''}
   </div>`;
 }
 function buildPanel() {
@@ -1107,7 +1105,7 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name"><span>${ZONES[z].name}${ORDER.colouredPanel.zones.includes(z) ? `<em class="cost" data-cost="${z}" hidden>+$${ORDER.colouredPanel.price}</em>` : ''}</span><small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
   $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame')}</div>`;
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
@@ -1132,18 +1130,16 @@ function placeBars() {
     el.style.left = `${Math.max(w / 2 + gap, Math.min(W / 2, edge - gap - w / 2))}px`;
   }
 }
-/** The chosen fabric's name in each row header (or the one under the pointer), and cost tags. */
+/** Each row header names the chosen fabric (or the swatch under the pointer) and any extra cost. */
 function syncNames(hover = null) {
   for (const el of document.querySelectorAll('[data-name]')) {
     const z = el.dataset.name;
     if (hover && hover.dataset.zone === z) { el.textContent = hover.title; el.classList.add('peek'); continue; }
     const id = state.colours[z];
-    el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
+    const c = ORDER.colouredPanel;
+    const cost = c.zones.includes(z) && id && id !== c.standard ? ` · +$${c.price}` : SAIL_ZONES.includes(z) && z !== 'pockets' && isUpgrade(id) ? ' · extra cost' : '';
+    el.textContent = (id ? fabricOf(z, id)?.name || 'As built' : 'As built') + cost;
     el.classList.remove('peek');
-  }
-  for (const el of document.querySelectorAll('[data-cost]')) {
-    const id = state.colours[el.dataset.cost];
-    el.hidden = !id || id === ORDER.colouredPanel.standard;
   }
 }
 
