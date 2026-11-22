@@ -79,8 +79,17 @@
       <div id="builds" class="builds" role="radiogroup" aria-label="Build"></div>
     </section>
     <section>
+      <h3>Studio background</h3>
+      <div class="backdrops" role="radiogroup" aria-label="Studio background">
+        <button type="button" class="backdrop" data-backdrop="dark" role="radio"><i class="bd-dark"></i><span>Dark</span></button>
+        <button type="button" class="backdrop" data-backdrop="light" role="radio"><i class="bd-light"></i><span>Light</span></button>
+        <button type="button" class="backdrop" data-backdrop="blueprint" role="radio"><i class="bd-blueprint"></i><span>Blueprint</span></button>
+      </div>
+      <p class="note" id="backdrop-hint" hidden>Switch to the Studio scene to see it.</p>
+    </section>
+    <section>
       <h3>Display</h3>
-      <label class="switch"><input type="checkbox" id="opt-grid"><i></i><span>Floor grid<small class="hint">In the studio</small></span></label>
+      <label class="switch"><input type="checkbox" id="opt-grid"><i></i><span>Floor grid<small class="hint" id="grid-hint">In the studio</small></span></label>
       <label class="switch"><input type="checkbox" id="opt-shadows" checked><i></i><span>Shadows</span></label>
     </section>
   </div>
