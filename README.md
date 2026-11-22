@@ -37,8 +37,10 @@ The viewer is a glider configurator:
 
 - **Compare** (top of the view buttons, `V`): shows the other build to the right of
   a divider you can drag, in the same pose and colours.
-- **Settings** (gear, top right corner, `S`): pick the build (Astra or Opus), turn the floor
-  grid in the studio on or off, and turn the shadows on or off.
+- **Settings** (gear, top right corner, `S`): pick the build (Astra or Opus), the colour
+  profile (the Wills Wing colour picker's colours, or calibrated to the real cloth where
+  measured: Blue 7304, Red 3125, White 170), turn the floor grid in the studio on or off, and
+  turn the shadows on or off.
 - **Customize** (top right, `C`): colour the sail
   panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2 forward, P3 middle,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each

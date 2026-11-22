@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
-import { FALCON_FABRICS } from './lib/fabrics.js';
+import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -37,6 +37,8 @@ const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 
 const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
   : zone === 'pockets' ? FALCON_FABRICS.P3.filter((f) => f[3] === 1)
   : FALCON_FABRICS[ZONES[zone].panel]);
+// The fabric's colour in the chosen colour profile (settings): the Wills Wing picker's, or calibrated.
+const hexOf = ([id, , hex]) => (state.profile === 'calibrated' && CALIBRATED[id]) || hex;
 // Baked colours of the textured opus sail panels (linear RGB), from falcon4-opus f4/sailmat.py.
 const BAKED = { white: [0.93, 0.93, 0.9], blue: [0.02, 0.1, 0.62], red: [0.78, 0.05, 0.03] };
 
@@ -95,6 +97,7 @@ const state = {
   selSide: 'A',
   names: params.get('names') === '1',
   hours: Number(params.get('t')) || 9.5,
+  profile: params.get('colors') === 'cal' ? 'calibrated' : 'default',   // settings: colour profile
   backdrop: BACKDROPS[params.get('bg')] ? params.get('bg') : 'dark',   // settings: studio background
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
@@ -236,7 +239,7 @@ function prepareTints(rec) {
 
 function fabricOf(zone, id) {
   const hit = fabricsFor(zone).find((c) => c[0] === id);
-  return hit ? { colour: new THREE.Color().setStyle(hit[2]), opacity: hit[3], name: hit[1] } : null;
+  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1] } : null;
 }
 
 function applyLook() {
@@ -966,7 +969,7 @@ const thumb = (name) => `url('./thumbs/${name}.jpg')`;
 function swatches(zone) {
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
-    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hex};--o:${opacity}"><i></i></button>`).join('')}
+    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`).join('')}
   </div>`;
 }
 function buildPanel() {
@@ -1010,6 +1013,15 @@ function syncPanel() {
   for (const b of document.querySelectorAll('.build')) b.classList.toggle('on', b.dataset.model === state.model);
   for (const b of document.querySelectorAll('.sw')) {
     const on = (state.colours[b.dataset.zone] || '') === b.dataset.colour;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  for (const b of document.querySelectorAll('.sw[data-colour]:not(.original)')) {
+    const f = fabricsFor(b.dataset.zone).find((c) => c[0] === b.dataset.colour);
+    if (f) b.style.setProperty('--c', hexOf(f));
+  }
+  for (const b of document.querySelectorAll('[data-profile]')) {
+    const on = b.dataset.profile === state.profile;
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
@@ -1126,6 +1138,13 @@ function wireUi() {
   $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
     if (build && build.dataset.model !== state.model) setModel(build.dataset.model);
+    const pr = e.target.closest('[data-profile]');
+    if (pr && pr.dataset.profile !== state.profile) {
+      state.profile = pr.dataset.profile;
+      applyLook();
+      syncPanel();
+      saveUrlSoon();
+    }
     const bd = e.target.closest('[data-backdrop]');
     if (bd && bd.dataset.backdrop !== state.backdrop) {
       state.backdrop = bd.dataset.backdrop;
@@ -1195,7 +1214,7 @@ function wireUi() {
 }
 
 // ------------------------------------------------------------------ address bar: the whole configuration
-// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&bg=blueprint&shadows=0&spot=0&t=19.5&cam=...
+// ?model=opus&scene=hill&p1=red-3125&p3=built&frame=black&xray=0.6&pose=bar&wires=0&battens=0&names=1&grid=1&colors=cal&bg=blueprint&shadows=0&spot=0&t=19.5&cam=...
 function readCamera() { return parseCamera(params.get('cam')); }
 function parseCamera(text) {
   const c = (text || '').split(',');
@@ -1218,6 +1237,7 @@ function saveUrl() {
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
+  if (state.profile === 'calibrated') q.set('colors', 'cal');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');
