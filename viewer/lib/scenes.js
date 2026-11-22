@@ -22,6 +22,7 @@ export class Scenes {
     this.hours = 9.5;
     this.wind = 1;
     this.shadows = true;
+    this.grid = false;
     this.ground = null;
   }
 
@@ -42,6 +43,7 @@ export class Scenes {
       this.meadow?.setActive(false);
       this.indoor.setActive(true);
       this.indoor.set(name, this.shadows);
+      this.indoor.setGrid(this.grid);
     }
   }
 
@@ -65,6 +67,8 @@ export class Scenes {
   setTime(h) { this.hours = h; if (this.current === 'hill') this.meadow.setTime(h); }
   setWind(w) { this.wind = w; this.meadow?.setWind(w); }
   setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); }
+  /** A metre grid on the studio floor. */
+  setGrid(on) { this.grid = on; this.indoor.setGrid(on); }
   update(camera, seconds) { if (this.current === 'hill') this.meadow.update(camera, seconds); }
 }
 
@@ -105,6 +109,8 @@ class Environments {
     this.sun.target.position.copy(this.center);
     this.sun.position.copy(this.center).addScaledVector(dir, 25);
     this.sun.target.updateMatrixWorld();
+    const grid = this.built.studio?.grid;
+    if (grid) grid.position.set(this.center.x, 0.002, this.center.z);   // centred under the glider
   }
 
   set(name, shadows = true) {
@@ -131,6 +137,8 @@ class Environments {
     this.renderer.shadowMap.needsUpdate = true;
   }
 
+  setGrid(on) { const g = this.built.studio?.grid; if (g) g.visible = on; }
+
   /** Shows or hides the studio and hangar, with their lights. */
   setActive(on) {
     this.root.visible = on;
@@ -150,8 +158,41 @@ function buildStudio(envs) {
   catcher.rotation.x = -Math.PI / 2;
   catcher.receiveShadow = true;
   group.add(catcher);
+  // Metre grid, brighter every 5 m, fading out towards the edge; hidden unless asked for.
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, extensions: { derivatives: true },
+    uniforms: { uColor: { value: new THREE.Color(0xdfe6ee) } },
+    vertexShader: `#include <common>
+      #include <logdepthbuf_pars_vertex>
+      varying vec2 vXY;
+      void main() {
+        vXY = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        #include <logdepthbuf_vertex>
+      }`,
+    fragmentShader: `#include <common>
+      #include <logdepthbuf_pars_fragment>
+      uniform vec3 uColor;
+      varying vec2 vXY;
+      float lines(float step, float width) {
+        vec2 g = abs(fract(vXY / step - 0.5) - 0.5) / fwidth(vXY / step);
+        return 1.0 - min(min(g.x, g.y) / width, 1.0);
+      }
+      void main() {
+        #include <logdepthbuf_fragment>
+        float a = max(lines(1.0, 1.0) * 0.22, lines(5.0, 1.4) * 0.42);
+        a *= 1.0 - smoothstep(6.0, 22.0, length(vXY));
+        if (a < 0.003) discard;
+        gl_FragColor = vec4(uColor, a);
+      }`,
+  }));
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = 0.002;
+  grid.renderOrder = -1;
+  grid.visible = false;
+  group.add(grid);
   return {
-    group, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
+    group, grid, envMap, envIntensity: 0.7, background: new THREE.Color('#222c38'), exposure: 1.05,
     sunColor: 0xfff8eb, sunIntensity: 1.6, sunDir: new THREE.Vector3(3, 8, 5).normalize(),
     hemi: [0xffffff, 0x919781, 0.6], fillIntensity: 0.5,
   };

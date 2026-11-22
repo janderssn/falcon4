@@ -37,7 +37,9 @@ The viewer is a glider configurator:
 
 - **Compare** (top of the view buttons, `V`): shows the other build to the right of
   a divider you can drag, in the same pose and colours.
-- **Customize** (top right, `C`): pick the build (Astra or Opus); colour the sail
+- **Settings** (gear, top right, `S`): pick the build (Astra or Opus), turn the floor
+  grid in the studio on or off, and turn the shadows on or off.
+- **Customize** (top right, `C`): colour the sail
   panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2, P3,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
   panel (the clear and tinted laminates are see-through), plus the batten pockets;
@@ -56,7 +58,7 @@ The viewer is a glider configurator:
 - Click a part to see what it is, with its Wills Wing part number where the build
   has one; double-click to go to it.
 - **Copy link to this glider** puts the whole configuration in the link: build,
-  colours, scene, time of day and camera.
+  colours, scene, settings, time of day and camera.
 - The viewer opens on the Opus build, magenta with Medium Blue P3 and P4, a graphite
   frame, the sail slightly see-through, resting tail down, seen from below the wing
   (`DEFAULTS` in [`viewer/main.js`](viewer/main.js)). **Reset** returns to these
