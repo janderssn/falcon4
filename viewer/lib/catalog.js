@@ -20,18 +20,15 @@ export async function loadCatalog() {
   const list = Array.isArray(data) ? data : data.models;
   const sources = new Map();
   for (const m of list) {
-    for (const [frame, asset] of Object.entries({ standard: m, ...m.controlFrames })) {
-      const id = frame === 'standard' ? m.id : `${m.id}:${frame}`;
-      const v = asset.version ? `?v=${encodeURIComponent(asset.version)}` : '';
-      sources.set(id, {
-        id, modelId: m.id, controlFrame: frame, label: m.label,
-        short: frame === 'standard' ? m.label : `${m.label} · ${asset.label}`,
-        title: m.title, description: asset.description, download: asset.download,
-        rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
-        versionLabel: asset.version ? `current · ${asset.version}` : 'current', current: true,
-        glb: `./${asset.glb}${v}`, parts: `./${asset.parts}${v}`,
-      });
-    }
+    const base = {
+      modelId: m.id, title: m.title, description: m.description, download: m.download,
+      rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
+    };
+    const v = m.version ? `?v=${encodeURIComponent(m.version)}` : '';
+    sources.set(m.id, {
+      ...base, id: m.id, label: m.label, short: m.label, versionLabel: m.version ? `current · ${m.version}` : 'current',
+      glb: `./${m.glb}${v}`, parts: `./${m.parts}${v}`, current: true,
+    });
   }
   return { sources, models: list };
 }
