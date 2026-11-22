@@ -73,7 +73,7 @@ const GROUP_TEXT = {
 const DEFAULTS = THUMB ? { colours: {}, seeThrough: 0, pose: 'bar', cam: null } : {
   colours: { p1: 'magenta-3958', p2: 'magenta-3958', p3: 'medium-blue-7314', p4: 'medium-blue-7314', p5: 'magenta-3958', pockets: 'magenta-3958', frame: 'graphite' },
   seeThrough: 0.1,
-  pose: 'tail',
+  pose: 'bar',
   cam: '-0.279,0.824,-2.549,-0.3601,0.1682,0.9176,3.276,p',
 };
 const pick = (key, list) => {
@@ -99,12 +99,9 @@ const state = {
   shadows: params.get('shadows') !== '0',          // settings: shadows
   spot: params.get('spot') !== '0',                // settings: soft spotlight in the studio
   wind: 1, sel: null, tour: false,
-  grid: false,                                     // settings: floor grid in the studio, set below
+  grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
   panel: !small && !THUMB ? 'custom' : null,       // the open side panel: 'custom', 'settings' or none
 };
-// The grid starts on for Blueprint and off for the others; the link only says when it differs.
-const gridDefault = (bg) => bg === 'blueprint';
-state.grid = params.has('grid') ? params.get('grid') === '1' : gridDefault(state.backdrop);
 let catalog, record, renderer, rig, scenes;
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
@@ -353,25 +350,14 @@ function applyPose(animate = false) {
   anchors.clear();
 }
 const POSE_TIME = 700;
-/** Swings the builds from their last pose to the new one; true while they move. */
-function stepPoses(now) {
-  let moving = false;
-  for (const rec of [record, other]) {
-    const m = rec?.swing;
-    if (!m) continue;
-    const k = Math.min((now - m.start) / POSE_TIME, 1), e = k * k * (3 - 2 * k);
-    rec.root.quaternion.slerpQuaternions(m.q0, m.q1, e);
-    rec.root.position.lerpVectors(m.p0, m.p1, e);
-    rec.root.updateMatrixWorld(true);
-    if (k === 1) rec.swing = null; else moving = true;
-  }
-  if (moving) anchors.clear();
-  return moving;
-}
-function poseOf(rec, animate = false) {
-  const q0 = rec.root.quaternion.clone(), p0 = rec.root.position.clone();
-  if (!rec.rest) rec.rest = restingPose(rec);
-  const { pivot, angle } = rec.rest[restPose()] || { pivot: rec.rest.nose.pivot, angle: 0 };   // standing: no tilt
+/**
+ * Places the build tilted by `angle` about X, rocking on the basebar where it touches the
+ * ground: about its front for a nose-down tilt (angle > 0), about its back for tail down.
+ * The contact stays put at y = 0 for every angle, so a swing rolls over the bar rather than
+ * sliding or lifting the glider; nose down to tail down rocks back through standing.
+ */
+function tiltTo(rec, angle) {
+  const pivot = (angle >= 0 ? rec.rest.nose : rec.rest.tail).pivot;
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
   rec.root.quaternion.copy(q);
   rec.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
@@ -379,15 +365,34 @@ function poseOf(rec, animate = false) {
   // every build: the builds' own origins differ, so without this they jump when switching.
   rec.root.position.y -= pivot.y;
   rec.root.updateMatrixWorld(true);
+  rec.angle = angle;
+}
+/** Swings the builds from their last pose to the new one; true while they move. */
+function stepPoses(now) {
+  let moving = false;
+  for (const rec of [record, other]) {
+    const m = rec?.swing;
+    if (!m) continue;
+    const k = Math.min((now - m.start) / POSE_TIME, 1), e = k * k * (3 - 2 * k);
+    tiltTo(rec, m.a0 + (m.a1 - m.a0) * e);
+    if (k === 1) rec.swing = null; else moving = true;
+  }
+  if (moving) anchors.clear();
+  return moving;
+}
+function poseOf(rec, animate = false) {
+  if (!rec.rest) rec.rest = restingPose(rec);
+  const a0 = rec.angle ?? 0;
+  const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
+  tiltTo(rec, a1);
   // Exact bounds: the quick box of rotated parts reaches below the glider.
   rec.box.setFromObject(rec.root, true);
   rec.ground = 0;
   // The box above is the one of the new pose, so views frame where the glider ends up.
   rec.swing = null;
-  if (animate && (!q0.equals(rec.root.quaternion) || !p0.equals(rec.root.position))) {
-    rec.swing = { q0, p0, q1: rec.root.quaternion.clone(), p1: rec.root.position.clone(), start: performance.now() };
-    rec.root.quaternion.copy(q0); rec.root.position.copy(p0);
-    rec.root.updateMatrixWorld(true);
+  if (animate && a0 !== a1) {
+    rec.swing = { a0, a1, start: performance.now() };
+    tiltTo(rec, a0);
   }
 }
 
@@ -1019,8 +1024,6 @@ function wireUi() {
     const bd = e.target.closest('[data-backdrop]');
     if (bd && bd.dataset.backdrop !== state.backdrop) {
       state.backdrop = bd.dataset.backdrop;
-      state.grid = gridDefault(state.backdrop);      // each background starts with its own grid setting
-      scenes.setGrid(state.grid);
       scenes.setBackdrop(state.backdrop);
       syncPanel();
       saveUrlSoon();
@@ -1108,7 +1111,7 @@ function saveUrl() {
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
-  if (state.grid !== gridDefault(state.backdrop)) q.set('grid', state.grid ? '1' : '0');
+  if (state.grid) q.set('grid', '1');
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');
