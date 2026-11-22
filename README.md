@@ -42,10 +42,10 @@ The viewer is a glider configurator:
   measured: Blue 7304, Red 3125, White 170), turn the floor grid in the studio on or off,
   turn the shadows on or off, and turn the studio effects (ambient occlusion, a faint glow
   on highlights, multisampled edges) on or off; they start off on phones.
-- **Sail cloth:** each panel's material follows its fabric. Dacron has a satin sheen and
-  lets light through when backlit, with the battens and frame showing as shadows; the MT
-  cloths add a ripstop grid; the laminates are clear film under a gloss coat with the scrim
-  and X-ply fibres. The studio light is Poly Haven's "Studio Small 09" HDRI (CC0).
+- **Sail cloth:** each panel's material follows its fabric, matched to photos of the real
+  cloth. Woven polyester (Dacron) is opaque with a plain resin finish; the MT cloths add a
+  diamond ripstop of paired threads; the laminates are glossy film over an opaque scrim and
+  X-ply (black in the "B" cloths), and the film shows what is behind it blurred. The studio light is Poly Haven's "Studio Small 09" HDRI (CC0).
 - **Customize** (top right, `C`): colour the sail
   panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2 forward, P3 middle,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each

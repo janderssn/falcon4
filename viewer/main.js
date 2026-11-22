@@ -5,7 +5,7 @@ import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
 import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
 import { Post } from './lib/post.js';
-import { clothKind, clothUniforms, setClothKind, toCloth, patchCloth } from './lib/cloth.js';
+import { clothUniforms, setCloth, toCloth, patchCloth } from './lib/cloth.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -213,7 +213,7 @@ async function setModel(id, first = false) {
 function prepareTints(rec) {
   if (rec.tints) return;
   rec.tints = {};
-  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), kind: -1 };
+  for (const zone of Object.keys(ZONES)) rec.tints[zone] = { uTint: { value: new THREE.Color() }, uTintOn: { value: 0 }, meshes: [], cloth: clothUniforms(), fabric: undefined };
   for (const mesh of rec.meshes) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
@@ -266,12 +266,14 @@ function lookOf(rec, side) {
   for (const [zone, t] of Object.entries(rec.tints)) {
     const fabric = fabricOf(zone, state.colours[zone]);
     const colour = fabric?.colour;
-    if (fabric && fabric.opacity < 1) clear[zone] = fabric.opacity;
+    // Sail laminates let light through their film (lib/cloth.js); other clear parts fade.
+    const sail = SAIL_ZONES.includes(zone);
+    if (fabric && fabric.opacity < 1 && !sail) clear[zone] = fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
-    const kind = SAIL_ZONES.includes(zone) ? clothKind(state.colours[zone]) : -1;
-    if (kind !== t.kind) {
-      t.kind = kind;
-      if (kind >= 0) setClothKind(t.cloth, t.meshes.flatMap((mesh) => Object.values(mesh.userData.materials)), kind);
+    const id = state.colours[zone] || null;
+    if (sail && id !== t.fabric) {
+      t.fabric = id;
+      setCloth(t.cloth, t.meshes.flatMap((mesh) => Object.values(mesh.userData.materials)), id, fabric?.opacity ?? 1);
     }
     if (colour) t.uTint.value.copy(colour);
     for (const mesh of t.meshes) {
