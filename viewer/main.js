@@ -10,7 +10,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const params = new URLSearchParams(location.search);
 const THUMB = params.get('thumb');                   // set by tools/thumbs.mjs to render the thumbnails
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const small = matchMedia('(max-width: 760px)').matches;
+const narrow = matchMedia('(max-width: 760px)');           // phone layout: the panel is a sheet at the bottom
+const small = narrow.matches;                              // at load: sets the start state and the grass density
 
 // ------------------------------------------------------------------ what can be tweaked
 // Sail and frame zones. The sail panels follow the Wills Wing Falcon colour picker:
@@ -508,7 +509,7 @@ function viewArea() {
   const sheet = state.panel && $(`#${state.panel}`);
   const w = innerWidth, h = innerHeight;
   if (!sheet) return { x: 0, y: 0, w, h };
-  return small ? { x: 0, y: 0, w, h: h - sheet.offsetHeight } : { x: 0, y: 0, w: w - sheet.offsetWidth - 16, h };
+  return narrow.matches ? { x: 0, y: 0, w, h: h - sheet.offsetHeight } : { x: 0, y: 0, w: w - sheet.offsetWidth - 16, h };
 }
 /** The camera under a screen point and the point in its view (-1..1). */
 function viewAt(x, y) {
