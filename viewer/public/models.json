@@ -5,11 +5,21 @@
       "id": "astra",
       "label": "Astra",
       "title": "Astra build",
-      "description": "669 parts \u00b7 round control frame \u00b7 resting on the ground",
+      "description": "669 parts with the standard frame \u00b7 optional Litestream control frame",
       "glb": "models/astra/model.glb",
       "parts": "models/astra/parts.json",
       "download": "falcon4-170-astra.glb",
-      "version": "b609a2ae"
+      "version": "b609a2ae",
+      "controlFrames": {
+        "litestream": {
+          "label": "Litestream",
+          "description": "Litestream uprights with a streamlined aluminum speedbar",
+          "glb": "models/astra/litestream/model.glb",
+          "parts": "models/astra/litestream/parts.json",
+          "download": "falcon4-170-astra-litestream.glb",
+          "version": "2a12d812"
+        }
+      }
     },
     {
       "id": "opus",

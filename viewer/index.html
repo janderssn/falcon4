@@ -37,7 +37,7 @@
 <aside id="custom" class="hud glass sheet" aria-label="Customize the glider" hidden>
   <header>
     <h2>Customize</h2>
-    <button type="button" id="btn-reset" class="textbtn" title="Back to the default colours">Reset</button>
+    <button type="button" id="btn-reset" class="textbtn" title="Restore the default configuration">Reset</button>
     <button type="button" class="icon btn-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </header>
   <div class="body">
@@ -47,6 +47,15 @@
     </section>
     <section>
       <h3>Frame</h3>
+      <label id="control-frame-row" hidden>Control frame
+        <select id="control-frame">
+          <option value="standard">Standard · round uprights and speedbar</option>
+          <option value="litestream">Litestream · streamlined aluminum speedbar</option>
+        </select>
+      </label>
+      <p id="litestream-credit" class="note" hidden>Hardware by Steven Pearson and Michael W. Meier.
+        <a href="https://github.com/Pearson00/WillsWing" target="_blank" rel="noopener">Wills Wing source</a> ·
+        <a href="./models/astra/litestream/credits/NOTICE.txt" target="_blank" rel="noopener">Notices</a></p>
       <div id="frame-row"></div>
     </section>
     <section>
