@@ -5,6 +5,7 @@ import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
 import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost } from './lib/cloth.js';
+import { FilmBlur } from './lib/frost.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -860,49 +861,23 @@ function loop(now) {
   updateLabels();
 }
 // ------------------------------------------------------------------ film blur
-// The scene without the laminates (and anything see-through), with its depth, for the
-// laminates to blur by distance (lib/cloth.js), with mip levels for the blur.
-let frostTarget = null;
+// Laminates show the scene behind them blurred by distance (lib/frost.js).
+const filmBlur = new FilmBlur();
 function renderFrost(camera) {
-  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const w = size.x, h = size.y;
-  if (!frostTarget || frostTarget.width !== w || frostTarget.height !== h) {
-    frostTarget?.dispose();
-    frostTarget = new THREE.WebGLRenderTarget(w, h, {
-      type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter,
-      depthTexture: new THREE.DepthTexture(w, h, THREE.FloatType),
-    });
-  }
-  const hidden = [];
-  let films = 0;
+  const films = [], hide = [];
   scene.traverse((o) => {
     if (!o.visible) return;
     const m = o.material;
-    if (o.userData.frost) films++;
-    if (o.userData.frost || (m && !Array.isArray(m) && (m.transparent || m.colorWrite === false))) { o.visible = false; hidden.push(o); }
+    if (o.userData.frost) films.push(o);
+    else if (m && !Array.isArray(m) && (m.transparent || m.colorWrite === false)) hide.push(o);
   });
-  if (!films) { for (const o of hidden) o.visible = true; return; }   // no laminate in sight
-  // Sail panels hold these textures too: unbound while drawing into them (a feedback loop
-  // makes WebGL skip those draws).
+  if (!films.length) return;   // no laminate in sight
+  // Sail panels hold the blurred texture: unbound while drawing (a feedback loop makes
+  // WebGL skip those draws).
   frost.uFrostColor.value = null;
-  frost.uFrostDepth.value = null;
-  const auto = renderer.shadowMap.autoUpdate;
-  renderer.shadowMap.autoUpdate = false;   // the main render keeps the shadows up to date
-  renderer.setRenderTarget(frostTarget);
-  renderer.clear();
-  renderer.render(scene, camera);
-  renderer.setRenderTarget(null);
-  renderer.shadowMap.autoUpdate = auto;
-  for (const o of hidden) o.visible = true;
-  frost.uFrostColor.value = frostTarget.texture;
-  frost.uFrostDepth.value = frostTarget.depthTexture;
+  const size = filmBlur.render(renderer, scene, camera, films, hide);
+  frost.uFrostColor.value = filmBlur.texture;
   frost.uFrostSize.value.copy(size);
-  const persp = Boolean(camera.isPerspectiveCamera);
-  frost.uFrostPersp.value = persp ? 1 : 0;
-  frost.uFrostLogFar.value = persp && renderer.capabilities.logarithmicDepthBuffer ? Math.log2(camera.far + 1) : 0;
-  frost.uFrostNear.value = camera.near;
-  frost.uFrostFar.value = camera.far;
-  frost.uFrostPx.value = camera.projectionMatrix.elements[5] * size.y / 2;
 }
 
 function resize() {

@@ -15,11 +15,10 @@
 // panel's plane, and fade to their average where they get smaller than a pixel.
 //
 // The film is hazy: what is just behind it shows sharp, and the further behind, the more
-// it blurs. With "Film blur" on (frost below) the laminate reads a picture of the scene
-// drawn without the laminates, with its depth, and blurs each point by how far behind
-// the film it is, leaving out anything in front of the film (three's own transmission
-// blurs a picture that includes the frame in front, so the tubes smear into the film).
-// With it off, the film is simply blended, with its alpha from filmAlpha.
+// it blurs. With "Film blur" on, the laminate shows the scene behind it blurred by
+// distance (lib/frost.js); three's own transmission blurs a picture that includes the frame
+// in front, so the tubes smear into the film. With it off, the film is simply blended, with
+// its alpha from filmAlpha.
 import * as THREE from 'three';
 
 export const CLOTH = { dacron: 0, ripstop: 1, laminate: 2, technora: 3 };
@@ -52,23 +51,12 @@ export function clothUniforms() {
   return { uCloth: { value: 0 }, uFibre: { value: new THREE.Color(0, 0, 0) }, uFilm: { value: 1 } };
 }
 
-/**
- * Film blur, shared by every laminate: the scene without the laminates (colour with mip
- * levels, and depth), and how to read its depth. The viewer fills it each frame.
- */
+/** Film blur, shared by every laminate: the blurred scene behind the film (lib/frost.js). */
 export const frost = {
   uFrostOn: { value: 0 },
   uFrostColor: { value: null },
-  uFrostDepth: { value: null },
   uFrostSize: { value: new THREE.Vector2(1, 1) },   // drawing buffer, px
-  uFrostLogFar: { value: 0 },                       // log2(far + 1) with a logarithmic depth buffer
-  uFrostNear: { value: 0.1 },
-  uFrostFar: { value: 100 },
-  uFrostPersp: { value: 1 },
-  uFrostPx: { value: 1 },                           // px per metre at 1 m (perspective) or anywhere (orthographic)
 };
-// How far a point blurs, as a share of its distance behind the film.
-const FROST_SPREAD = 0.1;
 
 /**
  * How opaque a laminate's film is, from the fabric's opacity in fabrics.js (Wills Wing's
@@ -197,42 +185,11 @@ export function patchCloth(shader, uniforms, material, canFrost = false) {
     .replace('#include <transmission_fragment>', `#include <transmission_fragment>
       ${canFrost ? `if (uFrostOn > 0.5 && uCloth > 1.5) {
         float a = mix(uFilm, 1.0, clothFibre);
-        totalDiffuse = frostBehind(vViewPosition.z) * clothTint * (1.0 - a) + totalDiffuse * a;
+        totalDiffuse = frostBehind() * clothTint * (1.0 - a) + totalDiffuse * a;
       }` : ''}`);
 }
 
 const FROST_GLSL = /* glsl */ `
-  uniform float uFrostOn; uniform sampler2D uFrostColor; uniform sampler2D uFrostDepth; uniform vec2 uFrostSize;
-  uniform float uFrostLogFar; uniform float uFrostNear; uniform float uFrostFar; uniform float uFrostPersp; uniform float uFrostPx;
-  // Distance from the camera plane to the scene (without the laminates) at uv.
-  float frostDist(vec2 uv) {
-    float d = texture(uFrostDepth, uv).x;
-    if (uFrostPersp < 0.5) return uFrostNear + d * (uFrostFar - uFrostNear);
-    if (uFrostLogFar > 0.0) return exp2(d * uFrostLogFar) - 1.0;
-    return uFrostNear * uFrostFar / (uFrostFar - (uFrostFar - uFrostNear) * d);
-  }
-  const vec2 FROST_TAPS[12] = vec2[](
-    vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
-    vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
-    vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
-  // What shows through the film at this pixel: each point blurred by how far behind the film
-  // it is. Samples of anything in front of the film (the frame) are left out.
-  vec3 frostBehind(float filmDist) {
-    vec2 uv = gl_FragCoord.xy / uFrostSize;
-    float behind = max(frostDist(uv) - filmDist, 0.0);
-    float px = uFrostPx / (uFrostPersp > 0.5 ? max(filmDist, 0.01) : 1.0);
-    float r = min(${FROST_SPREAD.toFixed(2)} * behind * px, 64.0);
-    // Read from a level as coarse as the gap between samples, so small bright points
-    // (highlights on hardware) spread smoothly instead of sparkling as the view moves.
-    float lod = log2(max(r / 2.5, 1.0));
-    vec3 sum = textureLod(uFrostColor, uv, lod).rgb;
-    float n = 1.0;
-    for (int i = 0; i < 12; i++) {
-      vec2 t = uv + FROST_TAPS[i] * r / uFrostSize;
-      float keep = step(filmDist + 0.005, frostDist(t));
-      sum += textureLod(uFrostColor, t, lod).rgb * keep;
-      n += keep;
-    }
-    return sum / n;
-  }
+  uniform float uFrostOn; uniform sampler2D uFrostColor; uniform vec2 uFrostSize;
+  vec3 frostBehind() { return texture(uFrostColor, gl_FragCoord.xy / uFrostSize).rgb; }
 `;
