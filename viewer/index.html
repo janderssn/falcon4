@@ -47,15 +47,16 @@
     </section>
     <section>
       <h3>Frame</h3>
-      <label id="control-frame-row" hidden>Control frame
-        <select id="control-frame">
-          <option value="standard">Standard · round uprights and speedbar</option>
-          <option value="litestream">Litestream · streamlined aluminum speedbar</option>
-        </select>
-      </label>
-      <p id="litestream-credit" class="note" hidden>Hardware by Steven Pearson and Michael W. Meier.
-        <a href="https://github.com/Pearson00/WillsWing" target="_blank" rel="noopener">Wills Wing source</a> ·
-        <a href="./models/astra/litestream/credits/NOTICE.txt" target="_blank" rel="noopener">Notices</a></p>
+      <div id="control-frame-row" class="row" hidden>
+        <span class="row-name">Control frame<small id="control-frame-name"></small></span>
+        <div class="frames" role="radiogroup" aria-label="Control frame">
+          <button type="button" class="frame-opt" data-frame="standard" role="radio"><b>Standard</b><small>Round uprights and basebar</small></button>
+          <button type="button" class="frame-opt" data-frame="litestream" role="radio"><b>Litestream</b><small>Streamlined uprights and speedbar</small></button>
+        </div>
+        <p id="litestream-credit" class="note" hidden>Litestream hardware by Steven Pearson and Michael W. Meier ·
+          <a href="https://github.com/Pearson00/WillsWing" target="_blank" rel="noopener">source</a> ·
+          <a href="./models/astra/litestream/credits/NOTICE.txt" target="_blank" rel="noopener">notices</a></p>
+      </div>
       <div id="frame-row"></div>
     </section>
     <section>

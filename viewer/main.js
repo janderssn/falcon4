@@ -1069,7 +1069,12 @@ function syncPanel() {
   $('#scene-cap').textContent = SCENES[state.scene].label;
   for (const t of document.querySelectorAll('#scene-fly .tile')) t.classList.toggle('on', t.dataset.scene === state.scene);
   $('#control-frame-row').hidden = !catalog?.sources.has(`${state.model}:litestream`);
-  $('#control-frame').value = state.controlFrame;
+  for (const b of document.querySelectorAll('.frame-opt')) {
+    const on = b.dataset.frame === state.controlFrame;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  $('#control-frame-name').textContent = state.controlFrame === 'litestream' ? 'Litestream' : 'Standard';
   const src = record?.source;
   $('#litestream-credit').hidden = src?.controlFrame !== 'litestream';
   if (src) {
@@ -1163,7 +1168,9 @@ function wireUi() {
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
-  $('#control-frame').addEventListener('change', (e) => setModel(state.model, false, e.target.value));
+  for (const b of document.querySelectorAll('.frame-opt')) b.onclick = () => {
+    if (b.dataset.frame !== state.controlFrame) setModel(state.model, false, b.dataset.frame);
+  };
   $('#btn-reset').onclick = () => {
     state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
