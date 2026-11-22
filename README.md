@@ -35,6 +35,8 @@ Open **http://localhost:5180**. Add `?model=opus` or `?model=astra` to the URL t
 
 The viewer is a glider configurator:
 
+- **Compare** (top of the view buttons, `V`): shows the other build to the right of
+  a divider you can drag, in the same pose and colours.
 - **Customize** (top right, `C`): pick the build (Astra or Opus); colour the sail
   panels as in the Wills Wing Falcon colour picker - P1 leading edge, P2, P3,
   P4 trailing edge, P5 undersurface - with the Wills Wing fabric list for each
@@ -75,7 +77,11 @@ npm run preview   # Preview at http://localhost:5181
 
 [`viewer/public/models.json`](viewer/public/models.json) lists the builds. Each
 entry gives the GLB, the parts file, and an optional `rotateY` / `offset`. The
-opus model is rotated 180° and raised to stand on the same ground plane as astra.
+opus model is turned 180° so its nose points the same way as astra's. The viewer then
+puts every build on the same floor: the point where the basebar touches the ground is
+at y = 0, whatever the file's own origin, so the builds don't jump when you switch or
+compare them. (The model repos have issues open to export in one shared frame, so this
+correction and `rotateY` can go: janderssn/falcon4-astra#3, janderssn/falcon4-opus#11.)
 To add another build, add an entry there.
 
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
