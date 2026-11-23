@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
-import { FALCON_FABRICS, CALIBRATED } from './lib/fabrics.js';
-import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost } from './lib/cloth.js';
+import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
+import { openOrder } from './lib/order.js';
+import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
 import { FilmBlur } from './lib/frost.js';
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -882,6 +883,56 @@ function renderFrost(camera) {
   frost.uFrostOn.value = 1;
 }
 
+// ------------------------------------------------------------------ order summary
+const orderOptions = new Set();   // options ticked in the order, kept while the page is open
+function showOrder() {
+  if (!record) return;
+  saveUrl();
+  const builtHex = (z) => document.querySelector(`.sw.original[data-zone="${z}"]`)?.style.getPropertyValue('--c') || '#ccc';
+  const panels = ['p1', 'p2', 'p3', 'p4', 'p5'].filter((z) => record.tints[z]?.meshes.length).map((z) => {
+    const id = state.colours[z];
+    const f = id && fabricsFor(z).find((c) => c[0] === id);
+    return { zone: z, label: ZONES[z].name, asBuilt: builtHex(z), fabric: f ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
+  });
+  const fill = (p) => (p.fabric ? p.fabric.hex : p.asBuilt);
+  const by = Object.fromEntries(panels.map((p) => [p.zone, p]));
+  const extras = [];
+  if (state.colours.pockets) extras.push({ name: 'Batten pockets', value: fabricOf('pockets', state.colours.pockets)?.name });
+  if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
+  openOrder({
+    model: 'Wills Wing Falcon 4', size: '170',
+    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker',
+    diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
+  }, orderOptions);
+}
+
+/**
+ * The sail from above and below as a flat plan, each panel in its colour: P1 along the leading
+ * edge, then P2, P3 and P4 back to the trailing edge; P5 under the front of the wing.
+ */
+function planSvg(panel) {
+  const W = 220, nose = [W / 2, 8], tip = [6, 74], root = [W / 2, 58], tipTe = [12, 84];
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const at = (s, f) => lerp(lerp(nose, tip, s), lerp(root, tipTe, s), f);   // s: root to tip, f: LE to TE
+  const band = (f0, f1) => {
+    const pts = [];
+    for (let i = 0; i <= 8; i++) pts.push(at(i / 8, f0));
+    for (let i = 8; i >= 0; i--) pts.push(at(i / 8, f1));
+    return [pts.map((p) => p.join(',')).join(' '), pts.map(([x, y]) => `${W - x},${y}`).join(' ')];
+  };
+  const draw = (z, f0, f1) => {
+    const p = panel(z);
+    if (!p) return '';
+    return band(f0, f1).map((pts) => `<polygon points="${pts}" fill="${p.fill}" fill-opacity="${p.opacity < 1 ? 0.25 + p.opacity * 0.5 : 1}"/>`).join('');
+  };
+  const tag = (z, f) => { const [x, y] = at(0.62, f); return panel(z) ? `<text x="${W - x}" y="${y + 1.6}">${z.toUpperCase()}</text>` : ''; };
+  const top = draw('p1', 0, 0.2) + draw('p2', 0.2, 0.42) + draw('p3', 0.42, 0.78) + draw('p4', 0.78, 1);
+  const topTags = tag('p1', 0.1) + tag('p2', 0.31) + tag('p3', 0.6) + tag('p4', 0.89);
+  const under = draw('p5', 0, 0.45) + `<g fill-opacity="0">${draw('p3', 0.45, 0.78)}${draw('p4', 0.78, 1)}</g>`;
+  const svg = (inner, tags, label) => `<figure><svg viewBox="0 0 ${W} 92" role="img" aria-label="${label}"><g stroke="#1a1a1a" stroke-width=".5" stroke-linejoin="round">${inner}</g><g class="of-tags">${tags}</g></svg><figcaption>${label}</figcaption></figure>`;
+  return svg(top, topTags, 'Top surface') + svg(under, tag('p5', 0.22), 'Bottom surface');
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   rig.setAspect(innerWidth / innerHeight);
@@ -898,6 +949,20 @@ function pickPart(e) {
   const part = raycaster.intersectObjects(meshes, false)[0]?.object.userData.part || null;
   if (part) part.side = side;
   return part;
+}
+/** The Customize zone (P1 to P5, pockets, frame) of the part under the pointer, if any. */
+function pickZone(e) {
+  const r = canvas.getBoundingClientRect();
+  const view = viewAt(e.clientX - r.left, e.clientY - r.top);
+  raycaster.setFromCamera(view.ndc, view.camera);
+  const rec = other && state.compare && e.clientX > state.split * innerWidth ? other : record;
+  const meshes = rec.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
+  for (const hit of raycaster.intersectObjects(meshes, false)) {
+    const z = hit.object.userData.zone;
+    if (z) return z;
+    if (hit.object.userData.part?.group === '01') return null;   // other sail parts hide what is behind
+  }
+  return null;
 }
 function select(part) {
   state.sel = part ? part.name : null;
@@ -968,10 +1033,18 @@ function zoneAnchor(rec, zone, side, at) {
   }
   return (rec.zoneAnchors[zone] = anchor);
 }
+const SVGNS = 'http://www.w3.org/2000/svg';
+const leaderEls = new Map();   // zone: { line, dot }
 function buildLabels() {
   const host = $('#labels');
   host.innerHTML = '';
   labelEls.clear();
+  leaderEls.clear();
+  labelPlace.clear();
+  labelMask.key = '';   // lay the new labels out
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.classList.add('leaders');
+  host.append(svg);
   for (const [zone] of LABEL_ZONES) {
     if (!record.tints[zone]?.meshes.length) continue;
     const el = document.createElement('button');
@@ -979,58 +1052,298 @@ function buildLabels() {
     el.className = 'label';
     el.tabIndex = -1;
     el.innerHTML = `<span class="label-tag"><span class="sw"><i></i></span><b>${esc(ZONES[zone].name)}</b></span>`;
-    el.onclick = () => showRow(zone);
+    el.onclick = () => { const r = el.getBoundingClientRect(); showRow(zone, r.right, r.top + r.height / 2); };
     host.append(el);
     labelEls.set(zone, el);
+    const line = document.createElementNS(SVGNS, 'polyline'), dot = document.createElementNS(SVGNS, 'circle');
+    dot.setAttribute('r', '3');
+    svg.append(line, dot);
+    leaderEls.set(zone, { line, dot });
   }
   syncLabelSwatches();
 }
 /** Each label's swatch looks like the option chosen in its row. */
 function syncLabelSwatches() {
   for (const [zone, el] of labelEls) {
-    const on = document.querySelector(`.sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
+    const on = document.querySelector(`.swatches .sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
     if (!on) continue;
     sw.className = on.className.replace(/\bon\b/, '').trim();
     sw.style.cssText = on.style.cssText;
   }
 }
-/** Opens Customize at the row of a label. */
-function showRow(zone) {
-  if (state.panel !== 'custom') { state.panel = 'custom'; syncPanel(); }
-  const row = zone === 'frame' ? $('#frame-row') : document.querySelector(`[data-row="${zone}"]`);
-  if (!row) return;
-  row.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+// Customize lists each part on one line (its colour and fabric); a line opens to its swatches.
+const ui = { open: null, picker: null };
+/** Copies the chosen swatch's look onto a line's (or the picker's) current-colour dot. */
+function showCurrent(cur, zone) {
+  const on = document.querySelector(`#custom .swatches .sw.on[data-zone="${zone}"]`);
+  if (on && cur) { cur.className = `cur ${on.className.replace(/\b(on|sw)\b/g, '').trim()}`; cur.style.cssText = on.style.cssText; }
+}
+/** The rows: which part is open, and each line's current swatch. */
+function syncRows() {
+  for (const row of document.querySelectorAll('#custom [data-row]')) {
+    const z = row.dataset.row, open = ui.open === z;
+    row.classList.toggle('open', open);
+    row.querySelector('.row-head').setAttribute('aria-expanded', String(open));
+    showCurrent(row.querySelector('.cur'), z);
+  }
+  if (ui.picker) showCurrent($('#picker .cur'), ui.picker);
+}
+
+// Clicking a part of the glider, or its label, opens a small colour picker right there.
+/** Opens the inline picker for a zone, next to a point on the screen (CSS px). */
+function showRow(zone, x = innerWidth / 2, y = innerHeight / 2) {
+  if (!ZONES[zone]) return;
+  const el = $('#picker');
+  ui.picker = zone;
+  el.innerHTML = `<header><span class="cur" aria-hidden="true"><i></i></span><span class="pk-title"><b>${esc(zone === 'frame' ? 'Frame' : ZONES[zone].name)}</b><small data-name="${zone}"></small></span>
+    <button type="button" class="pk-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+    ${swatches(zone)}`;
+  el.hidden = false;
+  syncPanel();
+  // Beside the point, flipped or nudged to stay on screen.
+  const w = el.offsetWidth, h = el.offsetHeight, gap = 14, m = 12;
+  let left = x + gap, top = y - h / 2;
+  if (left + w > innerWidth - m) left = x - gap - w;
+  left = Math.max(m, Math.min(left, innerWidth - m - w));
+  top = Math.max(m, Math.min(top, innerHeight - m - h));
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.querySelector('.sw.on')?.focus({ preventScroll: true });
+}
+function closePicker() {
+  if (!ui.picker) return;
+  ui.picker = null;
+  $('#picker').hidden = true;
+  $('#picker').innerHTML = '';
 }
 const tmp = new THREE.Vector3();
+/**
+ * Labels stand close to their part, with a straight leader to a dot on it (one sharp bend where
+ * it meets the label). Each label has a few candidate spots: the nearest one clear of the glider
+ * in each of 12 directions, and spots on the glider right beside the dot. They are chosen
+ * together, for short leaders that run little over the glider, never cross each other or another
+ * label, and keep a label where it was. The labels fade out while the view moves and are laid
+ * out once it is still. The glider's shape on screen comes from a small mask.
+ */
+const MASK_CELL = 8;                 // CSS px per mask cell
+const GLIDER_LAYER = 2;              // the glider's solid parts (not the wires), for the mask
+const labelMask = { target: null, data: null, cols: 0, rows: 0, key: '', flat: new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }) };
+/** Draws the glider (no wires) as white on black, a cell per MASK_CELL px, and reads it back. */
+function drawLabelMask(rec) {
+  const cols = Math.ceil(innerWidth / MASK_CELL), rows = Math.ceil(innerHeight / MASK_CELL);
+  const M = labelMask;
+  if (!M.target || M.cols !== cols || M.rows !== rows) {
+    M.target?.dispose();
+    M.target = new THREE.WebGLRenderTarget(cols, rows);
+    M.data = new Uint8Array(cols * rows * 4);
+    M.cols = cols; M.rows = rows;
+  }
+  if (!rec.maskLayer) {
+    for (const mesh of rec.meshes) if (!['04', '05'].includes(mesh.userData.part.group)) mesh.layers.enable(GLIDER_LAYER);
+    rec.maskLayer = true;
+  }
+  const cam = rig.camera, layers = cam.layers.mask, bg = scene.background, ov = scene.overrideMaterial, fog = scene.fog;
+  const autoShadow = renderer.shadowMap.autoUpdate, clear = renderer.getClearColor(new THREE.Color()), alpha = renderer.getClearAlpha();
+  cam.layers.set(GLIDER_LAYER);
+  scene.background = null; scene.overrideMaterial = M.flat; scene.fog = null;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.setClearColor(0x000000, 1);
+  renderer.setRenderTarget(M.target);
+  renderer.clear();
+  renderer.render(scene, cam);
+  renderer.readRenderTargetPixels(M.target, 0, 0, cols, rows, M.data);
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(clear, alpha);
+  renderer.shadowMap.autoUpdate = autoShadow;
+  cam.layers.mask = layers; scene.background = bg; scene.overrideMaterial = ov; scene.fog = fog;
+}
+/** True if the screen rectangle touches the glider. */
+function onGlider(x0, y0, x1, y1) {
+  const M = labelMask;
+  const c0 = Math.max(0, Math.floor(x0 / MASK_CELL)), c1 = Math.min(M.cols - 1, Math.floor(x1 / MASK_CELL));
+  const r0 = Math.max(0, Math.floor(y0 / MASK_CELL)), r1 = Math.min(M.rows - 1, Math.floor(y1 / MASK_CELL));
+  for (let r = r0; r <= r1; r++) {
+    const row = (M.rows - 1 - r) * M.cols;   // the target's rows run bottom up
+    for (let c = c0; c <= c1; c++) if (M.data[(row + c) * 4] > 0) return true;
+  }
+  return false;
+}
+const LABEL_MIN = 40, LABEL_MAX = 560;
+// zone: { dx, dy, d } the spot a label took (kept while free), its target box and anchor.
+const labelPlace = new Map();
+const LABEL_SETTLE = 160;   // ms of a still view before the labels are laid out and shown again
+/**
+ * While the view moves the labels fade out; once it has been still for LABEL_SETTLE ms they are
+ * laid out for it and fade back in.
+ */
+const labelView = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), proj: 0, at: new THREE.Vector3(), atQuat: new THREE.Quaternion() };
 function updateLabels() {
   if (!record || !state.names) return;
-  const placed = [];
-  const items = LABEL_ZONES.filter(([z]) => labelEls.has(z)).map(([z, side, at]) => {
-    const a = zoneAnchor(record, z, side, at);
-    return a && { z, p: a.clone().applyMatrix4(record.root.matrixWorld) };
-  }).filter(Boolean).sort((a, b) => a.p.distanceTo(rig.camera.position) - b.p.distanceTo(rig.camera.position));
-  for (const { z, p } of items) {
-    const el = labelEls.get(z);
-    tmp.copy(p).project(rig.camera);
-    const x = (tmp.x + 1) / 2 * innerWidth, y = (1 - tmp.y) / 2 * innerHeight;
-    let ok = record.tints[z].meshes.some((m) => m.visible) && tmp.z < 1 && Math.abs(tmp.x) < 1 && Math.abs(tmp.y) < 1 && !(other && state.compare && x > state.split * innerWidth - 20);
-    if (ok) {
-      const w = ZONES[z].name.length * 8 + 34, r = { x0: x - w / 2, x1: x + w / 2, y0: y - 44, y1: y };
-      if (placed.some((q) => r.x0 < q.x1 && r.x1 > q.x0 && r.y0 < q.y1 && r.y1 > q.y0)) ok = false; else placed.push(r);
-    }
-    el.style.opacity = ok ? 1 : 0;
-    el.style.pointerEvents = ok ? 'auto' : 'none';
-    el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+  const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera, now = performance.now();
+  const host = $('#labels'), V = labelView;
+  // Moving: the view turned or travelled noticeably since the last frame (the orbit's damping
+  // drifts on for a while; that counts as still), or the pose, size or panel changed.
+  const rest = `${m.elements.map((v) => v.toFixed(3))}${W}x${H}${state.panel}${state.compare}${state.split}${state.wires}${state.battens}`;
+  const proj = cam.isOrthographicCamera ? cam.zoom * (cam.top - cam.bottom) : cam.projectionMatrix.elements[5];
+  const fast = cam.position.distanceTo(V.pos) > 0.004 || cam.quaternion.angleTo(V.quat) > 0.002 || Math.abs(proj - V.proj) > 1e-3 * Math.abs(proj);
+  V.pos.copy(cam.position); V.quat.copy(cam.quaternion); V.proj = proj;
+  if (fast || rest !== labelMask.key) { labelMask.key = rest; labelMask.movedAt = now; labelMask.settled = false; host.classList.add('moving'); return; }
+  // Settled, but drifted since the layout: lay out again in place, without fading.
+  if (labelMask.settled && (cam.position.distanceTo(V.at) > 0.003 || cam.quaternion.angleTo(V.atQuat) > 0.0015)) labelMask.settled = false;
+  if (labelMask.settled || now - labelMask.movedAt < LABEL_SETTLE) return;
+  V.at.copy(cam.position); V.atQuat.copy(cam.quaternion);
+  labelMask.settled = true;
+  layoutLabels();
+  for (const [z, L] of labelPlace) {
+    if (!L.shown || !L.target) continue;
+    const el = labelEls.get(z), lead = leaderEls.get(z), r = L.target, p = L.p;
+    el.style.transform = `translate(${r.x0}px, ${r.y0}px)`;
+    lead.line.setAttribute('points', L.pts.map((q) => q.join(',')).join(' '));
+    lead.dot.setAttribute('cx', p.x);
+    lead.dot.setAttribute('cy', p.y);
   }
+  host.classList.remove('moving');
+}
+function layoutLabels() {
+  const W = innerWidth, H = innerHeight, m = record.root.matrixWorld, cam = rig.camera;
+  drawLabelMask(record);
+  // On screen, clear of the title, the bars, the buttons and any open panel.
+  const huds = [...document.querySelectorAll('#title, #topbtns > *, #navstack > *, #posebar, #scene-pick, #viewbar, #chip, #custom, #settings, #picker, #swipe')]
+    .filter((el) => !el.hidden && el.offsetParent !== null).map((el) => el.getBoundingClientRect()).filter((b) => b.width && b.height);
+  const inBox = (r) => r.x0 >= 12 && r.x1 <= W - 12 && r.y0 >= 12 && r.y1 <= H - 12
+    && !huds.some((b) => r.x0 < b.right + 10 && r.x1 > b.left - 10 && r.y0 < b.bottom + 8 && r.y1 > b.top - 8);
+  // The label's near edge (or corner) d px from the anchor, in direction (dx, dy).
+  const rectAt = (it, dx, dy, d) => {
+    const cx = it.p.x + dx * d + Math.sign(Math.round(dx * 10)) * it.w / 2, cy = it.p.y + dy * d + Math.sign(Math.round(dy * 10)) * it.h / 2;
+    return { x0: cx - it.w / 2, y0: cy - it.h / 2, x1: cx + it.w / 2, y1: cy + it.h / 2 };
+  };
+  // The leader: from the dot straight to the label, with one sharp bend into its near side.
+  const leader = (p, r, dx, dy) => {
+    const cy = (r.y0 + r.y1) / 2;
+    if (Math.abs(dx) < 0.3) {   // above or below: straight to the label's edge
+      const ex = Math.min(Math.max(p.x, r.x0 + 10), r.x1 - 10);
+      return [[p.x, p.y], [ex, dy < 0 ? r.y1 + 3 : r.y0 - 3]];
+    }
+    const side = dx > 0 ? r.x0 - 3 : r.x1 + 3;
+    return [[p.x, p.y], [side - Math.sign(dx) * 12, cy], [side, cy]];
+  };
+  const segs = (pts) => pts.slice(1).map((q, i) => [pts[i], q]);
+  const len = (pts) => segs(pts).reduce((s, [a, b]) => s + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+  // Pixels of the leader that run over the glider (past the first few, which leave the part).
+  const overGlider = (pts) => {
+    let n = 0, t = 0;
+    for (const [a, b] of segs(pts)) {
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      for (let s = 0; s < l; s += 4, t += 4) {
+        if (t < 14) continue;
+        const x = a[0] + (b[0] - a[0]) * s / l, y = a[1] + (b[1] - a[1]) * s / l;
+        if (onGlider(x, y, x, y)) n += 4;
+      }
+    }
+    return n;
+  };
+  const cross = (a, b, c, d) => {
+    const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+    return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+  };
+  const hitsRect = ([a, b], r) => {
+    for (let s = 0; s <= 1; s += 0.1) { const x = a[0] + (b[0] - a[0]) * s, y = a[1] + (b[1] - a[1]) * s; if (x > r.x0 - 2 && x < r.x1 + 2 && y > r.y0 - 2 && y < r.y1 + 2) return true; }
+    return false;
+  };
+
+  // The labels in view, each with its candidate spots: the nearest clear spot in each of 12
+  // directions, scored on its own (leader length, leader over the glider, a change of side).
+  const items = [];
+  for (const [z, side, at] of LABEL_ZONES) {
+    const el = labelEls.get(z), lead = leaderEls.get(z);
+    if (!el) continue;
+    const a = zoneAnchor(record, z, side, at);
+    if (a) tmp.copy(a).applyMatrix4(m).project(cam);
+    const p = a && { x: (tmp.x + 1) / 2 * W, y: (1 - tmp.y) / 2 * H };
+    const shown = Boolean(a && record.tints[z].meshes.some((mesh) => mesh.visible) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+      && !(other && state.compare && p.x > state.split * W - 20));
+    el.style.opacity = shown ? 1 : 0;
+    el.style.pointerEvents = shown ? 'auto' : 'none';
+    lead.line.style.display = lead.dot.style.display = shown ? '' : 'none';
+    const L = labelPlace.get(z) || {};
+    labelPlace.set(z, L);
+    L.shown = shown;
+    if (!shown) continue;
+    const it = { z, L, p, w: el.offsetWidth, h: el.offsetHeight || 18, cands: [] };
+    for (let k = 0; k < 12; k++) {
+      const ang = k * Math.PI / 6, dx = Math.round(Math.cos(ang) * 100) / 100, dy = Math.round(Math.sin(ang) * 100) / 100;
+      for (let d = LABEL_MIN; d < LABEL_MAX; d += 8) {
+        const r = rectAt(it, dx, dy, d);
+        if (!inBox(r)) break;
+        if (onGlider(r.x0 - 6, r.y0 - 4, r.x1 + 6, r.y1 + 4)) continue;
+        const pts = leader(p, r, dx, dy);
+        const same = L.dx !== undefined && Math.abs(L.dx - dx) < 0.01 && Math.abs(L.dy - dy) < 0.01;
+        it.cands.push({ dx, dy, d, r, pts, cost: len(pts) + 2.5 * overGlider(pts) + (same ? 0 : 60) });
+        break;
+      }
+    }
+    // On the glider right beside the dot: tidier than a long leader across the glider.
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, -1], [0, 1]]) {
+      const r = rectAt(it, dx, dy, 24);
+      if (inBox(r)) it.cands.push({ dx, dy, d: 24, r, pts: leader(p, r, dx, dy), cost: 420 });
+    }
+    if (!it.cands.length) { const r = rectAt(it, 1, 0, LABEL_MIN); it.cands.push({ dx: 1, dy: 0, d: LABEL_MIN, r, pts: leader(p, r, 1, 0), cost: 4000 }); }
+    it.cands.sort((x, y) => x.cost - y.cost);
+    items.push(it);
+  }
+
+  // Two labels together: overlapping labels are out; crossing leaders and a leader through
+  // another label cost a lot.
+  const pair = (A, B) => {
+    const r = A.r, q = B.r;
+    if (r.x0 < q.x1 + 8 && r.x1 > q.x0 - 8 && r.y0 < q.y1 + 6 && r.y1 > q.y0 - 6) return 1e6;
+    let c = 0;
+    const sa = segs(A.pts), sb = segs(B.pts);
+    for (const s of sa) for (const t of sb) if (cross(s[0], s[1], t[0], t[1])) c += 500;
+    for (const s of sa) if (hitsRect(s, q)) c += 400;
+    for (const t of sb) if (hitsRect(t, r)) c += 400;
+    return c;
+  };
+  // Start from each label's own best, then move one label at a time to whichever of its spots
+  // lowers the total, until nothing improves.
+  const pick = items.map(() => 0);
+  const total = (i, c) => items[i].cands[c].cost + items.reduce((s, it, j) => (j === i ? s : s + pair(items[i].cands[c], it.cands[pick[j]])), 0);
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false;
+    for (let i = 0; i < items.length; i++) {
+      let best = pick[i], bestCost = total(i, pick[i]);
+      for (let c = 0; c < items[i].cands.length; c++) { const t = total(i, c); if (t < bestCost - 1) { best = c; bestCost = t; } }
+      if (best !== pick[i]) { pick[i] = best; changed = true; }
+    }
+    if (!changed) break;
+  }
+  items.forEach((it, i) => {
+    const c = it.cands[pick[i]];
+    Object.assign(it.L, { dx: c.dx, dy: c.dy, d: c.d, target: c.r, pts: c.pts, p: it.p, w: it.w, h: it.h });
+  });
 }
 
 // ------------------------------------------------------------------ customize and settings panels
 const thumb = (name) => `url('./thumbs/${name}.jpg')`;
+// A swatch shows what it is: plain colours as dots; after a thin divider, the heavier woven
+// cloths with a faint ripstop and the laminates with a faint scrim (dark in the "B" cloths).
+// Dark swatches get a light ring. The row header names the swatch under the pointer.
+const luma = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
+function swatch(zone, [id, name, hex, opacity]) {
+  const kind = clothKind(id);
+  const sail = SAIL_ZONES.includes(zone) && zone !== 'pockets';
+  const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
+    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
+  const label = sail && isUpgrade(id) ? `${name} · extra cost` : name;
+  return `<button type="button" class="${cls}" data-zone="${zone}" data-colour="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`;
+}
 function swatches(zone) {
+  const all = fabricsFor(zone);
+  const colours = all.filter((f) => clothKind(f[0]) === 0), cloths = all.filter((f) => clothKind(f[0]) > 0);
   return `<div class="swatches" role="radiogroup" aria-label="${esc(ZONES[zone].name)}">
     <button type="button" class="sw original" data-zone="${zone}" data-colour="" title="As built" aria-label="As built"><i></i></button>
-    ${fabricsFor(zone).map(([id, name, hex, opacity]) => `<button type="button" class="sw${opacity < 1 ? ' clear' : ''}" data-zone="${zone}" data-colour="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`).join('')}
+    ${colours.map((f) => swatch(zone, f)).join('')}
+    ${cloths.length ? `<span class="sw-gap" aria-hidden="true"></span>${cloths.map((f) => swatch(zone, f)).join('')}` : ''}
   </div>`;
 }
 function buildPanel() {
@@ -1039,8 +1352,11 @@ function buildPanel() {
       <span class="art" style="background-image:${thumb(`model-${m.id}`)}"></span>
       <span class="build-text"><b>${esc(m.label)}</b><small>${esc(m.description.replace(/^\d+ parts · /, ''))}</small></span>
     </button>`).join('');
-  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => `<div class="row" data-row="${z}"><span class="row-name">${ZONES[z].name}<small data-name="${z}"></small></span>${swatches(z)}</div>`).join('');
-  $('#frame-row').innerHTML = `<div class="row"><span class="row-name">Tubes<small data-name="frame"></small></span>${swatches('frame')}</div>`;
+  const row = (z, name) => `<div class="row" data-row="${z}">
+    <button type="button" class="row-head" data-toggle="${z}" aria-expanded="false"><span class="cur" data-cur="${z}"><i></i></span><span class="row-title">${name}</span><small data-name="${z}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    ${swatches(z)}</div>`;
+  $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
+  $('#frame-row').innerHTML = row('frame', 'Tubes');
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -1064,6 +1380,19 @@ function placeBars() {
     el.style.left = `${Math.max(w / 2 + gap, Math.min(W / 2, edge - gap - w / 2))}px`;
   }
 }
+/** Each row header names the chosen fabric (or the swatch under the pointer) and any extra cost. */
+function syncNames(hover = null) {
+  for (const el of document.querySelectorAll('[data-name]')) {
+    const z = el.dataset.name;
+    if (hover && hover.dataset.zone === z) { el.textContent = hover.title; el.classList.add('peek'); continue; }
+    const id = state.colours[z];
+    const c = ORDER.colouredPanel;
+    const cost = c.zones.includes(z) && id && id !== c.standard ? ` · +$${c.price}` : SAIL_ZONES.includes(z) && z !== 'pockets' && isUpgrade(id) ? ' · extra cost' : '';
+    el.textContent = (id ? fabricOf(z, id)?.name || 'As built' : 'As built') + cost;
+    el.classList.remove('peek');
+  }
+}
+
 function syncPanel() {
   document.body.classList.toggle('panel-open', Boolean(state.panel));
   placeBars();
@@ -1086,10 +1415,7 @@ function syncPanel() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-checked', String(on));
   }
-  for (const el of document.querySelectorAll('[data-name]')) {
-    const z = el.dataset.name, id = state.colours[z];
-    el.textContent = id ? fabricOf(z, id)?.name || 'As built' : 'As built';
-  }
+  syncNames();
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
@@ -1098,6 +1424,7 @@ function syncPanel() {
   }
   syncLabelSwatches();
   if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
+  syncRows();
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
@@ -1194,8 +1521,14 @@ function wireUi() {
     setScene(t.dataset.scene);
   });
   $('#custom').addEventListener('click', (e) => {
-    const sw = e.target.closest('.sw');
-    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
+    const head = e.target.closest('[data-toggle]');
+    if (head) { ui.open = ui.open === head.dataset.toggle ? null : head.dataset.toggle; syncRows(); return; }
+    const sw = e.target.closest('.swatches .sw');
+    if (sw) {
+      state.colours[sw.dataset.zone] = sw.dataset.colour || null;
+      ui.open = null;   // the line closes again
+      applyLook(); syncPanel(); saveUrlSoon();
+    }
   });
   $('#settings').addEventListener('click', (e) => {
     const build = e.target.closest('.build');
@@ -1228,6 +1561,21 @@ function wireUi() {
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
     applyLook(); syncPanel(); saveUrlSoon();
   };
+  $('#custom').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('pointerout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
+  $('#custom').addEventListener('focusin', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#custom').addEventListener('focusout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
+  $('#btn-order').onclick = showOrder;
+  // The inline picker: choosing a swatch keeps it open to try others; it closes on its button,
+  // Esc, or a press anywhere else.
+  $('#picker').addEventListener('click', (e) => {
+    if (e.target.closest('.pk-close')) return closePicker();
+    const sw = e.target.closest('.swatches .sw');
+    if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
+  });
+  $('#picker').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
+  $('#picker').addEventListener('pointerout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
+  document.addEventListener('pointerdown', (e) => { if (ui.picker && !e.target.closest('#picker, .label')) closePicker(); }, true);
   $('#btn-share').onclick = async () => {
     saveUrl();
     try { await navigator.clipboard.writeText(location.href); toast('Link copied: it opens this glider just like this'); }
@@ -1241,11 +1589,13 @@ function wireUi() {
   });
   let down = null;
   canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; userActive(); $('#scene-fly').hidden = true; });
+  // A click on a part that can be coloured opens its choices in Customize. (The part card,
+  // select() and renderChip(), stays for a parts view.)
   canvas.addEventListener('pointerup', (e) => {
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || !record) return;
-    select(pickPart(e));
+    const zone = pickZone(e);
+    if (zone) showRow(zone, e.clientX, e.clientY);
   });
-  canvas.addEventListener('dblclick', (e) => { const part = record && pickPart(e); if (part) { select(part); focusPart(part); } });
   canvas.addEventListener('wheel', userActive, { passive: true });
   canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
@@ -1259,7 +1609,7 @@ function wireUi() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     userActive();
     const k = e.key.toLowerCase();
-    if (e.key === 'Escape') { if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
+    if (e.key === 'Escape') { if (ui.picker) closePicker(); else if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
     if (k === 'c') togglePanel('custom');
     else if (k === 's') togglePanel('settings');
     else if (k === 't') toggle2d();
