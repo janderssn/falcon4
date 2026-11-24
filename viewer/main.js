@@ -362,33 +362,55 @@ function depthTwin(mesh, on) {
 /**
  * Standing on the control bar (as modelled), or resting on the keel: rocked forward
  * over the basebar until the nose is on the ground, or back until the tail is.
- * The tilt is found from the model itself: the smallest rotation about the front
- * (or back) of the basebar at which another point of the glider reaches the ground.
+ * The glider rocks over the lower outline of its side view (the lower convex hull of every
+ * point, in z and y): from the lowest point it rolls along the outline, over a round basebar
+ * or wheels, until the next step of the outline is a long one, to the nose or the tail. That
+ * step lies on the ground at rest, and nothing is below it.
  */
 function restingPose(rec) {
   const root = rec.root;
   root.position.set(0, 0, 0);
   root.quaternion.identity();
   root.updateMatrixWorld(true);
+  // The lowest point in each 2 mm slice along the glider: the outline only needs those.
   // Flat arrays and plain loops: the models have up to a million vertices.
-  const ys = [], zs = [];
-  const v = new THREE.Vector3();
+  const v = new THREE.Vector3(), SLICE = 0.002;
+  const low = new Map();
   for (const m of rec.meshes) {
     const pos = m.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i += 2) { v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld); ys.push(v.y); zs.push(v.z); }
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      const k = Math.round(v.z / SLICE), q = low.get(k);
+      if (!q || v.y < q[1]) low.set(k, [v.z, v.y]);
+    }
   }
-  let minY = Infinity;
-  for (const y of ys) if (y < minY) minY = y;
-  let front = -Infinity, back = Infinity;
-  for (let i = 0; i < ys.length; i++) if (ys[i] < minY + 0.03) { front = Math.max(front, zs[i]); back = Math.min(back, zs[i]); }
-  let nose = Math.PI * 0.45, tail = Math.PI * 0.45;    // upper bound only; the first contact sets the angle
-  for (let i = 0; i < ys.length; i++) {
-    if (zs[i] > front + 0.5) nose = Math.min(nose, Math.atan2(ys[i] - minY, zs[i] - front));
-    if (zs[i] < back - 0.5) tail = Math.min(tail, Math.atan2(ys[i] - minY, back - zs[i]));
+  const pts = [...low.values()].sort((a, b) => a[0] - b[0]);
+  // Lower convex hull, front to back in z (monotone chain).
+  const hull = [];
+  for (const p of pts) {
+    while (hull.length > 1) {
+      const [a, b] = [hull[hull.length - 2], hull[hull.length - 1]];
+      if ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) <= 0) hull.pop(); else break;
+    }
+    hull.push(p);
   }
+  let bottom = 0;
+  for (let i = 1; i < hull.length; i++) if (hull[i][1] < hull[bottom][1]) bottom = i;
+  // From the bottom, roll one way until a step is longer than LONG: that step rests on the
+  // ground, and its slope is the tilt.
+  const LONG = 0.5;
+  const roll = (dir) => {
+    for (let i = bottom; i + dir >= 0 && i + dir < hull.length; i += dir) {
+      const a = hull[i], b = hull[i + dir];
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > LONG) return Math.atan2(b[1] - a[1], Math.abs(b[0] - a[0]));
+    }
+    return 0;
+  };
+  const nose = roll(1), tail = roll(-1);
   return {
-    nose: { pivot: new THREE.Vector3(0, minY, front), angle: nose },      // nose down: +rotation about X
-    tail: { pivot: new THREE.Vector3(0, minY, back), angle: -tail },      // tail down: the other way
+    hull,
+    nose: { angle: nose },      // nose down: +rotation about X
+    tail: { angle: -tail },     // tail down: the other way
   };
 }
 /** The plan views always show the glider standing, so its axes line up with the views. */
@@ -401,19 +423,22 @@ function applyPose(animate = false) {
 }
 const POSE_TIME = 700;
 /**
- * Places the build tilted by `angle` about X, rocking on the basebar where it touches the
- * ground: about its front for a nose-down tilt (angle > 0), about its back for tail down.
- * The contact stays put at y = 0 for every angle, so a swing rolls over the bar rather than
- * sliding or lifting the glider; nose down to tail down rocks back through standing.
+ * Places the build tilted by `angle` about X (nose down > 0, tail down < 0), resting on the
+ * lowest point of its outline at that angle, at y = 0 for every build. The contact keeps its
+ * place along the ground, so a swing rolls over the basebar or the wheels rather than
+ * sliding, lifting or sinking; nose down to tail down rocks back through standing.
  */
 function tiltTo(rec, angle) {
-  const pivot = (angle >= 0 ? rec.rest.nose : rec.rest.tail).pivot;
+  const c = Math.cos(angle), sn = Math.sin(angle);
+  let best = null, by = Infinity;
+  // The outline point lowest after the turn about X (y' = y cos - z sin) touches the ground.
+  for (const p of rec.rest.hull) { const y = p[1] * c - p[0] * sn; if (y < by) { by = y; best = p; } }
+  const contact = new THREE.Vector3(0, best[1], best[0]);
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
   rec.root.quaternion.copy(q);
-  rec.root.position.copy(pivot).sub(pivot.clone().applyQuaternion(q));
-  // The ground is where the basebar touches it, in every pose, and it is at y = 0 for
-  // every build: the builds' own origins differ, so without this they jump when switching.
-  rec.root.position.y -= pivot.y;
+  // The contact point stays where it is along the glider (z) and sits on the ground (y = 0).
+  rec.root.position.copy(contact).sub(contact.clone().applyQuaternion(q));
+  rec.root.position.y = -contact.clone().applyQuaternion(q).y;
   rec.root.updateMatrixWorld(true);
   rec.angle = angle;
 }
