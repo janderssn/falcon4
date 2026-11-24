@@ -78,7 +78,7 @@ body.panel-open #topbtns { opacity: 0; pointer-events: none; }
 .backdrop:disabled { opacity: .45; cursor: default; }
 .backdrop i { display: block; height: 46px; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
 .bd-dark { background: #222c38; }
-.bd-light { background: #e6e9ec; }
+.bd-light { background: #cccccc; }
 .bd-blueprint {
   background:
     radial-gradient(ellipse 55% 60% at 50% 62%, rgba(189, 238, 255, .55), transparent 70%),
@@ -116,6 +116,16 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 .wide:hover { background: rgba(255, 255, 255, .16); }
 #btn-share { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
 #btn-share:hover { filter: brightness(1.06); }
+/* the swatch leads the row: the browser's colour popup opens rightwards from it and must fit on screen */
+.colorrow { display: flex; gap: 12px; align-items: center; font-size: 13px; margin: 0 0 14px; }
+.colorrow > span { flex: 1; }
+.colorrow .hint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.colorrow input[type=color] { flex: none; width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: none; cursor: pointer; }
+.colorrow input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; } .colorrow input[type=color]::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.colorrow input[type=color]::-moz-color-swatch { border: 0; border-radius: 5px; }
+.colorrow .mini { font-size: 11.5px; padding: 4px 8px; border-radius: 7px; background: rgba(255, 255, 255, .08); border: 1px solid var(--line); color: var(--ink); }
+.colorrow .mini:hover { background: rgba(255, 255, 255, .16); }
+.experimental [hidden] { display: none; }
 .note { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
 
 /* ---- scene picker, bottom left */

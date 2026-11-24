@@ -269,9 +269,12 @@ function buildStudio(envs) {
  */
 const STUDIO_LOOKS = {
   dark: { background: '#222c38', grid: [0xdfe6ee, 0.5], spot: [0x8fb0d0, 0.22], shadow: [0x000000, 0.28], hemi: [0xffffff, 0x919781, 0.6] },
-  light: { background: '#e6e9ec', grid: [0x3c4654, 0.55], spot: [0xffffff, 0.75], shadow: [0x1c2430, 0.2], hemi: [0xffffff, 0xb9bdb3, 0.75] },
+  light: { background: '#cccccc', grid: [0x3c4654, 0.55], spot: [0xffffff, 0.75], shadow: [0x1c2430, 0.2], hemi: [0xffffff, 0xb9bdb3, 0.75] },
   blueprint: { background: '#1f9ee0', grid: [0xffffff, 1], spot: [0xbdeeff, 0.42], shadow: [0x063a6b, 0.3], hemi: [0xe6f7ff, 0x5fb4dc, 0.75] },
 };
+/** The Light background's shade (Settings, Experimental); the default is #cccccc (RGB 204, 204, 204). */
+export const LIGHT_SHADE = STUDIO_LOOKS.light.background;
+export function setLightShade(hex) { STUDIO_LOOKS.light.background = hex || LIGHT_SHADE; }
 function applyBackdrop(studio, name) {
   const look = STUDIO_LOOKS[name] || STUDIO_LOOKS.dark;
   studio.backdrop = name;
