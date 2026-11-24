@@ -350,6 +350,7 @@ function depthTwin(mesh, on) {
   if (!twin && !on) return;
   if (!twin) {
     twin = new THREE.Mesh(mesh.geometry, DEPTH_ONLY);
+    if (mesh.morphTargetInfluences) twin.morphTargetInfluences = mesh.morphTargetInfluences;   // same shape
     twin.renderOrder = 1;
     twin.raycast = () => {};
     mesh.add(twin);
@@ -408,7 +409,7 @@ function restingPose(rec) {
   };
   const nose = roll(1), tail = roll(-1);
   return {
-    hull,
+    hull, foot: hull[bottom],   // the standing contact: the fixed point along the ground
     nose: { angle: nose },      // nose down: +rotation about X
     tail: { angle: -tail },     // tail down: the other way
   };
@@ -423,25 +424,23 @@ function applyPose(animate = false) {
 }
 const POSE_TIME = 700;
 /**
- * Places the build tilted by `angle` about X (nose down > 0, tail down < 0), resting on the
- * lowest point of its outline at that angle, at y = 0 for every build. The contact keeps its
- * place along the ground, so a swing rolls over the basebar or the wheels rather than
- * sliding, lifting or sinking; nose down to tail down rocks back through standing.
+ * Places the build tilted by `angle` about X (nose down > 0, tail down < 0), with the lowest
+ * point of its outline at that angle on the ground (y = 0, the same for every build). Along
+ * the ground it turns about its standing contact, so the placement changes smoothly with the
+ * angle even where the lowest point jumps (from the wheels to the keel tail at rest).
  */
 function tiltTo(rec, angle) {
   const c = Math.cos(angle), sn = Math.sin(angle);
-  let best = null, by = Infinity;
-  // The outline point lowest after the turn about X (y' = y cos - z sin) touches the ground.
-  for (const p of rec.rest.hull) { const y = p[1] * c - p[0] * sn; if (y < by) { by = y; best = p; } }
-  const contact = new THREE.Vector3(0, best[1], best[0]);
-  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
-  rec.root.quaternion.copy(q);
-  // The contact point stays where it is along the glider (z) and sits on the ground (y = 0).
-  rec.root.position.copy(contact).sub(contact.clone().applyQuaternion(q));
-  rec.root.position.y = -contact.clone().applyQuaternion(q).y;
+  let low = Infinity;
+  // y after the turn about X: y' = y cos - z sin
+  for (const p of rec.rest.hull) low = Math.min(low, p[1] * c - p[0] * sn);
+  const [fz, fy] = rec.rest.foot;
+  rec.root.quaternion.setFromAxisAngle(X_AXIS, angle);
+  rec.root.position.set(0, -low, fz - (fy * sn + fz * c));   // z' = y sin + z cos
   rec.root.updateMatrixWorld(true);
   rec.angle = angle;
 }
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 /** Swings the builds from their last pose to the new one; true while they move. */
 function stepPoses(now) {
   let moving = false;
@@ -449,6 +448,7 @@ function stepPoses(now) {
     const m = rec?.swing;
     if (!m) continue;
     const k = Math.min((now - m.start) / POSE_TIME, 1), e = k * k * (3 - 2 * k);
+    setShapes(rec, Object.fromEntries(Object.keys(m.s1).map((n) => [n, m.s0[n] + (m.s1[n] - m.s0[n]) * e])));
     tiltTo(rec, m.a0 + (m.a1 - m.a0) * e);
     if (k === 1) rec.swing = null; else moving = true;
   }
@@ -458,15 +458,54 @@ function poseOf(rec, animate = false) {
   if (!rec.rest) rec.rest = restingPose(rec);
   const a0 = rec.angle ?? 0;
   const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
+  const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, restPose());
+  setShapes(rec, s1);
   tiltTo(rec, a1);
   // Exact bounds: the quick box of rotated parts reaches below the glider.
   rec.box.setFromObject(rec.root, true);
   rec.ground = 0;
   // The box above is the one of the new pose, so views frame where the glider ends up.
   rec.swing = null;
-  if (animate && a0 !== a1) {
-    rec.swing = { a0, a1, start: performance.now() };
+  const reshape = Object.keys(s1).some((n) => s0[n] !== s1[n]);
+  if (animate && (a0 !== a1 || reshape)) {
+    rec.swing = { a0, a1, s0, s1, start: performance.now() };
+    setShapes(rec, s0);
     tiltTo(rec, a0);
+  }
+}
+/**
+ * Configurations: a build can name shape keys (glTF morph targets) and their weight in each
+ * resting pose, in models.json: "poseShapes": { "bar": { "In flight": 1 } }. A key gets weight
+ * 0 in the poses that leave it out, and the weights swing with the tilt. The Tecma stands in
+ * its flight shape and lies parked, rigged on the ground, in the other two poses.
+ */
+function shapesFor(rec, pose) {
+  const table = rec.source.poseShapes;
+  if (!table) return {};
+  const names = new Set(Object.values(table).flatMap((w) => Object.keys(w)));
+  return Object.fromEntries([...names].map((n) => [n, table[pose]?.[n] ?? 0]));
+}
+function shapesNow(rec) {
+  if (!rec.shapes) {
+    rec.shapes = {};
+    for (const n of Object.keys(shapesFor(rec, 'bar'))) {
+      // As loaded: the weight the GLB gives the key (the first mesh that has it).
+      const m = rec.meshes.find((x) => x.morphTargetDictionary?.[n] !== undefined);
+      rec.shapes[n] = m ? m.morphTargetInfluences[m.morphTargetDictionary[n]] : 0;
+      if (m) for (const x of rec.meshes) { const i = x.morphTargetDictionary?.[n]; if (i !== undefined) x.morphTargetInfluences[i] = rec.shapes[n]; }
+    }
+  }
+  return rec.shapes;
+}
+function setShapes(rec, weights) {
+  const now = shapesNow(rec);
+  for (const [n, w] of Object.entries(weights)) {
+    if (now[n] === w) continue;
+    now[n] = w;
+    for (const m of rec.meshes) {
+      const i = m.morphTargetDictionary?.[n];
+      if (i !== undefined) m.morphTargetInfluences[i] = w;
+    }
   }
 }
 
