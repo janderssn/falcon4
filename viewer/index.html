@@ -103,6 +103,16 @@
       <label class="switch"><input type="checkbox" id="opt-shadows" checked><i></i><span>Shadows</span></label>
       <label class="switch"><input type="checkbox" id="opt-frost"><i></i><span>Film blur<small class="hint">Clear laminates blur what is further behind them</small></span></label>
     </section>
+    <section class="experimental">
+      <h3>Experimental</h3>
+      <div class="colorrow"><input type="color" id="opt-shade" value="#cccccc" aria-label="Light studio shade"><span>Light studio shade<small class="hint" id="shade-hint">The Light background</small></span><button type="button" class="mini" id="shade-reset" title="Back to the default shade">Reset</button></div>
+      <label class="switch"><input type="checkbox" id="opt-outline"><i></i><span>Outline<small class="hint">A line around the glider's silhouette</small></span></label>
+      <label class="slider" id="outline-w-row"><span>Outline thickness</span><b id="outline-w-label">2 px</b><input id="opt-outline-w" type="range" min="0.5" max="8" step="0.5" value="2" aria-label="Outline thickness"></label>
+      <div class="colorrow" id="outline-c-row"><input type="color" id="opt-outline-c" value="#000000" aria-label="Outline colour"><span>Outline colour</span></div>
+      <label class="switch" id="outline-inner-row"><input type="checkbox" id="opt-outline-inner"><i></i><span>Inner lines<small class="hint">Where one part stands in front of another, or a surface folds</small></span></label>
+      <label class="slider" id="outline-sens-row"><span>Inner line sensitivity</span><small class="ends"><span>Fewer</span><span>More</span></small><input id="opt-outline-sens" type="range" min="0" max="1" step="0.02" value="0.5" aria-label="Inner line sensitivity"></label>
+      <label class="switch" id="outline-wires-row"><input type="checkbox" id="opt-outline-wires"><i></i><span>Outline the wires too</span></label>
+    </section>
   </div>
 </aside>
 

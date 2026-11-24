@@ -2,7 +2,8 @@ import './style.css';
 import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
-import { Scenes, SCENES, BACKDROPS } from './lib/scenes.js';
+import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
+import { Outline } from './lib/outline.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
@@ -107,6 +108,14 @@ const state = {
   frost: params.has('frost') ? params.get('frost') === '1' : !small,   // settings: laminates blur what is behind them
   wind: 1, sel: null, tour: false,
   grid: params.get('grid') === '1',                // settings: floor grid in the studio, the same for every background
+  // settings, experimental: the Light background's shade, and an outline round the glider
+  shade: /^[0-9a-f]{6}$/i.test(params.get('shade') || '') ? `#${params.get('shade').toLowerCase()}` : LIGHT_SHADE,
+  outline: params.get('ol') === '1',
+  outlineW: Math.min(8, Math.max(0.5, Number(params.get('olw')) || 2)),
+  outlineC: /^[0-9a-f]{6}$/i.test(params.get('olc') || '') ? `#${params.get('olc').toLowerCase()}` : '#000000',
+  outlineWires: params.get('olwires') === '1',
+  outlineInner: params.get('olin') !== '0',
+  outlineSens: params.has('olsens') ? Math.min(1, Math.max(0, Number(params.get('olsens')) || 0)) : 0.5,
   panel: null,                                     // the open side panel: 'custom', 'settings' or none
 };
 let catalog, record, renderer, rig, scenes;
@@ -131,6 +140,7 @@ async function boot() {
   scenes.setShadows(state.shadows);
   scenes.setGrid(state.grid);
   scenes.setSpot(state.spot);
+  setLightShade(state.shade);
   scenes.setBackdrop(state.backdrop);
   wireUi();
   resize();
@@ -168,7 +178,7 @@ async function setModel(id, first = false) {
   try {
     rec = await loadModel(source, (f, loaded) => {
       const pct = f == null ? null : Math.round(f * 100);
-      if (first) loaderText('Falcon 4', pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
+      if (first) loaderText(source.glider, pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
       else if (pct != null && pct < 100) toast(`Loading the ${source.label} build · ${pct} %`, true);
     });
   } catch (e) {
@@ -859,9 +869,14 @@ function loop(now) {
   } else {
     if (frostActive) renderFrost(rig.camera);
     renderer.render(scene, rig.camera);
+    if (state.outline && record) {
+      if (record.outlineWires !== state.outlineWires) { record.outlineWires = state.outlineWires; outline.setMeshes(record.meshes, state.outlineWires); }
+      outline.render(renderer, scene, rig.camera, state.outlineW, state.outlineC, state.outlineInner ? Math.max(0.001, state.outlineSens) : 0);
+    }
   }
   updateLabels();
 }
+const outline = new Outline();                      // experimental (Settings); lib/outline.js
 // ------------------------------------------------------------------ film blur
 // Laminates show the scene behind them blurred by distance (lib/frost.js).
 const filmBlur = new FilmBlur();
@@ -1439,7 +1454,21 @@ function syncPanel() {
     b.disabled = state.scene !== 'studio';
   }
   $('#backdrop-hint').hidden = state.scene === 'studio';
-  document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light');
+  // Dark title text on a pale background; a dark custom shade keeps the light text.
+  const sh = new THREE.Color(state.shade), pale = 0.2126 * sh.r + 0.7152 * sh.g + 0.0722 * sh.b > 0.35;
+  document.body.classList.toggle('bg-light', state.scene === 'studio' && state.backdrop === 'light' && pale);
+  $('#opt-shade').value = state.shade;
+  $('#shade-reset').disabled = state.shade === LIGHT_SHADE;
+  $('#shade-hint').textContent = state.scene === 'studio' && state.backdrop === 'light' ? 'The Light background' : 'Picks the Light studio background';
+  $('#opt-outline').checked = state.outline;
+  $('#opt-outline-w').value = state.outlineW;
+  $('#outline-w-label').textContent = `${state.outlineW} px`;
+  $('#opt-outline-c').value = state.outlineC;
+  $('#opt-outline-wires').checked = state.outlineWires;
+  $('#opt-outline-inner').checked = state.outlineInner;
+  $('#opt-outline-sens').value = state.outlineSens;
+  for (const id of ['#outline-w-row', '#outline-c-row', '#outline-wires-row', '#outline-inner-row']) $(id).hidden = !state.outline;
+  $('#outline-sens-row').hidden = !state.outline || !state.outlineInner;
   $('#opt-shadows').checked = state.shadows;
   $('#opt-frost').checked = state.frost;
   $('#opt-spot').checked = state.spot;
@@ -1452,7 +1481,9 @@ function syncPanel() {
   for (const t of document.querySelectorAll('#scene-fly .tile')) t.classList.toggle('on', t.dataset.scene === state.scene);
   const src = catalog?.sources.get(state.model);
   if (src) {
-    $('#subtitle').textContent = `Wills Wing · 170 · ${src.label} build`;
+    $('h1').textContent = src.glider;
+    $('#subtitle').textContent = src.subtitle;
+    document.title = document.title.replace(/^[^—]*—/, `${src.glider} —`);
     $('#download').href = src.glb;
     $('#download').download = src.download;
   }
@@ -1551,6 +1582,23 @@ function wireUi() {
   $('#opt-grid').addEventListener('change', (e) => { state.grid = e.target.checked; scenes.setGrid(state.grid); saveUrlSoon(); });
   $('#opt-shadows').addEventListener('change', (e) => { state.shadows = e.target.checked; scenes.setShadows(state.shadows); saveUrlSoon(); });
   $('#opt-frost').addEventListener('change', (e) => { state.frost = e.target.checked; saveUrlSoon(); });
+  // Experimental: the shade switches to the Light studio, so the change shows.
+  const shade = (hex) => {
+    state.shade = hex;
+    setLightShade(hex);
+    if (state.scene !== 'studio') setScene('studio');
+    state.backdrop = 'light';
+    scenes.setBackdrop('light');
+    syncPanel(); saveUrlSoon();
+  };
+  $('#opt-shade').addEventListener('input', (e) => shade(e.target.value));
+  $('#shade-reset').addEventListener('click', () => shade(LIGHT_SHADE));
+  $('#opt-outline').addEventListener('change', (e) => { state.outline = e.target.checked; syncPanel(); saveUrlSoon(); });
+  $('#opt-outline-w').addEventListener('input', (e) => { state.outlineW = Number(e.target.value); $('#outline-w-label').textContent = `${state.outlineW} px`; saveUrlSoon(); });
+  $('#opt-outline-c').addEventListener('input', (e) => { state.outlineC = e.target.value; saveUrlSoon(); });
+  $('#opt-outline-inner').addEventListener('change', (e) => { state.outlineInner = e.target.checked; syncPanel(); saveUrlSoon(); });
+  $('#opt-outline-sens').addEventListener('input', (e) => { state.outlineSens = Number(e.target.value); saveUrlSoon(); });
+  $('#opt-outline-wires').addEventListener('change', (e) => { state.outlineWires = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
@@ -1655,6 +1703,15 @@ function saveUrl() {
   if (state.backdrop !== 'dark') q.set('bg', state.backdrop);
   if (!state.shadows) q.set('shadows', '0');
   if (!state.spot) q.set('spot', '0');
+  if (state.shade !== LIGHT_SHADE) q.set('shade', state.shade.slice(1));
+  if (state.outline) {
+    q.set('ol', '1');
+    if (state.outlineW !== 2) q.set('olw', String(state.outlineW));
+    if (state.outlineC !== '#000000') q.set('olc', state.outlineC.slice(1));
+    if (state.outlineWires) q.set('olwires', '1');
+    if (!state.outlineInner) q.set('olin', '0');
+    if (Math.abs(state.outlineSens - 0.5) > 0.001) q.set('olsens', state.outlineSens.toFixed(2));
+  }
   if (state.scene === 'hill' && Math.abs(state.hours - 9.5) > 0.01) q.set('t', state.hours.toFixed(2));
   const p = rig.pose(), r = (v, d = 3) => Number(v.toFixed(d));
   q.set('cam', [...p.target.toArray().map((v) => r(v)), ...p.dir.toArray().map((v) => r(v, 4)), r(p.size), rig.projection === 'orthographic' ? 'o' : 'p'].join(','));
