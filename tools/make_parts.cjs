@@ -9,6 +9,7 @@ const glb = path.join(__dirname, '..', 'viewer', 'public', 'models', id, 'model.
 const buf = fs.readFileSync(glb);
 const gltf = JSON.parse(buf.slice(20, 20 + buf.readUInt32LE(12)).toString('utf8'));
 const rules = [
+  ['01', /^Nose sleeve|^Nose batten (sleeve|keeper tab)$|^Tip inner webbing/],   // Tecma: cloth and eyelets sewn to the sail
   ['07', /webbing|hang loop|cinch strap|rope (hand )?loop|bungee|suspension tape|backup eye|Rapidlink|(?<!pocket )strap\b/i],     // Webbing
   ['01', /^Sail (top|upper|lower|under|P\d|number|panel)|^Sail\b(?! mount)|Trailing (edge )?hem|pocket|zigzag|stitch|Kingpost patch|Kingpost base sock|Nosecone|cloth cover|Nose bridge|Nose former|Nose lacing reinforcement|Mast binding|Batten pocket top tape|Batten doubler|Batten end reinforcement|Hinge cover (hook|loop) strip|Leading-edge|hem\b|selvedge|seam\b|patch\b|emblem|lap\b|Undersail|Tip cuff/i], // Sail & cloth
   ['05', /^Bridle|Luff (bridle|line)/i],                                       // reflex bridles, before the batten rule (#4)
