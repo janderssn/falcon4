@@ -245,7 +245,7 @@ function buildStudio(envs) {
   new HDRLoader().loadAsync('./env/studio_small_09_1k.hdr').then((hdr) => {
     hdr.mapping = THREE.EquirectangularReflectionMapping;
     const studio = envs.built.studio;
-    studio.envMap = envs.pmrem.fromEquirectangular(hdr).texture;
+    studio.envMap = studioReflections(envs.pmrem, hdr);
     hdr.dispose();
     if (envs.current === 'studio') envs.set('studio', envs.sun.castShadow);
   }, (e) => console.warn('Studio HDRI unavailable; using the room light.', e));
@@ -261,6 +261,36 @@ function buildStudio(envs) {
     hemi: [0xffffff, 0x919781, 0.6], fillIntensity: 0.5,
   };
 }
+
+/**
+ * The studio photo with long light strips added on a dark floor mat, for
+ * reflections only. The photo's floor is an even grey, so a tube seen from below that points
+ * at the camera (the keel from the front) reflected nothing but that grey and looked flat and
+ * white; the strips, both lengthwise and across, give tubes in every direction a highlight.
+ */
+function studioReflections(pmrem, hdr) {
+  const room = new THREE.Scene();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(50, 64, 32), new THREE.MeshBasicMaterial({ map: hdr, side: THREE.BackSide }));
+  sky.scale.x = -1;   // seen from inside: unmirrored, as fromEquirectangular would place it
+  room.add(sky);
+  const strip = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1).multiplyScalar(STRIP_GAIN) });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x080a0c });
+  const add = (mat, w, d, x, y, z, rx = -Math.PI / 2, ry = 0) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+    m.position.set(x, y, z); m.rotation.set(rx, ry, 0, 'YXZ');
+    room.add(m);
+  };
+  // On the floor, 2.5 m down: a dark mat with thin bright strips lengthwise and across, so
+  // the light from below stays about what the photo gives, only no longer even.
+  add(dark, 16, 16, 0, -2.5, 0);
+  for (const x of [-2.5, 2.5]) add(strip, 0.35, 16, x, -2.45, 0);
+  for (const z of [-3, 3]) add(strip, 16, 0.35, 0, -2.45, z);
+  const env = pmrem.fromScene(room, 0.02).texture;
+  room.traverse((o) => { o.geometry?.dispose(); });
+  strip.dispose(); dark.dispose();
+  return env;
+}
+const STRIP_GAIN = 4;
 
 /**
  * The studio's three backgrounds. Dark and Light are a plain colour with the shadow on an
