@@ -5,7 +5,7 @@
       "id": "astra",
       "label": "Astra",
       "title": "Astra build",
-      "description": "669 parts \u00b7 round control frame \u00b7 resting on the ground",
+      "description": "669 parts · round control frame · resting on the ground",
       "glb": "models/astra/model.glb",
       "parts": "models/astra/parts.json",
       "download": "falcon4-170-astra.glb",
@@ -15,12 +15,38 @@
       "id": "opus",
       "label": "Opus",
       "title": "Opus build",
-      "description": "356 parts \u00b7 manual-accurate hardware \u00b7 speedbar basetube",
+      "description": "356 parts · manual-accurate hardware · speedbar basetube",
       "glb": "models/opus/model.glb",
       "parts": "models/opus/parts.json",
       "download": "falcon4-170-opus.glb",
       "rotateY": 180,
       "version": "bb85d59-2"
+    },
+    {
+      "id": "sport3",
+      "label": "Sport 3",
+      "title": "Wills Wing Sport 3 155",
+      "description": "483 parts · frame, rigging and VG · no sail yet",
+      "glb": "models/sport3/model.glb",
+      "parts": "models/sport3/parts.json",
+      "download": "sport3-155-opus.glb",
+      "version": "ac34540",
+      "glider": "Sport 3",
+      "subtitle": "Wills Wing · 155 · Opus build",
+      "rotateY": 180
+    },
+    {
+      "id": "tecma",
+      "label": "Tecma",
+      "title": "Tecma Medium 15",
+      "description": "549 parts · rigged sail · floating crossbar link",
+      "glb": "models/tecma/model.glb",
+      "parts": "models/tecma/parts.json",
+      "download": "tecma-medium-15-opus.glb",
+      "version": "202f2a6",
+      "glider": "Medium 15",
+      "subtitle": "Tecma · Opus build",
+      "rotateY": 180
     }
   ]
 }

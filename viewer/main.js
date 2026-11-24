@@ -168,7 +168,7 @@ async function setModel(id, first = false) {
   try {
     rec = await loadModel(source, (f, loaded) => {
       const pct = f == null ? null : Math.round(f * 100);
-      if (first) loaderText('Falcon 4', pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
+      if (first) loaderText(source.glider, pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
       else if (pct != null && pct < 100) toast(`Loading the ${source.label} build · ${pct} %`, true);
     });
   } catch (e) {
@@ -1452,7 +1452,9 @@ function syncPanel() {
   for (const t of document.querySelectorAll('#scene-fly .tile')) t.classList.toggle('on', t.dataset.scene === state.scene);
   const src = catalog?.sources.get(state.model);
   if (src) {
-    $('#subtitle').textContent = `Wills Wing · 170 · ${src.label} build`;
+    $('h1').textContent = src.glider;
+    $('#subtitle').textContent = src.subtitle;
+    document.title = document.title.replace(/^[^—]*—/, `${src.glider} —`);
     $('#download').href = src.glb;
     $('#download').download = src.download;
   }

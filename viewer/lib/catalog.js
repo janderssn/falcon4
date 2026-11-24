@@ -23,6 +23,7 @@ export async function loadCatalog() {
     const base = {
       modelId: m.id, title: m.title, description: m.description, download: m.download,
       rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
+      glider: m.glider || 'Falcon 4', subtitle: m.subtitle || `Wills Wing · 170 · ${m.label} build`,
     };
     const v = m.version ? `?v=${encodeURIComponent(m.version)}` : '';
     sources.set(m.id, {
