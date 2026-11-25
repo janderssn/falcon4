@@ -35,7 +35,18 @@ for (const node of doc.getRoot().listNodes()) {
       b += n;
       if (n < 64) { a += n; continue; }
       const pos = prim.getAttribute('POSITION').getArray();
-      const [res] = MeshoptSimplifier.simplify(Uint32Array.from(idx.getArray()), pos, 3, 0, ERR / s, ['ErrorAbsolute']);
+      // Shape targets (morphs) count too: the simplified mesh must hold every shape, not only the
+      // base one, so each target's offsets go in as attributes (in metres, weight 1).
+      const targets = prim.listTargets().map((t) => t.getAttribute('POSITION')?.getArray()).filter(Boolean).slice(0, 10);
+      let res;
+      if (targets.length) {
+        const k = targets.length * 3, nv = pos.length / 3, attr = new Float32Array(nv * k);
+        targets.forEach((d, j) => { for (let v = 0; v < nv; v++) for (let c = 0; c < 3; c++) attr[v * k + j * 3 + c] = d[v * 3 + c]; });
+        [res] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(idx.getArray()), pos, 3, attr, k,
+          new Array(k).fill(1), null, 0, ERR / s, ['ErrorAbsolute']);
+      } else {
+        [res] = MeshoptSimplifier.simplify(Uint32Array.from(idx.getArray()), pos, 3, 0, ERR / s, ['ErrorAbsolute']);
+      }
       if (res.length >= 3) {
         prim.setIndices(doc.createAccessor().setArray(res).setBuffer(idx.getBuffer()));
         if (idx.listParents().length === 1) idx.dispose();

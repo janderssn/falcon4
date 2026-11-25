@@ -109,7 +109,7 @@ with its sail) and the **Tecma Medium 15**
 Falcon 4 only.
 
 Their GLBs are exported from the saved .blend and made small for the web with
-`tools/optimize_glb.mjs`: each mesh is simplified until it would move by more than a set
+`tools/optimize_glb.mjs`: each mesh is simplified until it (and each of its shape targets) would move by more than a set
 distance (0.12 mm for the Sport 3, 0.2 mm for the Tecma), then quantized and
 meshopt-compressed. This takes the Sport 3 from 77 MB to 17.3 MB (with its VG rig) and the Tecma from 136 MB
 to 17.7 MB.
