@@ -484,9 +484,11 @@ function poseOf(rec, animate = false) {
  * "VG loose"; the ropes that slide through the blocks follow their routes. A rope's surplus pays
  * out as the VG is pulled ("lengthLoose" in models.json).
  */
-const VG_SHAPE = 'VG loose';
+const VG_SHAPE = /^VG (loose|[\d.]+)$/;
+/** The setting of a VG shape key: "VG loose" is 0, "VG 0.25" 0.25 (the tight shape is the mesh). */
+const vgAt = (name) => { const m = VG_SHAPE.exec(name); return m ? (m[1] === 'loose' ? 0 : Number(m[1])) : null; };
 function vgOf(rec) {
-  const shaped = rec.meshes.filter((m) => m.morphTargetDictionary?.[VG_SHAPE] !== undefined);
+  const shaped = rec.meshes.filter((m) => Object.keys(m.morphTargetDictionary || {}).some((k) => vgAt(k) !== null));
   for (const m of shaped) m.frustumCulled = false;   // the loose shape reaches past the tight bounds
   const tracks = rec.clips.flatMap((c) => c.tracks.filter((t) => !t.name.endsWith('.morphTargetInfluences')));
   // Glide between the settings: Blender writes these two-key tracks as STEP.
@@ -512,7 +514,16 @@ function vgOf(rec) {
 function setVG(rec, v) {
   if (!rec?.vg) return;
   const { shaped, mixer, action, duration, routed } = rec.vg;
-  for (const m of shaped) m.morphTargetInfluences[m.morphTargetDictionary[VG_SHAPE]] = 1 - v;
+  // Each key holds its setting's shape: between two settings the shape blends from one to the next.
+  for (const m of shaped) {
+    const keys = Object.entries(m.morphTargetDictionary).map(([k, i]) => [vgAt(k), i]).filter(([s]) => s !== null);
+    const at = [...keys.map(([s]) => s), 1].sort((a, b) => a - b);
+    for (const [s, i] of keys) {
+      const k = at.indexOf(s), lo = at[k - 1], hi = at[k + 1];
+      m.morphTargetInfluences[i] = v <= s ? (lo === undefined ? 1 : Math.max(0, (v - lo) / (s - lo)))
+        : Math.max(0, (hi - v) / (hi - s));
+    }
+  }
   if (mixer) { action.time = v * duration; mixer.update(0); }
   rec.root.updateMatrixWorld(true);
   for (const r of routed) r.update();

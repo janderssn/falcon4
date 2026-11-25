@@ -30,7 +30,7 @@
       "glb": "models/sport3/model.glb",
       "parts": "models/sport3/parts.json",
       "download": "sport3-155-opus.glb",
-      "version": "6bbb492",
+      "version": "a409cf0",
       "ropes": [
         { "part": "VG lower rope surplus", "start": [0.64398, -1.54713, 1.27049], "dir": [-1, 0, 0],
           "length": 2.988, "lengthLoose": 0.367, "radius": 0.0016, "colliders": ["Basetube (speedbar)", "VG jamcleat"],
