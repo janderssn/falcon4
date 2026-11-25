@@ -488,6 +488,8 @@ function vgOf(rec) {
   const shaped = rec.meshes.filter((m) => m.morphTargetDictionary?.[VG_SHAPE] !== undefined);
   for (const m of shaped) m.frustumCulled = false;   // the loose shape reaches past the tight bounds
   const tracks = rec.clips.flatMap((c) => c.tracks.filter((t) => !t.name.endsWith('.morphTargetInfluences')));
+  // Glide between the settings: Blender writes these two-key tracks as STEP.
+  for (const t of tracks) t.setInterpolation(THREE.InterpolateLinear);
   let mixer = null, action = null, duration = 0;
   if (tracks.length) {
     const clip = new THREE.AnimationClip('VG', -1, tracks);
