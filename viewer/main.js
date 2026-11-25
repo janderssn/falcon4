@@ -4,6 +4,7 @@ import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/c
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
 import { Outline } from './lib/outline.js';
+import { Rope } from './lib/rope.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
@@ -457,6 +458,7 @@ function stepPoses(now) {
 }
 function poseOf(rec, animate = false) {
   if (!rec.rest) rec.rest = restingPose(rec);
+  const fresh = !rec.ropes;
   const a0 = rec.angle ?? 0;
   const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
   const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, restPose());
@@ -473,6 +475,26 @@ function poseOf(rec, animate = false) {
     setShapes(rec, s0);
     tiltTo(rec, a0);
   }
+  if (fresh) ropesOf(rec);
+}
+/**
+ * Soft rope ends: a part named in models.json ("ropes": [{ part, start, dir, length, radius,
+ * colliders, lay }], model space) is redrawn as a rope that hangs from where it leaves its cleat,
+ * lies on the floor and drapes over the colliders' tubes (lib/rope.js).
+ */
+function ropesOf(rec) {
+  rec.ropes = [];
+  for (const spec of rec.source.ropes || []) {
+    const part = rec.parts.get(spec.part);
+    if (!part) { console.warn(`No part ${spec.part} for a rope.`); continue; }
+    const [mesh, ...rest] = part.meshes;
+    for (const m of rest) m.geometry = new THREE.BufferGeometry();
+    const colliders = (spec.colliders || []).map((n) => rec.parts.get(n)?.meshes || []);
+    rec.ropes.push(new Rope(spec, rec.root.children[0], mesh, colliders));
+  }
+}
+function stepRopes(dt) {
+  for (const rec of [record, other]) for (const r of rec?.ropes || []) if (r.mesh.visible) r.step(dt);
 }
 /**
  * Configurations: a build can name shape keys (glTF morph targets) and their weight in each
@@ -910,6 +932,7 @@ function loop(now) {
   if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera();
   stepSplit(now);
   stepPoses(now);
+  stepRopes(dt);
   scenes.update(rig.camera, (now - clock0) / 1000);
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.

@@ -120,6 +120,13 @@ targets (exported at 0, rigged on the ground, with their drivers removed), and i
 Standing shows it in flight; tail down and nose down show it parked. The weights swing with
 the tilt. `node tools/make_parts.cjs sport3` (or `tecma`) writes the part groups.
 
+A loose rope end can be soft. An entry in `"ropes"` names the part (the Sport 3's "VG lower
+rope surplus"), where it leaves its cleat (`start`, `dir`), its `length` and `radius`, the
+`colliders` it rests on, and the `lay` it starts from: the model's stowed shape, points
+2.5 cm apart. All are in GLB coordinates. `viewer/lib/rope.js` redraws the part as a braided
+tube on a chain of points under gravity. The rope drapes over the colliders and lies on the
+floor, and it follows the glider when the pose changes.
+
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
   replace a model file, so browsers load the new file at once and don't use a
   cached copy.
