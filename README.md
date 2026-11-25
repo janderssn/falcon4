@@ -111,7 +111,7 @@ Falcon 4 only.
 Their GLBs are exported from the saved .blend and made small for the web with
 `tools/optimize_glb.mjs`: each mesh is simplified until it would move by more than a set
 distance (0.12 mm for the Sport 3, 0.2 mm for the Tecma), then quantized and
-meshopt-compressed. This takes the Sport 3 from 77 MB to 12.4 MB and the Tecma from 136 MB
+meshopt-compressed. This takes the Sport 3 from 77 MB to 13.5 MB (with its VG rig) and the Tecma from 136 MB
 to 17.7 MB.
 
 A build can have configurations. The Tecma's GLB keeps its "In flight" shape keys as morph
@@ -126,6 +126,11 @@ rope surplus"), where it leaves its cleat (`start`, `dir`), its `length` and `ra
 2.5 cm apart. All are in GLB coordinates. `viewer/lib/rope.js` redraws the part as a braided
 tube on a chain of points under gravity. The rope drapes over the colliders and lies on the
 floor, and it follows the glider when the pose changes.
+
+The Sport 3 is rigged for its VG (sport3-opus `tools/vg_rig.py`). Parts that move carry
+keyframes (time 0 loose, end tight) and parts that change shape carry the morph target
+"VG loose". The VG slider in the pose bar (`?vg=0..1`, default 1, tight as modelled) sets
+both. It also pays the rope surplus out from `lengthLoose` to `length`.
 
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
   replace a model file, so browsers load the new file at once and don't use a

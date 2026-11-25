@@ -125,6 +125,7 @@
   <button type="button" data-pose="tail" aria-pressed="false" title="Resting on the keel, tail down"><svg viewBox="0 0 24 24" class="ic"><path d="M2 20.5 21 4M12.5 11.6 9.4 21h7.8z"/><path d="M2 21h20" opacity=".45"/></svg><span>Tail down</span></button>
   <button type="button" data-pose="bar" aria-pressed="true" title="Standing on the control bar"><svg viewBox="0 0 24 24" class="ic"><path d="M2 9h20M12 9l-4.5 10h9z"/><path d="M2 21h20" opacity=".45"/></svg><span>Standing</span></button>
   <button type="button" data-pose="nose" aria-pressed="false" title="Resting on the keel, nose down"><svg viewBox="0 0 24 24" class="ic"><path d="M3 4l19 16.5M11.5 11.6 7.6 21h7.8z"/><path d="M2 21h20" opacity=".45"/></svg><span>Nose down</span></button>
+  <label id="vgctl" hidden title="VG: pull the rope to tighten the sail (loose to tight)"><span class="sep"></span><b>VG</b><input type="range" id="vg" min="0" max="1" step="0.01" aria-label="VG, loose to tight"><em id="vg-val"></em></label>
 </div>
 
 <div id="chip" class="hud glass" hidden aria-live="polite"></div>

@@ -118,7 +118,7 @@ async function load(source, progress) {
   const groups = {};
   for (const p of parts.values()) groups[p.group] = (groups[p.group] || 0) + 1;
   return {
-    source, root, meshes, parts, box, groups,
+    source, root, meshes, parts, box, groups, clips: gltf.animations || [],
     stats: {
       parts: parts.size, meshes: meshes.length, triangles, vertices, materials: materials.size,
       textures: textures.size, texturePixels, bytes,

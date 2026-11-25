@@ -97,6 +97,7 @@ const state = {
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   compare: params.get('compare') === '1',
   split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
   selSide: 'A',
@@ -475,7 +476,39 @@ function poseOf(rec, animate = false) {
     setShapes(rec, s0);
     tiltTo(rec, a0);
   }
-  if (fresh) ropesOf(rec);
+  if (fresh) { ropesOf(rec); vgOf(rec); setVG(rec, state.vg); }
+}
+/**
+ * VG: a rigged build carries its loose state too (sport3-opus tools/vg_rig.py): parts that move
+ * keep keyframes (time 0 loose, end tight) and parts that change shape the morph target
+ * "VG loose". A rope's surplus pays out as the VG is pulled ("lengthLoose" in models.json).
+ */
+const VG_SHAPE = 'VG loose';
+function vgOf(rec) {
+  const shaped = rec.meshes.filter((m) => m.morphTargetDictionary?.[VG_SHAPE] !== undefined);
+  for (const m of shaped) m.frustumCulled = false;   // the loose shape reaches past the tight bounds
+  const tracks = rec.clips.flatMap((c) => c.tracks.filter((t) => !t.name.endsWith('.morphTargetInfluences')));
+  let mixer = null, action = null, duration = 0;
+  if (tracks.length) {
+    const clip = new THREE.AnimationClip('VG', -1, tracks);
+    mixer = new THREE.AnimationMixer(rec.root.children[0]);
+    action = mixer.clipAction(clip);
+    action.play();
+    action.paused = true;
+    duration = clip.duration;
+  }
+  rec.vg = shaped.length || tracks.length ? { shaped, mixer, action, duration } : null;
+}
+function setVG(rec, v) {
+  if (!rec?.vg) return;
+  const { shaped, mixer, action, duration } = rec.vg;
+  for (const m of shaped) m.morphTargetInfluences[m.morphTargetDictionary[VG_SHAPE]] = 1 - v;
+  if (mixer) { action.time = v * duration; mixer.update(0); }
+  rec.root.updateMatrixWorld(true);
+  rec.ropes.forEach((r, i) => {
+    const spec = rec.source.ropes[i];
+    if (spec.lengthLoose !== undefined) r.setLength(spec.lengthLoose + (spec.length - spec.lengthLoose) * v);
+  });
 }
 /**
  * Soft rope ends: a part named in models.json ("ropes": [{ part, start, dir, length, radius,
@@ -1529,6 +1562,9 @@ function syncPanel() {
   if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
   syncRows();
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
+  $('#vgctl').hidden = !record?.vg;
+  $('#vg').value = state.vg;
+  $('#vg-val').textContent = state.vg >= 1 ? 'tight' : state.vg <= 0 ? 'loose' : `${Math.round(state.vg * 100)} %`;
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
   $('#opt-battens').checked = state.battens;
@@ -1718,6 +1754,13 @@ function wireUi() {
     catch { toast('Copy the address bar to share this glider'); }
   };
   $('#posebar').addEventListener('click', (e) => { const b = e.target.closest('[data-pose]'); if (b) setPose(b.dataset.pose); });
+  $('#vg').addEventListener('input', (e) => {
+    state.vg = Number(e.target.value);
+    setVG(record, state.vg);
+    setVG(other, state.vg);
+    $('#vg-val').textContent = state.vg >= 1 ? 'tight' : state.vg <= 0 ? 'loose' : `${Math.round(state.vg * 100)} %`;
+    saveUrlSoon();
+  });
   $('#chip').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'close') select(null);
@@ -1783,6 +1826,7 @@ function saveUrl() {
   if (!state.wires) q.set('wires', '0');
   if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
+  if (state.vg !== 1) q.set('vg', state.vg.toFixed(2));
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
