@@ -4,7 +4,7 @@ import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/c
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
 import { Outline } from './lib/outline.js';
-import { Rope } from './lib/rope.js';
+import { Rope, RoutedRope } from './lib/rope.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
@@ -481,7 +481,8 @@ function poseOf(rec, animate = false) {
 /**
  * VG: a rigged build carries its loose state too (sport3-opus tools/vg_rig.py): parts that move
  * keep keyframes (time 0 loose, end tight) and parts that change shape the morph target
- * "VG loose". A rope's surplus pays out as the VG is pulled ("lengthLoose" in models.json).
+ * "VG loose"; the ropes that slide through the blocks follow their routes. A rope's surplus pays
+ * out as the VG is pulled ("lengthLoose" in models.json).
  */
 const VG_SHAPE = 'VG loose';
 function vgOf(rec) {
@@ -499,14 +500,22 @@ function vgOf(rec) {
     action.paused = true;
     duration = clip.duration;
   }
-  rec.vg = shaped.length || tracks.length ? { shaped, mixer, action, duration } : null;
+  // Ropes that slide through the moving blocks are drawn along their routes (lib/rope.js).
+  const routed = [];
+  for (const m of rec.meshes) {
+    let node = m;
+    while (node && !node.userData.vg_route) node = node.parent;
+    if (node) routed.push(new RoutedRope(m, JSON.parse(node.userData.vg_route), rec.root.children[0]));
+  }
+  rec.vg = shaped.length || tracks.length ? { shaped, mixer, action, duration, routed } : null;
 }
 function setVG(rec, v) {
   if (!rec?.vg) return;
-  const { shaped, mixer, action, duration } = rec.vg;
+  const { shaped, mixer, action, duration, routed } = rec.vg;
   for (const m of shaped) m.morphTargetInfluences[m.morphTargetDictionary[VG_SHAPE]] = 1 - v;
   if (mixer) { action.time = v * duration; mixer.update(0); }
   rec.root.updateMatrixWorld(true);
+  for (const r of routed) r.update();
   rec.ropes.forEach((r, i) => {
     const spec = rec.source.ropes[i];
     if (spec.lengthLoose !== undefined) r.setLength(spec.lengthLoose + (spec.length - spec.lengthLoose) * v);

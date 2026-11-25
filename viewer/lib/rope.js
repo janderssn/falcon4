@@ -290,33 +290,48 @@ export class Rope {
   build() {
     const inv = new THREE.Matrix4().copy(this.mesh.matrixWorld).invert();
     const scale = new THREE.Vector3().setFromMatrixScale(inv).x;
-    const r = this.radius * scale;
     // Smooth through the points: three rings per step.
     const pts = new THREE.CatmullRomCurve3(this.p.map((x) => x.clone().applyMatrix4(inv))).getPoints((this.p.length - 1) * SMOOTH);
-    const n = pts.length;
-    const R = SIDES + 1;   // a ring, with its first vertex again at the seam for the texture
-    let pos = this.geometry.attributes.position;
-    if (!pos || pos.count !== n * R) {
-      pos = new THREE.BufferAttribute(new Float32Array(n * R * 3), 3);
-      const nor = new THREE.BufferAttribute(new Float32Array(n * R * 3), 3);
-      const uv = new THREE.BufferAttribute(new Float32Array(n * R * 2), 2);
-      const idx = [];
-      for (let i = 0; i + 1 < n; i++) {
+    drawTube(this.geometry, [pts], this.radius * scale, scale, this.pitch, this.vPerMetre);
+  }
+}
+
+/**
+ * A braided tube along polylines (mesh space): rings with a braid relief, the texture's v along
+ * the rope at vPerMetre. r in mesh units; scale: mesh units per metre.
+ */
+export function drawTube(geometry, lines, r, scale, pitch, vPerMetre) {
+  const R = SIDES + 1;   // a ring, with its first vertex again at the seam for the texture
+  const total = lines.reduce((s, l) => s + l.length, 0);
+  let pos = geometry.attributes.position;
+  if (!pos || pos.count !== total * R) {
+    pos = new THREE.BufferAttribute(new Float32Array(total * R * 3), 3);
+    const nor = new THREE.BufferAttribute(new Float32Array(total * R * 3), 3);
+    const uv = new THREE.BufferAttribute(new Float32Array(total * R * 2), 2);
+    const idx = [];
+    let base = 0;
+    for (const l of lines) {
+      for (let i = 0; i + 1 < l.length; i++) {
         for (let k = 0; k < SIDES; k++) {
-          const a = i * R + k, b = a + 1, c = a + R, e = b + R;
+          const a = (base + i) * R + k, b = a + 1, c = a + R, e = b + R;
           idx.push(a, b, c, b, e, c);   // outward: (b - a) round, (c - a) along
         }
       }
-      this.geometry.setAttribute('position', pos);
-      this.geometry.setAttribute('normal', nor);
-      this.geometry.setAttribute('uv', uv);
-      this.geometry.setIndex(idx);
+      base += l.length;
     }
-    const nor = this.geometry.attributes.normal, uv = this.geometry.attributes.uv;
-    // Parallel-transport frames along the points.
-    const t = new THREE.Vector3(), nrm = new THREE.Vector3(), bin = new THREE.Vector3(), prevT = new THREE.Vector3();
-    const turn = (Math.PI * 2) / (this.pitch * scale);
+    geometry.setAttribute('position', pos);
+    geometry.setAttribute('normal', nor);
+    geometry.setAttribute('uv', uv);
+    geometry.setIndex(idx);
+  }
+  const nor = geometry.attributes.normal, uv = geometry.attributes.uv;
+  const t = new THREE.Vector3(), nrm = new THREE.Vector3(), bin = new THREE.Vector3(), prevT = new THREE.Vector3();
+  const turn = (Math.PI * 2) / (pitch * scale);
+  let base = 0;
+  for (const pts of lines) {
+    const n = pts.length;
     let along = 0;
+    // Parallel-transport frames along the points.
     for (let i = 0; i < n; i++) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
       t.subVectors(b, a).normalize();
@@ -338,21 +353,69 @@ export class Rope {
         const ph = along * turn;
         const h = Math.max(Math.cos(STRANDS * ang + ph), Math.cos(STRANDS * ang - ph));
         const rr = r * (1 - RELIEF / 2 + RELIEF * Math.max(0, h));
-        const j = i * R + k;
+        const j = (base + i) * R + k;
         const nx = nrm.x * cs + bin.x * sn, ny = nrm.y * cs + bin.y * sn, nz = nrm.z * cs + bin.z * sn;
         pos.setXYZ(j, pts[i].x + nx * rr, pts[i].y + ny * rr, pts[i].z + nz * rr);
-        uv.setXY(j, k / SIDES, 1 - (along / scale) * this.vPerMetre);
+        uv.setXY(j, k / SIDES, 1 - (along / scale) * vPerMetre);
       }
     }
-    this.geometry.computeVertexNormals();
-    // The seam's two copies share one normal.
-    for (let i = 0; i < n; i++) {
-      const a = i * R, b = a + SIDES;
-      v1.set(nor.getX(a) + nor.getX(b), nor.getY(a) + nor.getY(b), nor.getZ(a) + nor.getZ(b)).normalize();
-      nor.setXYZ(a, v1.x, v1.y, v1.z); nor.setXYZ(b, v1.x, v1.y, v1.z);
-    }
-    pos.needsUpdate = nor.needsUpdate = uv.needsUpdate = true;
-    this.geometry.computeBoundingSphere();
-    this.geometry.computeBoundingBox();
+    base += n;
+  }
+  geometry.computeVertexNormals();
+  // The seam's two copies share one normal.
+  for (let i = 0; i < total; i++) {
+    const a = i * R, b = a + SIDES;
+    v1.set(nor.getX(a) + nor.getX(b), nor.getY(a) + nor.getY(b), nor.getZ(a) + nor.getZ(b)).normalize();
+    nor.setXYZ(a, v1.x, v1.y, v1.z); nor.setXYZ(b, v1.x, v1.y, v1.z);
+  }
+  pos.needsUpdate = nor.needsUpdate = uv.needsUpdate = true;
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+}
+
+/**
+ * A rope that slides through moving blocks (the VG tackle): its route is a list of points, each
+ * held by the part it touches, in that part's frame (vg_route, sport3-opus tools/vg_rig.py), so
+ * the falls between the sheaves stay straight at any VG. Redrawn by update().
+ */
+const ROUTE_STEP = 0.004;   // m between rings along the route
+export class RoutedRope {
+  constructor(mesh, route, model) {
+    this.mesh = mesh;
+    this.model = model;
+    this.radius = route.radius;
+    const uv0 = mesh.geometry.attributes.uv;
+    let lo = Infinity, hi = -Infinity, len = 0;
+    if (uv0) for (let i = 0; i < uv0.count; i++) { lo = Math.min(lo, uv0.getY(i)); hi = Math.max(hi, uv0.getY(i)); }
+    // Blender's frame (z up) to glTF's (y up): (x, y, z) -> (x, z, -y).
+    this.lines = route.lines.map((line) => line.map(([name, x, y, z]) => ({
+      node: name ? model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name)) : null,
+      p: new THREE.Vector3(x, z, -y),
+    })));
+    for (const l of this.lines) for (let i = 1; i < l.length; i++) len += l[i].p.distanceTo(l[i - 1].p);
+    this.vPerMetre = uv0 && hi > lo && len ? (hi - lo) / len : 1 / (2 * Math.PI * this.radius);
+    this.pitch = 0.019;
+    this.geometry = new THREE.BufferGeometry();
+    if (mesh.morphTargetInfluences) mesh.morphTargetInfluences = undefined;
+    mesh.geometry = this.geometry;
+    mesh.frustumCulled = false;
+    this.update();
+  }
+
+  update() {
+    this.model.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(this.mesh.matrixWorld).invert();
+    const scale = new THREE.Vector3().setFromMatrixScale(inv).x;
+    const lines = this.lines.map((line) => {
+      const pts = line.map(({ node, p }) => p.clone().applyMatrix4((node || this.model).matrixWorld).applyMatrix4(inv));
+      // Rings every few millimetres along each straight run, for the braid.
+      const out = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const d = pts[i].distanceTo(pts[i - 1]), k = Math.max(1, Math.round(d / (ROUTE_STEP * scale)));
+        for (let j = 1; j <= k; j++) out.push(pts[i - 1].clone().lerp(pts[i], j / k));
+      }
+      return out;
+    });
+    drawTube(this.geometry, lines, this.radius * scale, scale, this.pitch, this.vPerMetre);
   }
 }
