@@ -111,7 +111,7 @@ Falcon 4 only.
 Their GLBs are exported from the saved .blend and made small for the web with
 `tools/optimize_glb.mjs`: each mesh is simplified until it would move by more than a set
 distance (0.12 mm for the Sport 3, 0.2 mm for the Tecma), then quantized and
-meshopt-compressed. This takes the Sport 3 from 77 MB to 12.3 MB and the Tecma from 136 MB
+meshopt-compressed. This takes the Sport 3 from 77 MB to 12.4 MB and the Tecma from 136 MB
 to 17.7 MB.
 
 A build can have configurations. The Tecma's GLB keeps its "In flight" shape keys as morph

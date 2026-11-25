@@ -378,6 +378,7 @@ function restingPose(rec) {
   const v = new THREE.Vector3(), SLICE = 0.002;
   const low = new Map();
   for (const m of rec.meshes) {
+    if (!m.userData.part.ground) continue;   // a hanging rope end does not hold the glider up
     const pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);

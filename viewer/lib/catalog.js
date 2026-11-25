@@ -94,7 +94,10 @@ async function load(source, progress) {
     if (!part) {
       const info = {};
       for (const key of INFO_KEYS) if (node && node.userData[key] !== undefined) info[key] = String(node.userData[key]);
-      part = { name, group: hit ? hit.group : '06', meshes: [], info, triangles: 0, vertices: 0, key: name.toLowerCase() };
+      // Soft parts that hang free (a rope's surplus) are tagged ground_contact = 0 in the model:
+      // they do not hold the glider up, so the resting pose leaves them out.
+      const ground = !(node && Number(node.userData.ground_contact) === 0);
+      part = { name, group: hit ? hit.group : '06', meshes: [], info, ground, triangles: 0, vertices: 0, key: name.toLowerCase() };
       parts.set(name, part);
     }
     const g = o.geometry;

@@ -26,11 +26,11 @@
       "id": "sport3",
       "label": "Sport 3",
       "title": "Wills Wing Sport 3 155",
-      "description": "577 parts · sail, frame, rigging and VG",
+      "description": "578 parts · sail, frame, rigging and VG",
       "glb": "models/sport3/model.glb",
       "parts": "models/sport3/parts.json",
       "download": "sport3-155-opus.glb",
-      "version": "24dab8a",
+      "version": "4e0462a",
       "glider": "Sport 3",
       "subtitle": "Wills Wing · 155 · Opus build",
       "rotateY": 180
