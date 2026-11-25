@@ -24,7 +24,8 @@ export async function loadCatalog() {
       modelId: m.id, title: m.title, description: m.description, download: m.download,
       rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
       glider: m.glider || 'Falcon 4', subtitle: m.subtitle || `Wills Wing · 170 · ${m.label} build`,
-      poseShapes: m.poseShapes || null,   // shape-key weights per resting pose (see main.js, poseOf)
+      poseShapes: m.poseShapes || null,
+      ropes: m.ropes || null,             // soft rope ends drawn by lib/rope.js (see main.js, ropesOf)   // shape-key weights per resting pose (see main.js, poseOf)
     };
     const v = m.version ? `?v=${encodeURIComponent(m.version)}` : '';
     sources.set(m.id, {
@@ -117,7 +118,7 @@ async function load(source, progress) {
   const groups = {};
   for (const p of parts.values()) groups[p.group] = (groups[p.group] || 0) + 1;
   return {
-    source, root, meshes, parts, box, groups,
+    source, root, meshes, parts, box, groups, clips: gltf.animations || [],
     stats: {
       parts: parts.size, meshes: meshes.length, triangles, vertices, materials: materials.size,
       textures: textures.size, texturePixels, bytes,

@@ -4,6 +4,7 @@ import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/c
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
 import { Outline } from './lib/outline.js';
+import { Rope, RoutedRope } from './lib/rope.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
@@ -96,6 +97,7 @@ const state = {
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   compare: params.get('compare') === '1',
   split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
   selSide: 'A',
@@ -457,6 +459,7 @@ function stepPoses(now) {
 }
 function poseOf(rec, animate = false) {
   if (!rec.rest) rec.rest = restingPose(rec);
+  const fresh = !rec.ropes;
   const a0 = rec.angle ?? 0;
   const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
   const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, restPose());
@@ -473,6 +476,80 @@ function poseOf(rec, animate = false) {
     setShapes(rec, s0);
     tiltTo(rec, a0);
   }
+  if (fresh) { ropesOf(rec); vgOf(rec); setVG(rec, state.vg); }
+}
+/**
+ * VG: a rigged build carries its loose state too (sport3-opus tools/vg_rig.py): parts that move
+ * keep keyframes (time 0 loose, end tight) and parts that change shape the morph target
+ * "VG loose"; the ropes that slide through the blocks follow their routes. A rope's surplus pays
+ * out as the VG is pulled ("lengthLoose" in models.json).
+ */
+const VG_SHAPE = /^VG (loose|[\d.]+)$/;
+/** The setting of a VG shape key: "VG loose" is 0, "VG 0.25" 0.25 (the tight shape is the mesh). */
+const vgAt = (name) => { const m = VG_SHAPE.exec(name); return m ? (m[1] === 'loose' ? 0 : Number(m[1])) : null; };
+function vgOf(rec) {
+  const shaped = rec.meshes.filter((m) => Object.keys(m.morphTargetDictionary || {}).some((k) => vgAt(k) !== null));
+  for (const m of shaped) m.frustumCulled = false;   // the loose shape reaches past the tight bounds
+  const tracks = rec.clips.flatMap((c) => c.tracks.filter((t) => !t.name.endsWith('.morphTargetInfluences')));
+  // Glide between the settings: Blender writes these two-key tracks as STEP.
+  for (const t of tracks) t.setInterpolation(THREE.InterpolateLinear);
+  let mixer = null, action = null, duration = 0;
+  if (tracks.length) {
+    const clip = new THREE.AnimationClip('VG', -1, tracks);
+    mixer = new THREE.AnimationMixer(rec.root.children[0]);
+    action = mixer.clipAction(clip);
+    action.play();
+    action.paused = true;
+    duration = clip.duration;
+  }
+  // Ropes that slide through the moving blocks are drawn along their routes (lib/rope.js).
+  const routed = [];
+  for (const m of rec.meshes) {
+    let node = m;
+    while (node && !node.userData.vg_route) node = node.parent;
+    if (node) routed.push(new RoutedRope(m, JSON.parse(node.userData.vg_route), rec.root.children[0]));
+  }
+  rec.vg = shaped.length || tracks.length ? { shaped, mixer, action, duration, routed } : null;
+}
+function setVG(rec, v) {
+  if (!rec?.vg) return;
+  const { shaped, mixer, action, duration, routed } = rec.vg;
+  // Each key holds its setting's shape: between two settings the shape blends from one to the next.
+  for (const m of shaped) {
+    const keys = Object.entries(m.morphTargetDictionary).map(([k, i]) => [vgAt(k), i]).filter(([s]) => s !== null);
+    const at = [...keys.map(([s]) => s), 1].sort((a, b) => a - b);
+    for (const [s, i] of keys) {
+      const k = at.indexOf(s), lo = at[k - 1], hi = at[k + 1];
+      m.morphTargetInfluences[i] = v <= s ? (lo === undefined ? 1 : Math.max(0, (v - lo) / (s - lo)))
+        : Math.max(0, (hi - v) / (hi - s));
+    }
+  }
+  if (mixer) { action.time = v * duration; mixer.update(0); }
+  rec.root.updateMatrixWorld(true);
+  for (const r of routed) r.update();
+  rec.ropes.forEach((r, i) => {
+    const spec = rec.source.ropes[i];
+    if (spec.lengthLoose !== undefined) r.setLength(spec.lengthLoose + (spec.length - spec.lengthLoose) * v);
+  });
+}
+/**
+ * Soft rope ends: a part named in models.json ("ropes": [{ part, start, dir, length, radius,
+ * colliders, lay }], model space) is redrawn as a rope that hangs from where it leaves its cleat,
+ * lies on the floor and drapes over the colliders' tubes (lib/rope.js).
+ */
+function ropesOf(rec) {
+  rec.ropes = [];
+  for (const spec of rec.source.ropes || []) {
+    const part = rec.parts.get(spec.part);
+    if (!part) { console.warn(`No part ${spec.part} for a rope.`); continue; }
+    const [mesh, ...rest] = part.meshes;
+    for (const m of rest) m.geometry = new THREE.BufferGeometry();
+    const colliders = (spec.colliders || []).map((n) => rec.parts.get(n)?.meshes || []);
+    rec.ropes.push(new Rope(spec, rec.root.children[0], mesh, colliders));
+  }
+}
+function stepRopes(dt) {
+  for (const rec of [record, other]) for (const r of rec?.ropes || []) if (r.mesh.visible) r.step(dt);
 }
 /**
  * Configurations: a build can name shape keys (glTF morph targets) and their weight in each
@@ -910,6 +987,7 @@ function loop(now) {
   if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera();
   stepSplit(now);
   stepPoses(now);
+  stepRopes(dt);
   scenes.update(rig.camera, (now - clock0) / 1000);
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
@@ -1506,6 +1584,9 @@ function syncPanel() {
   if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
   syncRows();
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
+  $('#vgctl').hidden = !record?.vg;
+  $('#vg').value = state.vg;
+  $('#vg-val').textContent = state.vg >= 1 ? 'tight' : state.vg <= 0 ? 'loose' : `${Math.round(state.vg * 100)} %`;
   $('#xray').value = state.seeThrough;
   $('#opt-wires').checked = state.wires;
   $('#opt-battens').checked = state.battens;
@@ -1695,6 +1776,13 @@ function wireUi() {
     catch { toast('Copy the address bar to share this glider'); }
   };
   $('#posebar').addEventListener('click', (e) => { const b = e.target.closest('[data-pose]'); if (b) setPose(b.dataset.pose); });
+  $('#vg').addEventListener('input', (e) => {
+    state.vg = Number(e.target.value);
+    setVG(record, state.vg);
+    setVG(other, state.vg);
+    $('#vg-val').textContent = state.vg >= 1 ? 'tight' : state.vg <= 0 ? 'loose' : `${Math.round(state.vg * 100)} %`;
+    saveUrlSoon();
+  });
   $('#chip').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'close') select(null);
@@ -1760,6 +1848,7 @@ function saveUrl() {
   if (!state.wires) q.set('wires', '0');
   if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
+  if (state.vg !== 1) q.set('vg', state.vg.toFixed(2));
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');

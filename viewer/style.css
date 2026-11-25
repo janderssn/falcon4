@@ -145,6 +145,12 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #posebar button { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px 0 10px; border-radius: 999px; background: none; border: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 #posebar button:hover { color: var(--ink); background: rgba(255, 255, 255, .08); }
 #posebar button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+#vgctl { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 0; font-size: 12.5px; color: var(--muted); }
+#vgctl[hidden] { display: none; }
+#vgctl .sep { width: 1px; height: 20px; margin: 0 6px 0 4px; background: var(--line); }
+#vgctl b { font-weight: 600; color: var(--ink); letter-spacing: .04em; }
+#vgctl input { width: 120px; accent-color: var(--accent); }
+#vgctl em { font-style: normal; min-width: 34px; font-variant-numeric: tabular-nums; }
 
 /* ---- part chip, bottom centre (above the pose bar) */
 #chip { left: 50%; bottom: 76px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; transition: left .28s ease, opacity .45s ease; }

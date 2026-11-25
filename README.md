@@ -109,9 +109,9 @@ with its sail) and the **Tecma Medium 15**
 Falcon 4 only.
 
 Their GLBs are exported from the saved .blend and made small for the web with
-`tools/optimize_glb.mjs`: each mesh is simplified until it would move by more than a set
+`tools/optimize_glb.mjs`: each mesh is simplified until it (and each of its shape targets) would move by more than a set
 distance (0.12 mm for the Sport 3, 0.2 mm for the Tecma), then quantized and
-meshopt-compressed. This takes the Sport 3 from 77 MB to 12.4 MB and the Tecma from 136 MB
+meshopt-compressed. This takes the Sport 3 from 77 MB to 17.3 MB (with its VG rig) and the Tecma from 136 MB
 to 17.7 MB.
 
 A build can have configurations. The Tecma's GLB keeps its "In flight" shape keys as morph
@@ -119,6 +119,21 @@ targets (exported at 0, rigged on the ground, with their drivers removed), and i
 `models.json` gives the weight per resting pose: `"poseShapes": { "bar": { "In flight": 1 } }`.
 Standing shows it in flight; tail down and nose down show it parked. The weights swing with
 the tilt. `node tools/make_parts.cjs sport3` (or `tecma`) writes the part groups.
+
+A loose rope end can be soft. An entry in `"ropes"` names the part (the Sport 3's "VG lower
+rope surplus"), where it leaves its cleat (`start`, `dir`), its `length` and `radius`, the
+`colliders` it rests on, and the `lay` it starts from: the model's stowed shape, points
+2.5 cm apart. All are in GLB coordinates. `viewer/lib/rope.js` redraws the part as a braided
+tube on a chain of points under gravity. The rope drapes over the colliders and lies on the
+floor, and it follows the glider when the pose changes.
+
+The Sport 3 is rigged for its VG (sport3-opus `tools/vg_rig.py`). Parts that move carry
+keyframes (time 0 loose, end tight) through real builds at 25, 50 and 75 %, and parts that change
+shape move with them and carry their bend as morph targets ("VG loose", "VG 0.5"; the viewer blends
+from one setting's target to the next), so a tube stays in its end cap all the way. The VG slider in the pose bar (`?vg=0..1`, default 1, tight as modelled) sets
+both. It also pays the rope surplus out from `lengthLoose` to `length`. The ropes that slide
+through the VG blocks carry a route instead (`vg_route`: points held by the parts they touch),
+and `RoutedRope` in `viewer/lib/rope.js` redraws them along it, so the falls stay straight.
 
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
   replace a model file, so browsers load the new file at once and don't use a
