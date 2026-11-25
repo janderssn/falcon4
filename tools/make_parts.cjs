@@ -9,9 +9,12 @@ const glb = path.join(__dirname, '..', 'viewer', 'public', 'models', id, 'model.
 const buf = fs.readFileSync(glb);
 const gltf = JSON.parse(buf.slice(20, 20 + buf.readUInt32LE(12)).toString('utf8'));
 const rules = [
-  ['01', /^Nose sleeve|^Nose batten (sleeve|keeper tab)$|^Tip inner webbing|^Batten (return eyelet|tension return|toggle keeper)|^Washout green return/],   // Tecma: cloth, cords and eyelets sewn to the sail
+  ['01', /^Nose sleeve|^Nose batten (sleeve|keeper tab)$|^Tip inner webbing|^Batten (return eyelet|tension return|tension webbing|toggle keeper)|^Washout green return/],   // Tecma: cloth, cords and eyelets sewn to the sail
+  ['01', /^Sail (lower|speed|transverse) batten|^Transverse batten saddle|^Rear sail (mount webbing|strap tang)/],   // Sport 3: sewn-in battens and the rear sail mount
+  ['03', /^Sail (nose )?batten( \d+)?( [LR])?$/],                              // Sport 3: the main and nose battens (their pockets are sail)
+  ['05', /^Sail bridle (common|inner|outer|ring|branch press)/],                // Sport 3: reflex bridle lines; grommets and retainers are sail
   ['07', /webbing|hang loop|cinch strap|rope (hand )?loop|bungee|suspension tape|backup eye|Rapidlink|(?<!pocket )strap\b/i],     // Webbing
-  ['01', /^Sail (top|upper|lower|under|P\d|number|panel)|^Sail\b(?! mount)|Trailing (edge )?hem|pocket|zigzag|stitch|Kingpost patch|Kingpost base sock|Nosecone|cloth cover|Nose bridge|Nose former|Nose lacing reinforcement|Mast binding|Batten pocket top tape|Batten doubler|Batten end reinforcement|Hinge cover (hook|loop) strip|Leading-edge|hem\b|selvedge|seam\b|patch\b|emblem|lap\b|Undersail|Tip cuff/i], // Sail & cloth
+  ['01', /^Sail (top|upper|lower|under|P\d|number|panel)|^Sail\b(?! mount)|Trailing (edge )?hem|pocket|zigzag|stitch|Kingpost patch|Kingpost base sock|Nosecone|cloth cover|Nose bridge|Nose former|Nose lacing reinforcement|Mast binding|Batten pocket top tape|Batten doubler|Batten end reinforcement|Hinge cover (hook|loop) strip|Leading-edge|hem\b|selvedge|seam\b|patch\b|emblem|lap\b|Undersail|^Undersurface|^Upper sail|Tip cuff/i], // Sail & cloth
   ['05', /^Bridle|Luff (bridle|line)/i],                                       // reflex bridles, before the batten rule (#4)
   ['03', /batten|Lever tip|String tip|Washout|Sprog|Tip wand|^Wand /i],               // Battens & washout
   ['06', /\btang\b|keyhole/i],                                                 // wire tangs count as hardware

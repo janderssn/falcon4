@@ -24,6 +24,7 @@ export async function loadCatalog() {
       modelId: m.id, title: m.title, description: m.description, download: m.download,
       rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
       glider: m.glider || 'Falcon 4', subtitle: m.subtitle || `Wills Wing · 170 · ${m.label} build`,
+      poseShapes: m.poseShapes || null,   // shape-key weights per resting pose (see main.js, poseOf)
     };
     const v = m.version ? `?v=${encodeURIComponent(m.version)}` : '';
     sources.set(m.id, {
@@ -93,7 +94,10 @@ async function load(source, progress) {
     if (!part) {
       const info = {};
       for (const key of INFO_KEYS) if (node && node.userData[key] !== undefined) info[key] = String(node.userData[key]);
-      part = { name, group: hit ? hit.group : '06', meshes: [], info, triangles: 0, vertices: 0, key: name.toLowerCase() };
+      // Soft parts that hang free (a rope's surplus) are tagged ground_contact = 0 in the model:
+      // they do not hold the glider up, so the resting pose leaves them out.
+      const ground = !(node && Number(node.userData.ground_contact) === 0);
+      part = { name, group: hit ? hit.group : '06', meshes: [], info, ground, triangles: 0, vertices: 0, key: name.toLowerCase() };
       parts.set(name, part);
     }
     const g = o.geometry;
