@@ -127,13 +127,55 @@ rope surplus"), where it leaves its cleat (`start`, `dir`), its `length` and `ra
 tube on a chain of points under gravity. The rope drapes over the colliders and lies on the
 floor, and it follows the glider when the pose changes.
 
+Film over film: the picture of what lies behind a clear laminate (lib/frost.js) keeps the opaque parts
+of the other film skin (stripes, woven panels, fibres), so a stripe on a film undersurface shows through a
+film top. The pockets inside the undersurface are one tape in the undersurface's own cloth (P5). In the
+picker's top drawings a zone of which under 5 % shows is left out (`tools/sail_designs.py`; set
+`DESIGNS_OUT` to write a trial copy).
+
 The Sport 3 is rigged for its VG (sport3-opus `tools/vg_rig.py`). Parts that move carry
 keyframes (time 0 loose, end tight) through real builds at 25, 50 and 75 %, and parts that change
-shape move with them and carry their bend as morph targets ("VG loose", "VG 0.5"; the viewer blends
+shape move with them and carry their bend as morph targets ("VG loose", "VG 0.5", and for the sail's skins "VG 0.25" and "VG 0.75" too; the viewer blends
 from one setting's target to the next), so a tube stays in its end cap all the way. The VG slider in the pose bar (`?vg=0..1`, default 1, tight as modelled) sets
 both. It also pays the rope surplus out from `lengthLoose` to `length`. The ropes that slide
 through the VG blocks carry a route instead (`vg_route`: points held by the parts they touch),
 and `RoutedRope` in `viewer/lib/rope.js` redraws them along it, so the falls stay straight.
+
+A build can have sail designs (`"designs": "designs/sport3"`). The Sport 3 offers the Wills Wing
+colour picker's designs for it: 3-panel, Woosh and Butterfly (Monarch), in Customize under *Sail
+colours* (`?design=woosh&dz=P6:bright-yellow-5280`). `python3 tools/sail_designs.py`
+downloads the picker's plan-view drawings and fabric lists, reads each zone's outline as vectors and
+writes it to `viewer/public/designs/` (the 3-panel's stripes under the wing run straight to the tip, as on the real
+sails, where the picker draws them tapering) in cloth coordinates (share of the half span, share of the
+chord) as a signed distance field. `viewer/lib/designs.js`
+works out the same coordinates per pixel on the 3D sail, so the edges stay sharp and smooth at any
+zoom (the fields have mipmaps: from far off a pixel takes its share of each zone) and the design stays on
+the cloth through the VG travel.
+
+The chord is measured in parts, so that the drawing's panel edges land on the model's own: from the
+leading edge to the rear edge of the leading-edge panel (where the model's other cloth starts, round the
+tip too: the crescent on top, the undersurface's rounded end underneath), on to the seam where the
+undersurface is sewn to the top (the undersurface's trailing edge on the bottom maps; on the top maps the
+front edge of the trailing-edge panel P4, which starts at that seam), and from there to the trailing edge.
+The leading-edge zone (P1) is the model's own leading-edge cloth. Past the last of the other cloth at the
+tip, each band carries on to the tip at its share of the chord. A cloth has the same colours on both
+faces: the top skin seen from below shows the top drawing (so a red top shows red through a clear
+undersurface), and behind the undersurface that is P4, as the picker's bottom drawing has it.
+
+Every seam between zones is drawn as a lap with a zigzag stitch (from `<design>-<side>-seams.json`),
+standing proud of the cloth: the normal takes the slope of the lap and the thread from the seam's own
+distances, softened to half a millimetre and faded out where it gets smaller than a pixel (a slope taken
+from the drawn shades glints along every edge). The Sport 3's own seams, hems, pocket tapes, patches and
+stitching are in its detail map (sport3-opus `s3/sail_detail.py`: base and normal texture on a second UV
+set); the design's colour is multiplied with it, and the model's seams are then not drawn a second time.
+A model without such a map gets them drawn as the design's are. Seams and the edges between the model's
+parts are drawn on the cloth laid flat (the skins' first UV set, which the Sport 3 build lays out with a
+minimum-stretch unwrap; `tools/sail_uv.mjs` does the same for a GLB exported with a plan projection), so
+they follow it round the leading edge. No cloth is drawn blacker than black sailcloth (2 % reflectance):
+the picker's black is #000000, which would leave the seams and the sail's shape invisible.
+`tools/optimize_glb.mjs` keeps a sail's detail atlas at full size (other textures are shrunk to 1024 px).
+The batten pockets and zipper tape take the colour of the cloth they are sewn to, and the clear laminates (UVPXB05 and the like) are
+see-through with their scrim, glossy and with film blur, as on the Falcon: the undersurface and frame show through the top skin.
 
 - `version` is added to the GLB and parts URLs (`?v=…`). Change it whenever you
   replace a model file, so browsers load the new file at once and don't use a

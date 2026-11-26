@@ -5,3 +5,4 @@ viewer/dist/
 .env.*
 *.blend1
 *.blend2
+tools/.cache/

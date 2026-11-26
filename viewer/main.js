@@ -9,6 +9,7 @@ import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
 import { FilmBlur } from './lib/frost.js';
+import { loadDesigns, SailDesigns } from './lib/designs.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -98,6 +99,9 @@ const state = {
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
+  // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
+  design: params.get('design') || null,
+  designFab: Object.fromEntries((params.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))),
   compare: params.get('compare') === '1',
   split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
   selSide: 'A',
@@ -194,6 +198,8 @@ async function setModel(id, first = false) {
   if (other) { other.root.removeFromParent(); other = null; }   // the other build changes too
   record = rec;
   prepareTints(record);
+  renderDesignRows();
+  designsOf(record);
   scene.add(record.root);
   applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
@@ -267,12 +273,110 @@ function prepareTints(rec) {
   }
 }
 
+// ------------------------------------------------------------------ sail designs
+// A glider with "designs" in models.json offers the Wills Wing picker's designs for it
+// (lib/designs.js): one row to choose the design, then a row per colour zone of that design.
+const designCache = new Map();
+async function designsOf(rec) {
+  const dir = rec.source.designs;
+  if (!dir || rec.sailDesigns) return;
+  try {
+    if (!designCache.has(dir)) designCache.set(dir, loadDesigns(dir));
+    const designs = await designCache.get(dir);
+    rec.sailDesigns = new SailDesigns(rec, designs);
+  } catch (e) { console.warn('Sail designs:', e); return; }
+  if (rec === record) {
+    if (state.design && !rec.sailDesigns.design(state.design)) { state.design = null; state.designFab = {}; }
+    renderDesignRows();
+  }
+  applyLook();
+}
+const currentDesigns = () => (record?.sailDesigns?.ok ? record.sailDesigns : null);
+function applyDesign() {
+  for (const rec of [record, other]) {
+    const sd = rec?.sailDesigns;
+    if (sd?.ok) sd.set(sd.design(state.design) ? state.design : null, state.designFab, hexOf);
+  }
+}
+function designSwatch(zone, f) {
+  const [id, name, hex, opacity, extra] = f;
+  const cls = ['sw', opacity < 1 && 'clear', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
+  // "extra": a cloth the Sport 3 is built with that the Wills Wing picker does not list for this panel.
+  const label = extra ? `${name} (not in the Wills Wing picker)` : name;
+  return `<button type="button" class="${cls}" data-dzone="${zone}" data-dfab="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf(f)};--o:${opacity}"><i></i></button>`;
+}
+function renderDesignRows() {
+  const box = $('#design-rows');
+  const sd = currentDesigns();
+  if (!sd) { box.innerHTML = ''; return; }
+  const d = sd.design(state.design);
+  const head = (key, title) => `<button type="button" class="row-head" data-dtoggle="${key}" aria-expanded="false"><span class="cur" data-dcur="${key}"><i></i></span><span class="row-title">${esc(title)}</span><small data-dname="${key}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`;
+  const choices = [{ id: '', label: 'As built' }, ...sd.designs.designs].map((x) =>
+    `<button type="button" class="profile" data-design="${x.id}" role="radio"><b>${esc(x.label)}</b>${x.picker ? `<small>Wills Wing picker: ${esc(x.picker)}</small>` : '<small>The sail as modelled</small>'}</button>`).join('');
+  box.innerHTML = `<div class="row" data-drow="design">${head('design', 'Design')}<div class="swatches designs" role="radiogroup" aria-label="Sail design">${choices}</div></div>`
+    + (d ? d.zones.map((z) => `<div class="row" data-drow="${z.id}">${head(z.id, z.name)}
+      <div class="swatches" role="radiogroup" aria-label="${esc(z.name)}">${z.fabrics.map((f) => designSwatch(z.id, f)).join('')}</div></div>`).join('') : '');
+  syncDesignRows();
+}
+function syncDesignRows() {
+  const sd = currentDesigns();
+  if (!sd) return;
+  const d = sd.design(state.design);
+  for (const b of document.querySelectorAll('#design-rows [data-design]')) {
+    const on = b.dataset.design === (d ? d.id : '');
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
+  }
+  const fabOf = (z) => state.designFab[z.id] || z.default;
+  for (const b of document.querySelectorAll('#design-rows [data-dfab]')) {
+    const z = d?.zones.find((x) => x.id === b.dataset.dzone);
+    const on = Boolean(z) && fabOf(z) === b.dataset.dfab;
+    b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
+  }
+  for (const row of document.querySelectorAll('#design-rows [data-drow]')) {
+    const key = row.dataset.drow, open = ui.open === `d:${key}`;
+    row.classList.toggle('open', open);
+    row.querySelector('.row-head').setAttribute('aria-expanded', String(open));
+    const cur = row.querySelector('.cur'), name = row.querySelector('[data-dname]');
+    if (key === 'design') {
+      cur.hidden = true;
+      name.textContent = d ? d.label : 'As built';
+      continue;
+    }
+    const z = d.zones.find((x) => x.id === key), f = z.fabrics.find((x) => x[0] === fabOf(z)) || z.fabrics[0];
+    cur.className = `cur${f[3] < 1 ? ' clear' : ''}`; cur.style.cssText = `--c:${hexOf(f)};--o:${f[3]}`;
+    name.textContent = f[1];
+  }
+}
+/** Clicks in the design rows; true when handled. */
+function designClick(e) {
+  const head = e.target.closest('[data-dtoggle]');
+  if (head) { const k = `d:${head.dataset.dtoggle}`; ui.open = ui.open === k ? null : k; syncRows(); syncDesignRows(); return true; }
+  const choice = e.target.closest('[data-design]');
+  if (choice) {
+    state.design = choice.dataset.design || null; state.designFab = {};
+    ui.open = null;
+    applyLook(); renderDesignRows(); saveUrlSoon();
+    return true;
+  }
+  const sw = e.target.closest('[data-dfab]');
+  if (sw) {
+    const z = currentDesigns()?.design(state.design)?.zones.find((x) => x.id === sw.dataset.dzone);
+    if (!z) return true;
+    if (sw.dataset.dfab === z.default) delete state.designFab[z.id]; else state.designFab[z.id] = sw.dataset.dfab;
+    // The row stays open to try colours; it closes when another row is opened.
+    applyLook(); syncDesignRows(); saveUrlSoon();
+    return true;
+  }
+  return false;
+}
+
 function fabricOf(zone, id) {
   const hit = fabricsFor(zone).find((c) => c[0] === id);
   return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1] } : null;
 }
 
 function applyLook() {
+  applyDesign();   // first: whether the design has a see-through laminate
   if (record) lookOf(record, 'A');
   if (other) lookOf(other, 'B');
 }
@@ -318,10 +422,14 @@ function lookOf(rec, side) {
     // See-through sail, or a clear laminate panel.
     // In a sail zone only the panels are laminate; pockets coloured with them stay woven.
     const inSail = SAIL_ZONES.includes(mesh.userData.zone);
-    const laminate = !inSail || /^Sail P/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
+    let laminate = !inSail || /^Sail P/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
+    // A design with a clear laminate: the skins blend, with the film's alpha from the design's shader.
+    const designFilm = rec.sailDesigns?.seeThrough(mesh);
+    if (designFilm) laminate = 1;
     // With film blur the laminate draws solid and shows the blurred scene behind it.
-    const frosted = laminate !== undefined && inSail && frostActive && state.seeThrough === 0;
+    const frosted = laminate !== undefined && (inSail || designFilm) && frostActive && state.seeThrough === 0;
     mesh.userData.frost = frosted;
+    mesh.userData.frostDesign = frosted && Boolean(designFilm);   // its shader keeps its opaque parts in the film-blur picture
     const ghost = (part.group === '01' && state.seeThrough > 0) || (laminate !== undefined && !frosted);
     if (ghost) {
       const seeThrough = part.group === '01' ? 1 - state.seeThrough * 0.92 : 1;
@@ -613,6 +721,7 @@ async function setCompare(on) {
   other?.root.removeFromParent();
   other = rec;
   prepareTints(other);
+  designsOf(other);
   scene.add(other.root);
   applyPose();
   applyLook();
@@ -1035,7 +1144,7 @@ function renderFrost(camera) {
   // Sail panels hold the blurred texture: unbound while drawing (a feedback loop makes
   // WebGL skip those draws).
   frost.uFrostColor.value = null;
-  const size = filmBlur.render(renderer, scene, camera, films, hide);
+  const size = filmBlur.render(renderer, scene, camera, films, hide, films.filter((o) => o.userData.frostDesign), frost.uFrostPass);
   frost.uFrostColor.value = filmBlur.texture;
   frost.uFrostSize.value.copy(size);
   frost.uFrostOn.value = 1;
@@ -1574,6 +1683,7 @@ function syncPanel() {
     b.setAttribute('aria-checked', String(on));
   }
   syncNames();
+  syncDesignRows();
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
@@ -1698,12 +1808,13 @@ function wireUi() {
     setScene(t.dataset.scene);
   });
   $('#custom').addEventListener('click', (e) => {
+    if (designClick(e)) return;
     const head = e.target.closest('[data-toggle]');
     if (head) { ui.open = ui.open === head.dataset.toggle ? null : head.dataset.toggle; syncRows(); return; }
     const sw = e.target.closest('.swatches .sw');
     if (sw) {
       state.colours[sw.dataset.zone] = sw.dataset.colour || null;
-      ui.open = null;   // the line closes again
+      // The line stays open to try colours; it closes when another line is opened.
       applyLook(); syncPanel(); saveUrlSoon();
     }
   });
@@ -1752,7 +1863,9 @@ function wireUi() {
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });
   $('#btn-reset').onclick = () => {
     state.colours = Object.fromEntries(Object.keys(ZONES).map((z) => [z, DEFAULTS.colours[z] ?? null]));
+    state.design = null; state.designFab = {};
     state.seeThrough = DEFAULTS.seeThrough; state.wires = true; state.battens = true;
+    applyLook(); renderDesignRows();
     applyLook(); syncPanel(); saveUrlSoon();
   };
   $('#custom').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
@@ -1849,6 +1962,11 @@ function saveUrl() {
   if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.vg !== 1) q.set('vg', state.vg.toFixed(2));
+  if (state.design) {
+    q.set('design', state.design);
+    const dz = Object.entries(state.designFab).map(([z, f]) => `${z}:${f}`).join(',');
+    if (dz) q.set('dz', dz);
+  }
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');

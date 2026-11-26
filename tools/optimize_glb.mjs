@@ -60,11 +60,18 @@ for (const node of doc.getRoot().listNodes()) {
   before += b; after += a;
   report.push({ name: node.getName(), before: b, after: a });
 }
+// (textureCompress matches a pattern against the name or the URI: give them the name as URI meanwhile.)
+const atlases = doc.getRoot().listTextures().filter((t) => /seams and/i.test(t.getName()) && !t.getURI());
+for (const t of atlases) t.setURI(`${t.getName()}.png`);
 await doc.transform(
   dedup(), prune({ keepLeaves: true, keepAttributes: true, keepExtras: true }),
   reorder({ encoder: MeshoptEncoder, target: 'size' }),
-  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024] }),
+  // A sail's detail atlas (seams and stitching over the whole cloth, sport3-opus s3/sail_detail.py) keeps
+  // its size; every other texture is a small tile.
+  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024], pattern: /^(?!.*seams and).*$/i }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 92, pattern: /seams and/i }),
 );
+for (const t of atlases) t.setURI('');
 doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
 await io.write(output, doc);
 report.sort((x, y) => y.before - x.before);
