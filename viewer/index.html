@@ -64,6 +64,7 @@
       <label class="slider"><span>Wind</span><input id="wind" type="range" min="0" max="2.5" step="0.05" value="1"></label>
     </section>
     <footer>
+      <button type="button" id="btn-save" class="wide">Save this glider</button>
       <button type="button" id="btn-order" class="wide">Order form</button>
       <button type="button" id="btn-share" class="wide">Copy link to this glider</button>
       <a id="download" class="wide" href="#" download>Download the 3D model (GLB)</a>
@@ -71,6 +72,19 @@
   </div>
 </aside>
 
+<aside id="gliders" class="hud glass sheet" aria-label="Choose the glider to compare with" hidden>
+  <header>
+    <h2>Compare with</h2>
+    <button type="button" class="icon btn-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </header>
+  <div class="body">
+    <input type="search" id="gl-search" placeholder="Search" aria-label="Search gliders" autocomplete="off" spellcheck="false">
+    <div id="gl-filter" class="seg" role="radiogroup" aria-label="Show">
+      <button type="button" data-glf="all" role="radio">All</button><button type="button" data-glf="models" role="radio">Models</button><button type="button" data-glf="saved" role="radio">Saved</button>
+    </div>
+    <div id="gl-list" class="builds"></div>
+  </div>
+</aside>
 <aside id="settings" class="hud glass sheet" aria-label="Settings" hidden>
   <header>
     <h2>Settings</h2>
@@ -132,7 +146,7 @@
 <div id="chip" class="hud glass" hidden aria-live="polite"></div>
 
 <div id="navstack" class="hud">
-  <button type="button" id="btn-compare" class="icon" title="Compare Astra and Opus (V)" aria-label="Compare the two builds side by side" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 2v20"/><path d="m8.5 10-2 2 2 2M15.5 10l2 2-2 2"/></svg></button>
+  <button type="button" id="btn-compare" class="icon" title="Compare two gliders (V)" aria-label="Compare two gliders side by side" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 2v20"/><path d="m8.5 10-2 2 2 2M15.5 10l2 2-2 2"/></svg></button>
   <button type="button" id="btn-tour" class="icon" title="Fly around (F)" aria-label="Fly around"><svg viewBox="0 0 24 24" class="ic"><path d="M8 5.5v13l10.5-6.5Z"/></svg></button>
   <div class="stack glass">
     <button type="button" id="btn-front" title="Back to the start view (N)" aria-label="Back to the start view"><svg viewBox="0 0 24 24" class="ic"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
@@ -153,7 +167,7 @@
   <button type="button" data-view="quad" aria-pressed="false" title="Four views at once: top, front, left and 3D">4 views</button>
 </div>
 <div id="quad" aria-hidden="true" hidden><span><b>Top</b></span><span><b>Front</b></span><span><b>Left</b></span><span><b>3D</b></span></div>
-<div id="swipe" class="hud" role="slider" tabindex="0" aria-label="Divider between the two builds" hidden><span class="swipe-tag left" id="swipe-a"></span><span class="swipe-grip" aria-hidden="true"></span><span class="swipe-tag right" id="swipe-b"></span></div>
+<div id="swipe" class="hud" role="slider" tabindex="0" aria-label="Divider between the two gliders" hidden><span class="swipe-tag left" id="swipe-a"></span><span class="swipe-grip" aria-hidden="true"></span><button type="button" class="swipe-tag right" id="swipe-b" aria-controls="gliders" aria-expanded="false" title="Choose the glider to compare with"></button></div>
 <div id="labels" aria-hidden="true"></div>
 <div id="picker" class="hud glass" role="dialog" aria-label="Choose a colour" hidden></div>
 <div id="order" role="dialog" aria-modal="true" aria-labelledby="order-title" hidden></div>

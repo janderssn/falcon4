@@ -10,6 +10,7 @@ import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
 import { FilmBlur } from './lib/frost.js';
 import { loadDesigns, SailDesigns, asCloth } from './lib/designs.js';
+import { savedGliders, saveGlider, renameGlider, deleteGlider } from './lib/saved.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -115,6 +116,9 @@ const state = {
   design: params.get('design') || null,
   designFab: Object.fromEntries((params.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))),
   compare: params.get('compare') === '1',
+  b: null,                                         // comparing: the glider on the other side (model, colours, design), see gliderFrom
+  flip: params.get('flip') === '1',                // comparing: the glider being edited is drawn right of the divider
+  name: undefined,                                 // the glider being edited, when it has a name (a saved glider, a copy)
   split: Math.min(0.95, Math.max(0.05, Number(params.get('split')) || 0.5)),
   selSide: 'A',
   names: params.get('names') === '1',
@@ -134,8 +138,31 @@ const state = {
   outlineWires: params.get('olwires') === '1',
   outlineInner: params.get('olin') !== '0',
   outlineSens: params.has('olsens') ? Math.min(1, Math.max(0, Number(params.get('olsens')) || 0)) : 0.5,
-  panel: null,                                     // the open side panel: 'custom', 'settings' or none
+  panel: null,                                     // the open side panel: 'custom', 'settings', 'gliders' (what to compare with) or none
 };
+/**
+ * A glider: its model and everything chosen in Customize (not the view). As a link's query it is what
+ * the address, a comparison's other side (b=) and a saved glider all carry.
+ */
+function gliderQuery(g) {
+  const q = new URLSearchParams();
+  q.set('model', g.model);
+  for (const [z, id] of Object.entries(g.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
+  if (g.design) q.set('design', g.design);
+  const dz = Object.entries(g.designFab).map(([z, f]) => `${z}:${f}`).join(',');   // (as built too)
+  if (dz) q.set('dz', dz);
+  return q;
+}
+function gliderFrom(q, name) {
+  const colour = (z) => { const v = q.get(z); return v === 'built' ? null : fabricsFor(z).some((x) => x[0] === v) ? v : DEFAULTS.colours[z] ?? null; };
+  return { model: q.get('model'), name, colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, colour(z)])), design: q.get('design') || null,
+    designFab: Object.fromEntries((q.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))) };
+}
+/** The glider being edited, as it is now (a copy). */
+const gliderNow = (name = state.name) => ({ model: state.model, name, colours: { ...state.colours }, design: state.design, designFab: { ...state.designFab } });
+/** A model as it comes: the default colours, the sail as built. */
+const stockGlider = (model) => gliderFrom(new URLSearchParams({ model }));
+if (params.get('b')) { const q = new URLSearchParams(params.get('b')); state.b = { ...gliderFrom(q, q.get('name') || undefined), self: q.get('self') === '1' }; }
 let catalog, record, renderer, rig, scenes;
 let frostActive = false;                            // film blur in use this frame (see renderFrost)
 let other = null;                                   // the second build, shown right of the divider when comparing
@@ -192,13 +219,14 @@ async function setModel(id, first = false) {
   state.model = id;
   syncPanel();
   if (!first) toast(`Loading the ${source.label} build…`, true);
-  let rec;
+  let rec, key;
   try {
+    key = other?.cacheKey === id ? `${id}#b` : id;   // (never the copy the other side of a comparison shows)
     rec = await loadModel(source, (f, loaded) => {
       const pct = f == null ? null : Math.round(f * 100);
       if (first) loaderText(source.glider, pct != null && pct >= 100 ? 'Putting it together…' : `Loading the ${source.label} build · ${((loaded || 0) / 1048576).toFixed(1)} MB`, 0.1 + 0.85 * (f || 0));
       else if (pct != null && pct < 100) toast(`Loading the ${source.label} build · ${pct} %`, true);
-    });
+    }, key);
   } catch (e) {
     console.error(e);
     if (first) { loaderText('The glider didn’t load', `Check the connection and try again. ${e.message}`, 0, true); $('#ld-retry').onclick = () => location.reload(); }
@@ -207,8 +235,8 @@ async function setModel(id, first = false) {
   }
   if (state.model !== id) return;
   if (record && record !== rec) record.root.removeFromParent();
-  if (other) { other.root.removeFromParent(); other = null; }   // the other build changes too
   record = rec;
+  record.cacheKey = key;
   prepareTints(record);
   renderDesignRows();
   designsOf(record);
@@ -228,10 +256,11 @@ async function setModel(id, first = false) {
     $('#loader').classList.add('done');
     lastInput = performance.now();            // the slow idle turn counts from when the glider appears
     if (THUMB) runThumb();
+    if (params.has('snap')) runSnap();
   } else toast(`${source.title} · ${source.description}`);
   if (state.compare) setCompare(true); else syncCompare();
   syncPanel();
-  trimCache([id]);
+  trimCache([record.cacheKey, other?.cacheKey].filter(Boolean));
   saveUrlSoon();
 }
 
@@ -325,9 +354,9 @@ const currentDesigns = () => (record?.sailDesigns?.ok ? record.sailDesigns : nul
 /** The design in use: one of the picker's, or the sail as built (its own cloths as zones). */
 const designNow = (sd = currentDesigns()) => (sd ? sd.design(state.design) || sd.built : null);
 function applyDesign() {
-  for (const rec of [record, other]) {
+  for (const [rec, g] of [[record, state], [other, state.b || state]]) {
     const sd = rec?.sailDesigns;
-    if (sd?.ok) sd.set(sd.design(state.design) ? state.design : 'built', state.designFab, hexOf);
+    if (sd?.ok) sd.set(sd.design(g.design) ? g.design : 'built', g.designFab, hexOf);
   }
 }
 function designSwatch(zone, f) {
@@ -428,14 +457,15 @@ function applyLook() {
 }
 function lookOf(rec, side) {
   const clear = {};
+  const colours = (side === 'B' && state.b ? state.b : state).colours;   // each side of a comparison has its own
   for (const [zone, t] of Object.entries(rec.tints)) {
-    const fabric = fabricOf(zone, state.colours[zone]);
+    const fabric = fabricOf(zone, colours[zone]);
     const colour = fabric?.colour;
     // Clear laminates: hazy film between opaque fibres (lib/cloth.js).
     const sail = SAIL_ZONES.includes(zone);
     if (fabric && fabric.opacity < 1) clear[zone] = sail ? filmAlpha(fabric.opacity) : fabric.opacity;
     t.uTintOn.value = colour ? 1 : 0;
-    const id = state.colours[zone] || null;
+    const id = colours[zone] || null;
     if (sail && id !== t.fabric) {
       t.fabric = id;
       const panel = (mesh) => /^Sail P/.test(mesh.userData.materials.base.name);
@@ -746,56 +776,202 @@ function setShapes(rec, weights) {
 }
 
 // ------------------------------------------------------------------ compare
-/** The build that is not the current one. */
-const otherId = () => catalog.models.map((m) => m.id).find((id) => id !== state.model);
-async function setCompare(on) {
+/** Screen x (CSS px) lies on the other glider's half (pad: that much further into this one's). */
+const onOther = (x, pad = 0) => Boolean(other && state.compare) && (state.flip ? x < state.split * innerWidth + pad : x > state.split * innerWidth - pad);
+/** What a comparison shows with no glider chosen: the glider being edited, as it is now. */
+const defaultOther = () => ({ ...gliderNow(), self: true });
+/** A glider's name on its chip: the saved glider's (or the copy's) name, else its model. */
+const gliderLabel = (g) => (g.self ? 'Compare with' : g.name || catalog.sources.get(g.model)?.label || g.model);
+/** Turns the comparison on or off; `glider` puts that glider on the other side. */
+async function setCompare(on, glider) {
   if (on && plan.quad) setQuad(false);
-  state.compare = on && Boolean(otherId());
+  if (on) state.b = glider || (state.b && catalog.sources.has(state.b.model) ? state.b : defaultOther());
+  state.compare = on && Boolean(state.b);
   if (!state.compare) {
     other?.root.removeFromParent();
     other = null;
+    state.flip = false;
+    if (state.b?.self) state.b = null;   // (none chosen: the next comparison starts from the glider as it is then)
     if (state.selSide === 'B') { state.sel = null; state.selSide = 'A'; renderChip(); }
+    applyLook();
     syncCompare();
     saveUrlSoon();
     return;
   }
-  const id = otherId();
+  const id = state.b.model;
   syncCompare();
-  if (other?.source.id === id) return;
+  if (other?.source.id === id) { applyLook(); saveUrlSoon(); return; }   // the same model: only its look changed
   const source = catalog.sources.get(id);
   toast(`Loading the ${source.label} build to compare…`, true);
   let rec;
-  try { rec = await loadModel(source, (f) => { if (f != null && f < 1) toast(`Loading the ${source.label} build · ${Math.round(f * 100)} %`, true); }); }
+  // (Its own copy of the model, so a glider can be compared with itself.)
+  const key = record?.cacheKey === `${id}#b` ? id : `${id}#b`;
+  try { rec = await loadModel(source, (f) => { if (f != null && f < 1) toast(`Loading the ${source.label} build · ${Math.round(f * 100)} %`, true); }, key); }
   catch (e) { console.error(e); toast(`The ${source.label} build didn’t load`); state.compare = false; syncCompare(); return; }
-  if (!state.compare || otherId() !== id) return;
+  if (!state.compare || state.b?.model !== id) return;
   other?.root.removeFromParent();
   other = rec;
+  other.cacheKey = key;
   prepareTints(other);
   designsOf(other);
   scene.add(other.root);
   applyPose();
   applyLook();
   syncCompare();
-  toast(`Drag the divider to compare ${catalog.sources.get(state.model).label} and ${source.label}`);
+  trimCache([record.cacheKey, key]);
+  if (!state.b.self) toast(`Drag the divider to compare ${gliderLabel(state)} and ${gliderLabel(state.b)}`);
   saveUrlSoon();
 }
+// ------------------------------------------------------------------ saved gliders (lib/saved.js)
+/** Shows a glider in place of the one being edited. */
+async function applyGlider(g) {
+  if (!catalog.sources.has(g.model)) { toast('That glider’s model is not in this viewer any more'); return; }
+  state.colours = { ...g.colours }; state.design = g.design; state.designFab = { ...g.designFab };
+  state.name = undefined;   // (it is edited from here on: no longer the saved glider)
+  closePicker();
+  ui.open = null;
+  if (g.model !== state.model) { await setModel(g.model); return; }
+  applyLook(); renderDesignRows(); syncPanel(); saveUrlSoon();
+}
+/** A small picture of the glider being edited: standing level, seen from above with the nose up (a data URL). */
+function snapshot(w = 600, h = 240) {
+  const src = renderer.domElement;
+  const alone = other && state.compare;
+  if (alone) { other.root.visible = false; record.root.visible = true; }
+  // Standing (no tilt) for the picture, whatever pose it rests in: its true plan.
+  const angle = record.angle ?? 0;
+  if (record.rest) tiltTo(record, 0);
+  // Framed on the sail (the keel's tail and the control frame reach past it), without the floor's shadow.
+  const box = new THREE.Box3();
+  for (const mesh of record.meshes) if (mesh.userData.part.group === '01' && mesh.visible) box.expandByObject(mesh);
+  if (box.isEmpty()) box.copy(record.box);
+  const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  // The middle of the canvas, in the picture's shape, holds the whole plan.
+  const k = Math.max(w / src.width, h / src.height), sw = w / k, sh = h / k;
+  const half = Math.max(size.z, size.x * h / w) * 1.05 * src.height / (2 * sh), wide = half * src.width / src.height;
+  const cam = new THREE.OrthographicCamera(-wide, wide, half, -half, 0.1, 80);
+  cam.position.set(c.x, box.max.y + 30, c.z);
+  cam.up.set(0, 0, 1);
+  cam.lookAt(c);
+  const shadows = [];
+  scene.traverse((o) => { if (o.visible && o.material?.isShadowMaterial) { shadows.push(o); o.visible = false; } });
+  frost.uFrostOn.value = 0;   // (the film blur's picture is of the view on screen)
+  renderer.setScissorTest(false);
+  renderer.render(scene, cam);
+  for (const o of shadows) o.visible = true;
+  if (record.rest) tiltTo(record, angle);
+  const pic = document.createElement('canvas');
+  pic.width = w; pic.height = h;
+  pic.getContext('2d').drawImage(src, (src.width - sw) / 2, (src.height - sh) / 2, sw, sh, 0, 0, w, h);
+  if (alone) other.root.visible = true;
+  return pic.toDataURL('image/jpeg', 0.8);
+}
+/** A name for the glider being edited: its model and design, numbered when taken. */
+function savedName() {
+  const src = catalog.sources.get(state.model), sd = currentDesigns();
+  const base = [src.glider, src.label !== src.glider && src.label, sd && designNow(sd).label].filter(Boolean).join(' · ');
+  const taken = new Set(savedGliders().map((g) => g.name));
+  for (let n = 1; ; n++) { const name = n === 1 ? base : `${base} ${n}`; if (!taken.has(name)) return name; }
+}
+const savedGlider = (g) => gliderFrom(new URLSearchParams(g.q), g.name);
+function wireSaved() {
+  $('#btn-save').onclick = () => {
+    if (!record) return;
+    const name = savedName();
+    const g = saveGlider(name, gliderQuery(state).toString(), snapshot());
+    toast(g ? `Saved as “${name}”` : 'This browser would not store the glider (a private window, or its storage is full)');
+    if (state.panel === 'gliders') renderGliders();
+  };
+}
+
+// ------------------------------------------------------------------ what to compare with
+// The glider right of the divider is a reference: it stays as chosen while the one on the left is edited.
+// Its chip is a button that opens a side panel to choose it: the models and the saved gliders, with a
+// search box and a filter. With none chosen it is the glider on the left as it was when the comparison
+// was turned on.
+const otherClicked = () => {};
+const gliderKey = (g) => `${gliderQuery(g)}|${g.name || ''}`;
+const picking = { text: '', show: 'all', list: [] };
+/** A model's name in a list of gliders of several makes: "Falcon 4 · Astra", "Tecma Medium 15". */
+const modelName = (src) => (src.label === src.glider || src.title.includes(src.glider) ? src.title : `${src.glider} · ${src.label}`);
+function gliderChoices() {
+  const model = (id) => catalog.sources.get(id);
+  const models = catalog.models.map((m) => ({ kind: 'models', g: stockGlider(m.id), name: modelName(model(m.id)), art: thumb(`top-${m.id}`),
+    text: `${modelName(model(m.id))} ${m.title} ${model(m.id).subtitle}` }));
+  const saved = savedGliders().filter((x) => catalog.sources.has(savedGlider(x).model)).map((x) => {
+    const g = savedGlider(x), on = modelName(model(g.model));
+    return { kind: 'saved', id: x.id, g, name: x.name, note: on, art: /^data:image\//.test(x.img || '') ? `url('${x.img}')` : 'none', text: `${x.name} ${on}` };
+  });
+  return [...models, ...saved];
+}
+// What a saved glider's card offers besides choosing it.
+const SAVED_ACTIONS = [
+  ['open', 'Edit this glider', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>'],
+  ['rename', 'Rename', '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'],
+  ['delete', 'Delete', '<path d="M6 6l12 12M18 6 6 18"/>'],
+];
+function renderGliders() {
+  const words = picking.text.toLowerCase().split(/\s+/).filter(Boolean);
+  picking.list = gliderChoices().filter((c) => (picking.show === 'all' || c.kind === picking.show) && words.every((w) => c.text.toLowerCase().includes(w)));
+  const cur = state.b ? gliderKey(state.b) : '';
+  const acts = (c) => (c.kind !== 'saved' ? '' : `<span class="gl-acts">${SAVED_ACTIONS.map(([act, title, icon]) =>
+    `<button type="button" class="saved-btn" data-act="${act}" title="${title}" aria-label="${title}"><svg viewBox="0 0 24 24" class="ic">${icon}</svg></button>`).join('')}</span>`);
+  $('#gl-list').innerHTML = picking.list.map((c, i) => `<div class="build${gliderKey(c.g) === cur ? ' on' : ''}" role="button" tabindex="0" data-gl="${i}">
+    <span class="art" style="background-image:${esc(c.art)}"></span><span class="build-text"><b>${esc(c.name)}</b>${c.note ? `<small>${esc(c.note)}</small>` : ''}</span>${acts(c)}</div>`).join('')
+    || '<p class="gl-none">No glider matches</p>';
+  for (const b of document.querySelectorAll('[data-glf]')) { const on = b.dataset.glf === picking.show; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); }
+}
+function wireGliders() {
+  $('#swipe-b').addEventListener('click', () => { togglePanel('gliders'); if (state.panel === 'gliders') $('#gl-search').focus({ preventScroll: true }); });
+  $('#gl-search').addEventListener('input', (e) => { picking.text = e.target.value; renderGliders(); });
+  $('#gl-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') togglePanel(null); });
+  $('#gl-filter').addEventListener('click', (e) => { const b = e.target.closest('[data-glf]'); if (b) { picking.show = b.dataset.glf; renderGliders(); } });
+  $('#gl-list').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-gl]')) { e.preventDefault(); e.target.click(); } });
+  $('#gl-list').addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-gl]'), c = card && picking.list[card.dataset.gl];
+    if (!c || card.querySelector('input')) return;
+    const b = e.target.closest('[data-act]'), act = b?.dataset.act;
+    if (act === 'open') applyGlider(c.g);
+    else if (act === 'rename') {
+      const label = card.querySelector('.build-text b'), input = document.createElement('input');
+      input.value = c.name; input.maxLength = 60; input.setAttribute('aria-label', 'Name');
+      label.replaceWith(input);
+      input.focus(); input.select();
+      const done = (keep) => { if (keep && input.value.trim()) renameGlider(c.id, input.value.trim()); renderGliders(); };
+      input.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') done(true); else if (ev.key === 'Escape') done(false); });
+      input.addEventListener('blur', () => done(true));
+    } else if (act === 'delete') {
+      // The second click deletes (there is no undo).
+      if (!b.classList.contains('sure')) { b.classList.add('sure'); b.textContent = 'Delete?'; setTimeout(() => { if (state.panel === 'gliders') renderGliders(); }, 3500); return; }
+      deleteGlider(c.id);
+      renderGliders();
+    } else {
+      // (The chosen one again: none chosen.)
+      await setCompare(true, state.b && gliderKey(c.g) === gliderKey(state.b) ? defaultOther() : c.g);
+      renderGliders();
+    }
+  });
+}
+
 function syncCompare() {
   const on = state.compare && Boolean(other);
   document.body.classList.toggle('comparing', on);
   $('#btn-compare').classList.toggle('on', state.compare);
   $('#btn-compare').setAttribute('aria-pressed', String(state.compare));
   $('#swipe').hidden = !on;
+  if (!on && state.panel === 'gliders') togglePanel(null);
   if (on) {
     $('#swipe').style.left = `${state.split * 100}%`;
-    $('#swipe-a').textContent = catalog.sources.get(state.model).label;
-    $('#swipe-b').textContent = catalog.sources.get(otherId()).label;
+    const [left, right] = state.flip ? [state.b, state] : [state, state.b];
+    $('#swipe-a').textContent = gliderLabel(left);
+    $('#swipe-b').textContent = gliderLabel(right);
   }
 }
 function wireSwipe() {
   const el = $('#swipe');
   let drag = false;
   const move = (x) => { state.split = Math.min(0.95, Math.max(0.05, x / innerWidth)); el.style.left = `${state.split * 100}%`; saveUrlSoon(); };
-  el.addEventListener('pointerdown', (e) => { drag = true; el.setPointerCapture(e.pointerId); e.preventDefault(); });
+  el.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; drag = true; el.setPointerCapture(e.pointerId); e.preventDefault(); });
   el.addEventListener('pointermove', (e) => { if (drag) move(e.clientX); });
   el.addEventListener('pointerup', () => { drag = false; });
   el.addEventListener('keydown', (e) => {
@@ -1160,10 +1336,11 @@ function loop(now) {
     const w = renderer.domElement.width / renderer.getPixelRatio(), h = renderer.domElement.height / renderer.getPixelRatio();
     const x = Math.round(state.split * w);
     renderer.setScissorTest(true);
-    record.root.visible = true; other.root.visible = false;
+    const [left, right] = state.flip ? [other, record] : [record, other];
+    left.root.visible = true; right.root.visible = false;
     renderer.setScissor(0, 0, x, h);
     renderer.render(scene, rig.camera);
-    record.root.visible = false; other.root.visible = true;
+    left.root.visible = false; right.root.visible = true;
     renderer.setScissor(x, 0, w - x, h);
     renderer.render(scene, rig.camera);
     renderer.setScissorTest(false);
@@ -1260,7 +1437,7 @@ function pickPart(e) {
   const r = canvas.getBoundingClientRect();
   const view = viewAt(e.clientX - r.left, e.clientY - r.top);
   raycaster.setFromCamera(view.ndc, view.camera);
-  const side = other && state.compare && e.clientX > state.split * innerWidth ? 'B' : 'A';
+  const side = onOther(e.clientX) ? 'B' : 'A';
   const rec = side === 'B' ? other : record;
   const meshes = rec.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
   const part = raycaster.intersectObjects(meshes, false)[0]?.object.userData.part || null;
@@ -1272,7 +1449,7 @@ function pickZone(e) {
   const r = canvas.getBoundingClientRect();
   const view = viewAt(e.clientX - r.left, e.clientY - r.top);
   raycaster.setFromCamera(view.ndc, view.camera);
-  const rec = other && state.compare && e.clientX > state.split * innerWidth ? other : record;
+  const rec = onOther(e.clientX) ? other : record;
   const meshes = rec.meshes.filter((m) => m.visible && !(m.material.transparent && m.material.opacity < 0.5));
   for (const hit of raycaster.intersectObjects(meshes, false)) {
     const z = hit.object.userData.zone;
@@ -1518,7 +1695,7 @@ function updateLabels() {
   const host = $('#labels'), V = labelView;
   // Moving: the view turned or travelled noticeably since the last frame (the orbit's damping
   // drifts on for a while; that counts as still), or the pose, size or panel changed.
-  const rest = `${m.elements.map((v) => v.toFixed(3))}${W}x${H}${state.panel}${state.compare}${state.split}${state.wires}${state.battens}`;
+  const rest = `${m.elements.map((v) => v.toFixed(3))}${W}x${H}${state.panel}${state.compare}${state.flip}${state.split}${state.wires}${state.battens}`;
   const proj = cam.isOrthographicCamera ? cam.zoom * (cam.top - cam.bottom) : cam.projectionMatrix.elements[5];
   const fast = cam.position.distanceTo(V.pos) > 0.004 || cam.quaternion.angleTo(V.quat) > 0.002 || Math.abs(proj - V.proj) > 1e-3 * Math.abs(proj);
   V.pos.copy(cam.position); V.quat.copy(cam.quaternion); V.proj = proj;
@@ -1597,7 +1774,7 @@ function layoutLabels() {
     if (a) tmp.copy(a).applyMatrix4(m).project(cam);
     const p = a && { x: (tmp.x + 1) / 2 * W, y: (1 - tmp.y) / 2 * H };
     const shown = Boolean(a && item.seen(eye) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
-      && !(other && state.compare && p.x > state.split * W - 20));
+      && !onOther(p.x, 20));
     el.style.opacity = shown ? 1 : 0;
     el.style.pointerEvents = shown ? 'auto' : 'none';
     lead.line.style.display = lead.dot.style.display = shown ? '' : 'none';
@@ -1737,6 +1914,9 @@ function syncPanel() {
     $(`#${id}`).hidden = state.panel !== id;
     $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
   }
+  $('#gliders').hidden = state.panel !== 'gliders';
+  $('#swipe-b').setAttribute('aria-expanded', String(state.panel === 'gliders'));
+  if (state.panel === 'gliders' && catalog) renderGliders();
   for (const b of document.querySelectorAll('.build')) b.classList.toggle('on', b.dataset.model === state.model);
   for (const b of document.querySelectorAll('.sw')) {
     const on = (state.colours[b.dataset.zone] || '') === b.dataset.colour;
@@ -1957,6 +2137,8 @@ function wireUi() {
   $('#picker').addEventListener('pointerover', (e) => { const b = e.target.closest('.swatches .sw'); if (b) syncNames(b); });
   $('#picker').addEventListener('pointerout', (e) => { if (e.target.closest('.swatches .sw')) syncNames(); });
   document.addEventListener('pointerdown', (e) => { if (ui.picker && !e.target.closest('#picker, .label')) closePicker(); }, true);
+  wireSaved();
+  wireGliders();
   $('#btn-share').onclick = async () => {
     saveUrl();
     try { await navigator.clipboard.writeText(location.href); toast('Link copied: it opens this glider just like this'); }
@@ -1981,6 +2163,7 @@ function wireUi() {
   // select() and renderChip(), stays for a parts view.)
   canvas.addEventListener('pointerup', (e) => {
     if (!down || e.button !== 0 || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || !record) return;
+    if (onOther(e.clientX)) { otherClicked(e); return; }   // Customize edits one glider of a comparison
     const zone = pickZone(e);
     if (zone) showRow(zone, e.clientX, e.clientY);
   });
@@ -1997,7 +2180,7 @@ function wireUi() {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     userActive();
     const k = e.key.toLowerCase();
-    if (e.key === 'Escape') { if (ui.picker) closePicker(); else if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
+    if (e.key === 'Escape') { if (state.panel === 'gliders') togglePanel(null); else if (ui.picker) closePicker(); else if (!$('#scene-fly').hidden) $('#scene-fly').hidden = true; else if (state.sel) select(null); else document.body.classList.remove('nohud'); return; }
     if (k === 'c') togglePanel('custom');
     else if (k === 's') togglePanel('settings');
     else if (k === 't') toggle2d();
@@ -2028,18 +2211,19 @@ function saveUrlSoon() { clearTimeout(urlTimer); urlTimer = setTimeout(saveUrl, 
 function saveUrl() {
   if (!record || THUMB) return;
   const q = new URLSearchParams();
-  q.set('model', state.model);
+  for (const [k, v] of gliderQuery(state)) q.set(k, v);
   if (state.scene !== 'studio') q.set('scene', state.scene);
-  for (const [z, id] of Object.entries(state.colours)) if (id !== (DEFAULTS.colours[z] ?? null)) q.set(z, id || 'built');
   if (Math.abs(state.seeThrough - DEFAULTS.seeThrough) > 0.001) q.set('xray', state.seeThrough.toFixed(2));
   if (!state.wires) q.set('wires', '0');
   if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.vg !== 1) q.set('vg', state.vg.toFixed(2));
-  if (state.design) q.set('design', state.design);
-  const dz = Object.entries(state.designFab).map(([z, f]) => `${z}:${f}`).join(',');   // (as built too)
-  if (dz) q.set('dz', dz);
-  if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
+  if (state.compare) {
+    q.set('compare', '1');
+    if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3));
+    if (state.b) { const b = gliderQuery(state.b); if (state.b.name) b.set('name', state.b.name); if (state.b.self) b.set('self', '1'); q.set('b', b.toString()); }   // the other side's glider
+    if (state.flip) q.set('flip', '1');
+  }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');
   if (state.profile === 'calibrated') q.set('colors', 'cal');
@@ -2070,6 +2254,12 @@ async function runThumb() {
   if (kind === 'model') rig.animateTo(rig.frame(record.box, [0.42, 0.32, 1], 0.92), false);
   for (let i = 0; i < 40; i++) await frame();
   document.body.dataset.thumbReady = '1';
+}
+
+/** ?snap=1: the top-down picture of the model as it comes, for its card (tools/thumbs.mjs reads it from the page). */
+async function runSnap() {
+  for (let i = 0; i < 60; i++) await frame();
+  document.body.dataset.snap = snapshot();
 }
 
 // ------------------------------------------------------------------ start (last, so every declaration above exists)
