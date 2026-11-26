@@ -538,7 +538,8 @@ function restingPose(rec) {
   const v = new THREE.Vector3(), SLICE = 0.002;
   const low = new Map();
   for (const m of rec.meshes) {
-    if (!m.userData.part.ground) continue;   // a hanging rope end does not hold the glider up
+    const part = m.userData.part;
+    if (!part.ground || part.group === '04' || part.group === '05') continue;   // soft ropes and slack wires do not hold the glider up
     const pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
@@ -616,8 +617,9 @@ function stepPoses(now) {
   return moving;
 }
 function poseOf(rec, animate = false) {
-  if (!rec.rest) rec.rest = restingPose(rec);
   const fresh = !rec.ropes;
+  if (fresh) { vgOf(rec); setVG(rec, 1); }           // evaluate at VG tight before measuring the resting hull
+  if (!rec.rest) rec.rest = restingPose(rec);
   const a0 = rec.angle ?? 0;
   const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
   const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, restPose());
@@ -634,7 +636,7 @@ function poseOf(rec, animate = false) {
     setShapes(rec, s0);
     tiltTo(rec, a0);
   }
-  if (fresh) { ropesOf(rec); vgOf(rec); setVG(rec, state.vg); }
+  if (fresh) { ropesOf(rec); setVG(rec, state.vg); }
 }
 /**
  * VG: a rigged build carries its loose state too (sport3-opus tools/vg_rig.py): parts that move
@@ -685,7 +687,7 @@ function setVG(rec, v) {
   if (mixer) { action.time = v * duration; mixer.update(0); }
   rec.root.updateMatrixWorld(true);
   for (const r of routed) r.update();
-  rec.ropes.forEach((r, i) => {
+  (rec.ropes || []).forEach((r, i) => {
     const spec = rec.source.ropes[i];
     if (spec.lengthLoose !== undefined) r.setLength(spec.lengthLoose + (spec.length - spec.lengthLoose) * v);
   });
