@@ -266,7 +266,10 @@ button.swipe-tag:hover, button.swipe-tag[aria-expanded="true"] { background: rgb
 #viewbar button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 #viewbar .sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line); }
 body.plan #toast { top: 80px; }
-body.plan #posebar { opacity: 0; pointer-events: none; }   /* plan views always show the glider standing */
+/* plan views always show the glider standing, but keep the VG slider when the model has one */
+body.plan #posebar:has(#vgctl[hidden]) { opacity: 0; pointer-events: none; }
+body.plan #posebar button, body.plan #vgctl .sep { display: none; }
+body.plan #vgctl { padding: 0 12px; height: 34px; }
 #quad { position: fixed; z-index: 3; display: grid; grid-template: 1fr 1fr / 1fr 1fr; pointer-events: none; }
 #quad span { position: relative; padding: 12px 14px; }
 #quad b { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); font-size: 10.5px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }

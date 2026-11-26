@@ -13,13 +13,18 @@
 import * as THREE from 'three';
 import { clothKind, CLOTH, filmAlpha, frost } from './cloth.js';
 
-const SKIN = /^(Upper sail|Undersurface) [LR]$/;
+const SKIN = /^(Sail( [LR])?|(Upper sail|Undersurface) [LR])$/;
+const isSail = (m) => /^Sail( [LR])?$/.test(m.userData.part?.name || '');
+const isLowerMat = (m) => /lower panel|undersurface/i.test(m.userData.materials.base.name);
+const isSharedMat = (m) => isSail(m) && (LE_CLOTH.test(m.userData.materials.base.name) || TRIM.test(m.userData.materials.base.name));
+const isUpperMesh = (m) => (isSail(m) ? !isLowerMat(m) : /^Upper/.test(m.userData.part.name));
+const isLowerMesh = (m) => (isSail(m) ? isLowerMat(m) : /^Undersurface/.test(m.userData.part.name));
 // Sewn on the skins: the panel laps and the batten pockets take the colour of the cloth under them.
 const LAP = /^Upper panel lap [LR]$/;
 const ZIP = /^Sail .*zipper( [LR])?$/;
 const PATCH = /^Sail sprog patch [LR]$/;
 const UNDER_TOP = (m) => /^Sail (nose )?batten /.test(m.userData.part?.name || '');   // pockets under the top skin
-const POCKET = /^Sail (lower |speed )?batten [\d-]+ [LR] pocket$/;
+const POCKET = /^Sail (nose batten|(lower |speed )?batten [\d-]+ [LR]) pocket$/;
 const THREAD = /^Topstitch/;
 const LE_CLOTH = /leading-edge cloth/;
 const TRIM = /bound panel edge|reinforced wire exits/;
@@ -205,7 +210,7 @@ function planCoords(skins, sewn, root) {
   // trailing edge. Empty bins inside its span: between their neighbours.
   const under = new Float32Array(BINS).fill(-Infinity);
   skins.forEach((mesh, k) => {
-    if (/^Undersurface/.test(mesh.userData.part.name)) extent(k, k + 1, new Float32Array(BINS).fill(Infinity), under);
+    if (isLowerMesh(mesh)) extent(k, k + 1, new Float32Array(BINS).fill(Infinity), under);
   });
   const inUnder = [...Array(BINS).keys()].filter((b) => Number.isFinite(under[b]));
   const last = inUnder[inUnder.length - 1] ?? -1;
@@ -232,7 +237,7 @@ function planCoords(skins, sewn, root) {
   const front = (upper, rest) => {
     const lo = new Float32Array(BINS).fill(Infinity), hi = new Float32Array(BINS).fill(-Infinity);
     skins.forEach((mesh, k) => {
-      if (/^Upper/.test(mesh.userData.part.name) === upper && !LE_CLOTH.test(mesh.userData.materials.base.name)) extent(k, k + 1, lo, hi);
+      if (isUpperMesh(mesh) === upper && !LE_CLOTH.test(mesh.userData.materials.base.name)) extent(k, k + 1, lo, hi);
     });
     const raw = Float32Array.from(lo, (v, b) => (Number.isFinite(v) ? v : rest[b]));
     const r = Math.ceil(3 * SMOOTH * BINS), g = [];
@@ -320,12 +325,13 @@ const CENTRE = 0.036;   // share of the half span
  * leading-edge cloth, the bound edges and the wire-exit patches meet the cloth (sewn over it), and
  * the skin's free edges (hemmed). Plan polylines, each with the side it is sewn on to its left.
  */
-function meshLines(meshes, half, smooth = 4) {
+function meshLines(meshes, half, up = 0, smooth = 4) {
   const role = (m) => (LE_CLOTH.test(m.userData.materials.base.name) ? 1 : TRIM.test(m.userData.materials.base.name) ? 2 : 0);
   const pk = (q) => `${Math.round(q[0] * 1000)},${Math.round(q[1] * 1000)}`;   // ends meet within a millimetre
   // Each part's outline (right wing): its boundary edges chained into lines, each resampled every
   // 5 mm, with the part's cloth to the left.
   const prims = meshes.filter((m) => {
+    if (isSail(m)) return true;
     const a = m.geometry.attributes.aSailPlan;
     let sx = 0;
     for (let i = 0; i < a.count; i += 17) sx += a.getX(i);
@@ -335,12 +341,23 @@ function meshLines(meshes, half, smooth = 4) {
     const keys = Array.from({ length: pos.count }, (_, i) => `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getY(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`);
     const P = (i) => [pat.getX(i), pat.getY(i), plan.getX(i) * half];   // pattern (metres), plan x
     const idx = g.index ? g.index.array : Array.from({ length: pos.count }, (_, i) => i);
+    const filterSide = isSail(m), filterUp = isSharedMat(m) && up !== 0;
     const count = new Map(), edges = [];
-    for (let t = 0; t + 2 < idx.length; t += 3) for (let e = 0; e < 3; e++) {
-      const a = idx[t + e], b = idx[t + ((e + 1) % 3)], c = idx[t + ((e + 2) % 3)];
-      const k = keys[a] < keys[b] ? `${keys[a]}|${keys[b]}` : `${keys[b]}|${keys[a]}`;
-      count.set(k, (count.get(k) || 0) + 1);
-      edges.push({ k, a, b, c });
+    for (let t = 0; t + 2 < idx.length; t += 3) {
+      const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
+      if (filterSide && plan.getX(i0) + plan.getX(i1) + plan.getX(i2) < 0) continue;
+      if (filterUp) {
+        const ax = pos.getX(i1) - pos.getX(i0), ay = pos.getY(i1) - pos.getY(i0), az = pos.getZ(i1) - pos.getZ(i0);
+        const bx = pos.getX(i2) - pos.getX(i0), by = pos.getY(i2) - pos.getY(i0), bz = pos.getZ(i2) - pos.getZ(i0);
+        const ny = az * bx - ax * bz;
+        if (ny * up < 0) continue;
+      }
+      for (let e = 0; e < 3; e++) {
+        const a = idx[t + e], b = idx[t + ((e + 1) % 3)], c = idx[t + ((e + 2) % 3)];
+        const k = keys[a] < keys[b] ? `${keys[a]}|${keys[b]}` : `${keys[b]}|${keys[a]}`;
+        count.set(k, (count.get(k) || 0) + 1);
+        edges.push({ k, a, b, c });
+      }
     }
     const boundary = edges.filter((e) => count.get(e.k) === 1).map((e) => {
       let A = P(e.a), B = P(e.b);
@@ -685,7 +702,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
         // Zone k's share of this pixel: its signed distance to its edge (texels), over the pixel's width.
         float designCover(float e) {
           float d = (e - 0.5) * 2.0 * uDesignBand;
-          return clamp(0.5 + d / max(fwidth(d), 1e-4), 0.0, 1.0);
+          return clamp(0.5 + d / clamp(fwidth(d), 1e-4, 0.8), 0.0, 1.0);
         }
         // Laminate fibres (as lib/cloth.js, PX): square scrim every 6 mm, X-ply at +-30 degrees every
         // 20 mm, tows 0.7 mm; on the plan, in metres. Fade to their average when under a pixel.
@@ -701,7 +718,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
         // Ripstop (as lib/cloth.js, 205MT and 240MT): pairs of heavier threads 1 mm apart in 7 mm diamonds.
         // Relief in metres: the ripstop's threads, and the weave [EST: a hot-pressed cloth is nearly flat].
         #define WEAVE_RIB 0.0003
-        #define WEAVE_H 0.00001
+        #define WEAVE_H 0.00008
         float designRipstop(vec2 p) {
           float rib = 0.0;
           for (int k = 0; k < 2; k++) {
@@ -710,14 +727,18 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           }
           return rib;
         }
-        // Woven polyester: a plain weave, about 100 x 64 threads to the inch [EST: a 4 oz sailcloth; no thread
-        // count is published for V170]. Height from -1 to 1; flat once a thread is under about two pixels.
+        // Woven polyester: fine plain weave up very close (0.4 x 0.25 mm) plus subtle calendered
+        // fabric grain (2.2 mm cross-weave) that reads cleanly at normal close-up distances.
         float designWeave(vec2 p) {
           vec2 q = p / vec2(0.0004, 0.00025), fw = fwidth(q);
-          float keep = 1.0 - smoothstep(0.2, 0.5, max(fw.x, fw.y));
+          float keep = 1.0 - smoothstep(0.2, 0.55, max(fw.x, fw.y));
           vec2 c = cos(3.14159265 * fract(q * 0.5) * 2.0), t = cos(6.2831853 * fract(q));
-          float over = 0.5 + 0.5 * c.x * c.y;
-          return keep * mix(t.y, t.x, over);
+          float fine = keep * mix(t.y, t.x, 0.5 + 0.5 * c.x * c.y);
+          vec2 q2 = p / vec2(0.0022, 0.0018), fw2 = fwidth(q2);
+          float keep2 = 1.0 - smoothstep(0.25, 0.7, max(fw2.x, fw2.y));
+          vec2 c2 = cos(3.14159265 * fract(q2 * 0.5) * 2.0), t2 = cos(6.2831853 * fract(q2));
+          float grain = keep2 * mix(t2.y, t2.x, 0.5 + 0.5 * c2.x * c2.y);
+          return fine * 0.65 + grain * 0.55;
         }
         ${DESIGN_FN('F')}
         ${DESIGN_FN('B')}
@@ -734,14 +755,14 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           if (front) dc = designColourF(uv, designLam, fib, designRip); else dc = designColourB(uv, designLam, fib, designRip);
           vec3 s0 = vec3(0.0), s1 = vec3(0.0);
           vec2 pm = vSailUv;                                                     // the cloth laid flat (metres)
-          if (uDesignRole < 2.5 || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // the cloth, and pockets under it
+          if (uDesignRole < 0.5 || (uDesignRole > 1.5 && uDesignRole < 2.5) || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // body cloth, trim and pockets (welded LE cloth stays pure P1)
             if (front) designSeams(uSeamF, uSeam2F, uSeamBoxF, pm, s0, s1); else designSeams(uSeamB, uSeam2B, uSeamBoxB, pm, s0, s1);
           }
           // The leading-edge cloth (P1) and the bound edges: their parts, but near an edge between two
           // parts the smooth seam line decides which is where (the mesh's own edges step along its triangles).
           float le = (uDesignRole > 0.5 && uDesignRole < 1.5) || uDesignRole > 4.5 ? 1.0 : 0.0;
           float trim = uDesignRole > 1.5 && uDesignRole < 2.5 ? 1.0 : 0.0, onLe = 0.0;
-          if (uDesignRole < 2.5 || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // the cloth, and pockets under it
+          if (uDesignRole < 0.5 || (uDesignRole > 1.5 && uDesignRole < 2.5) || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // body cloth, trim and pockets (welded LE cloth stays pure P1)
             // A line between two parts decides only for a pixel of one of those parts (pockets: any).
             float own = uDesignRole;
             bool pocket = uDesignRole > 3.5;
@@ -822,7 +843,12 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         // The weave, ripstop threads and laminate fibres stand proud (heights in metres, as lib/cloth.js).
-        if (uDesignOn < 0.5) designRelief = designWeave(vSailUv) * WEAVE_H;   // as built: woven polyester
+        if (uDesignOn < 0.5) {
+          float wv = designWeave(vSailUv);
+          float rs = designRipstop(vSailUv);
+          designRelief = wv * WEAVE_H + rs * (WEAVE_RIB * 0.55);   // as built: woven polyester + subtle MT ripstop
+          diffuseColor.rgb *= (1.0 + wv * 0.035) * (1.0 - rs * 0.075);
+        }
         {
           vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
           float det = dot(sx, r1) * faceDirection;
@@ -997,6 +1023,7 @@ function toPhysical(old) {
   m.specularIntensity = 0.2;
   m.clearcoat = 1;
   m.clearcoatRoughness = 0.08;
+  for (const t of [m.map, m.normalMap]) if (t) { t.anisotropy = 8; t.needsUpdate = true; }
   return m;
 }
 
@@ -1037,8 +1064,8 @@ export class SailDesigns {
     const sewn = [...laps, ...pockets, ...zips, ...patches];
     this.ok = skins.length > 0;
     if (!this.ok) return;
-    this.upper = new Set(skins.filter((m) => /^Upper/.test(m.userData.part.name)));
-    this.lower = new Set(skins.filter((m) => !this.upper.has(m)));
+    this.upper = new Set(skins.filter((m) => isUpperMesh(m)));
+    this.lower = new Set(skins.filter((m) => isLowerMesh(m) || isSharedMat(m)));
     this.clear = { top: false, bottom: false };
     this.built = builtDesign(skins, this.upper, designs);
     this.flat = { top: flatMap(2), bottom: flatMap(3) };   // as built: the top skin is zone 2 (P3), the undersurface zone 3 (P5)
@@ -1052,7 +1079,7 @@ export class SailDesigns {
       bottom: patternCoords([...this.lower], [...pockets.filter((m) => !UNDER_TOP(m)), ...zips, ...patches], rec.root.children[0], half, -1),
     };
     this.seams = new Map();   // design-side -> seam field (built on first use)
-    this.own = { top: meshLines([...this.upper], half), bottom: meshLines([...this.lower], half) };
+    this.own = { top: meshLines([...this.upper], half, 1), bottom: meshLines([...this.lower], half, -1) };
     const uniforms = () => ({ map: { value: null }, on: { value: 0 }, half: { value: half }, straight, cref: { value: cref },
       seam: { value: noSeams }, seam2: { value: noSeams }, seamBox: { value: new THREE.Vector4(0, 0, 1, 1) },
       pal: { value: Array.from({ length: 16 }, () => new THREE.Color()) },
@@ -1067,7 +1094,7 @@ export class SailDesigns {
     const pal = () => ({ value: Array.from({ length: 16 }, () => new THREE.Color()) });
     this.u.pocket = { ...this.u.bottom, pal: pal(), film: { value: Array.from({ length: 16 }, () => new THREE.Vector4(1, 0, 0, 0)) } };
     for (const mesh of skins) {
-      const upper = /^Upper/.test(mesh.userData.part.name);
+      const upper = isUpperMesh(mesh);
       const M = mesh.userData.materials;
       for (const [key, old] of Object.entries(M)) {
         // Physical, as the Falcon's cloth: the laminates' gloss is a clear coat.
@@ -1085,21 +1112,57 @@ export class SailDesigns {
       const name = m.name || mesh.userData.materials.base.name;
       patch(m, this.u.top, /leading-edge/.test(name) ? 1 : /bound panel edge/.test(name) ? 2 : 3, this.u.bottom, this.u.top);
     }
-    for (const mesh of pockets) for (const m of Object.values(mesh.userData.materials)) {
-      const name = m.name || mesh.userData.materials.base.name;
-      // Stitching under the leading-edge cloth shows in that cloth's colour.
-      const r = THREAD.test(name) ? (LE_CLOTH.test(name) ? 5 : 3) : 4;
-      // The top skin's pockets: in the bottom drawing's colours, and the leading-edge cloth's where they
-      // run in under it (from the top skin's own part edges).
-      const top = UNDER_TOP(mesh);
-      // Their topstitching shows on the cloth it goes through: the top skin's in the top drawing's colours.
-      const u = top ? this.u.top : this.u.pocket;
-      patch(m, u, r, u, u, false, u);
+    const pushDepth = (m) => {
+      m.polygonOffset = true; m.polygonOffsetFactor = 2; m.polygonOffsetUnits = 2;
+      const prev = m.onBeforeCompile;
+      m.onBeforeCompile = (s, r) => {
+        prev?.call(m, s, r);
+        s.vertexShader = s.vertexShader.replace('#include <logdepthbuf_vertex>',
+          `#include <logdepthbuf_vertex>
+          #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
+            vFragDepth *= 1.006;
+          #endif
+          gl_Position.z += 0.0005 * gl_Position.w;`);
+      };
+      const prevKey = m.customProgramCacheKey?.bind(m);
+      m.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}pushdv3`;
+      m.needsUpdate = true;
+    };
+    for (const mesh of rec.meshes) {
+      const pn = mesh.userData.part?.name || '';
+      if (/^Rear keel pocket/.test(pn)) {
+        for (const m of Object.values(mesh.userData.materials)) { m.side = THREE.FrontSide; pushDepth(m); }
+      } else if (/^(Sail (nose |lower |speed )?batten|Sweep wire tubing)/.test(pn) && !/pocket$/.test(pn)) {
+        for (const m of Object.values(mesh.userData.materials)) pushDepth(m);
+      }
+    }
+    for (const mesh of pockets) {
+      for (const m of Object.values(mesh.userData.materials)) {
+        const name = m.name || mesh.userData.materials.base.name;
+        // All batten pockets (top-skin and undersurface) face into the wing; cull their back faces
+        // so they never bleed through the sail skin from outside.
+        m.side = THREE.FrontSide;
+        // Stitching under the leading-edge cloth shows in that cloth's colour.
+        const r = THREAD.test(name) ? (LE_CLOTH.test(name) ? 5 : 3) : 4;
+        // The top skin's pockets: in the bottom drawing's colours, and the leading-edge cloth's where they
+        // run in under it (from the top skin's own part edges).
+        const top = UNDER_TOP(mesh);
+        // Their topstitching shows on the cloth it goes through: the top skin's in the top drawing's colours.
+        const u = top ? this.u.top : this.u.pocket;
+        patch(m, u, r, u, u, false, u);
+        pushDepth(m);
+      }
     }
     for (const mesh of zips) for (const m of Object.values(mesh.userData.materials)) {
       if (/zipper tape/.test(m.name || mesh.userData.materials.base.name)) patch(m, this.u.bottom, 4);
     }
-    for (const mesh of patches) for (const m of Object.values(mesh.userData.materials)) patch(m, this.u.top, 4);
+    const topBody = skins.find((m) => isUpperMesh(m) && !LE_CLOTH.test(m.userData.materials.base.name) && !TRIM.test(m.userData.materials.base.name));
+    for (const mesh of patches) {
+      for (const m of Object.values(mesh.userData.materials)) {
+        if (topBody && m.color) m.color.copy(topBody.userData.materials.base.color).multiplyScalar(0.85);
+        patch(m, this.u.top, 4);
+      }
+    }
   }
 
   /** The seam field of a design's side (null: none drawn). */
