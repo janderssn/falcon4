@@ -102,6 +102,8 @@ const STRAIGHT_FROM = 0.12;   // as tools/sail_designs.py STRAIGHT
 const EDGE = 0.1;                                                                   // share of the chord texels up to the leading-edge panel's rear edge (tools/sail_designs.py)
 const UNDER = 0.85, CLOSE = 6;                 // bottom maps: share of the chord texels up to the undersurface's trailing edge
 const P1 = 15;                      // palette slot of the leading-edge colour
+/** 1 while a skin is drawn to read back which zone lies under a pixel (zoneAt, anchors). */
+const pick = { value: 0 };
 const ZONES = 12;                   // at most: three distance-field images of four channels
 
 /** The designs of a glider ("designs" in models.json: the folder with designs.json and the maps). */
@@ -136,6 +138,10 @@ function texture(designs, file, nearest) {
 const BLACKEST = 0.022;   // linear: black woven polyester in daylight
 function clothColour(c, hex) {
   c.setStyle(hex);
+  return asCloth(c);
+}
+/** The same for a colour already set (the nose cone's tint, main.js). */
+export function asCloth(c) {
   c.r = Math.max(c.r, BLACKEST); c.g = Math.max(c.g, BLACKEST); c.b = Math.max(c.b, BLACKEST * 1.08);
   return c;
 }
@@ -585,18 +591,19 @@ const SEAM_GLSL = /* glsl */ `
 // One side's design in the shader: its maps and its palette (colour, film alpha, laminate fibres per zone).
 const SIDE_GLSL = (n) => `uniform sampler2D uDesignMap${n}, uDesignSdf0${n}, uDesignSdf1${n}, uDesignSdf2${n}, uSeam${n}, uSeam2${n};
   uniform vec4 uSeamBox${n};
-  uniform vec3 uDesignPal${n}[16]; uniform vec3 uDesignFilm${n}[16];`;
+  uniform vec3 uDesignPal${n}[16]; uniform vec4 uDesignFilm${n}[16];`;
 // The design's colour here (rgb) and how much the film lets through (a: 1 opaque); lam: the share
-// of laminate, fib: its fibre colour.
+// of laminate, fib: its fibre colour, rip: the share of ripstop cloth (205MT, 240MT).
 const DESIGN_FN = (n) => `
-        vec4 designColour${n}(vec2 uv, out float lam, out vec3 fib) {
+        vec4 designColour${n}(vec2 uv, out float lam, out vec3 fib, out float rip) {
           vec4 f0 = texture2D(uDesignSdf0${n}, uv), f1 = texture2D(uDesignSdf1${n}, uv), f2 = texture2D(uDesignSdf2${n}, uv);
           float e[${ZONES}] = float[${ZONES}](f0.r, f0.g, f0.b, f0.a, f1.r, f1.g, f1.b, f1.a, f2.r, f2.g, f2.b, f2.a);
-          vec4 acc = vec4(0.0); vec4 film = vec4(0.0); float sum = 0.0;
+          vec4 acc = vec4(0.0); vec4 film = vec4(0.0); float sum = 0.0, rsum = 0.0;
           for (int k = 0; k < ${ZONES}; k++) {
             float w = designCover(e[k]);
             acc += w * vec4(uDesignPal${n}[k + 1], uDesignFilm${n}[k + 1].x);
             film += w * uDesignFilm${n}[k + 1].y * vec4(vec3(uDesignFilm${n}[k + 1].z), 1.0);
+            rsum += w * uDesignFilm${n}[k + 1].w;
             sum += w;
           }
           int k = clamp(int(floor(texture2D(uDesignMap${n}, uv).r * 255.0 + 0.5)), 0, 15);
@@ -605,6 +612,7 @@ const DESIGN_FN = (n) => `
           vec4 c = sum > 0.0 ? acc / sum : fill; vec4 g = sum > 0.0 ? film / sum : ffill;
           if (sum > 0.0 && sum < 1.0) { c = mix(fill, c, sum); g = mix(ffill, g, sum); }
           lam = g.a; fib = lam > 0.0 ? g.rgb / max(lam, 1e-3) : vec3(0.0);
+          rip = sum > 0.0 ? mix(uDesignFilm${n}[k].w, rsum / sum, min(sum, 1.0)) : uDesignFilm${n}[k].w;
           return c;
         }`;
 const sideUniforms = (s, u, n) => {
@@ -626,6 +634,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
     if (canFrost) Object.assign(s.uniforms, frost);
     sideUniforms(s, u, 'F'); sideUniforms(s, back, 'B');
     seamUniforms(s, seamsFront, 'F'); seamUniforms(s, seamsBack, 'B');
+    s.uniforms.uDesignPick = pick;
     s.uniforms.uDesignOn = u.on; s.uniforms.uDesignBand = u.band; s.uniforms.uDesignProfile = u.profile;
     s.uniforms.uDesignProfile2 = u.profile2; s.uniforms.uDesignEref = u.eref;
     s.uniforms.uDesignHalf = u.half; s.uniforms.uDesignRole = { value: role };
@@ -637,6 +646,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSailPlan = aSailPlan; vSailUv = aSailUv;');
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
+        uniform float uDesignPick;
         uniform float uDesignOn, uDesignRole, uDesignBand, uDesignHalf, uDesignUnderF, uDesignUnderB, uDesignStraight, uDesignCref, uDesignEref, uDesignBaked;
         uniform sampler2D uDesignProfile, uDesignProfile2;
         ${SIDE_GLSL('F')}
@@ -684,24 +694,44 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           return mix(1.0 - smoothstep(0.5 * w - fw, 0.5 * w + fw, d), w, smoothstep(0.08, 0.35, fw));
         }
         float designRun(vec2 p, float a, float s, float w) { return designLine(dot(p, vec2(-sin(a), cos(a))) / s, w / s); }
-        float designFibres() {
-          vec2 p = vec2(vSailPlan.x * uDesignHalf, vSailPlan.y);
+        float designFibres(vec2 p) {
           return max(max(designRun(p, 0.0, 0.006, 0.0007), designRun(p, 1.5708, 0.006, 0.0007)),
                      max(designRun(p, 1.0472, 0.02, 0.0008), designRun(p, 2.0944, 0.02, 0.0008)));
+        }
+        // Ripstop (as lib/cloth.js, 205MT and 240MT): pairs of heavier threads 1 mm apart in 7 mm diamonds.
+        // Relief in metres: the ripstop's threads, and the weave [EST: a hot-pressed cloth is nearly flat].
+        #define WEAVE_RIB 0.0003
+        #define WEAVE_H 0.00001
+        float designRipstop(vec2 p) {
+          float rib = 0.0;
+          for (int k = 0; k < 2; k++) {
+            vec2 q = p + float(k) * vec2(0.0, 0.001);
+            rib = max(rib, max(designRun(q, 0.61, 0.007, 0.0005), designRun(q, -0.61, 0.007, 0.0005)));
+          }
+          return rib;
+        }
+        // Woven polyester: a plain weave, about 100 x 64 threads to the inch [EST: a 4 oz sailcloth; no thread
+        // count is published for V170]. Height from -1 to 1; flat once a thread is under about two pixels.
+        float designWeave(vec2 p) {
+          vec2 q = p / vec2(0.0004, 0.00025), fw = fwidth(q);
+          float keep = 1.0 - smoothstep(0.2, 0.5, max(fw.x, fw.y));
+          vec2 c = cos(3.14159265 * fract(q * 0.5) * 2.0), t = cos(6.2831853 * fract(q));
+          float over = 0.5 + 0.5 * c.x * c.y;
+          return keep * mix(t.y, t.x, over);
         }
         ${DESIGN_FN('F')}
         ${DESIGN_FN('B')}
         ${SEAM_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        float designLam = 0.0, designA = 1.0;
+        float designLam = 0.0, designA = 1.0, designRip = 0.0, designRib = 0.0, designRelief = 0.0;
         vec2 designGrad = vec2(0.0);
         vec3 designTint = vec3(1.0);
-        if (uDesignOn > 0.5) {
+        if (uDesignOn > 0.5 || uDesignPick > 0.5) {   // (the zone under a pixel is read as built too)
           vec3 fib = vec3(0.0);
           vec4 dc;
           bool front = gl_FrontFacing;
           vec2 st = designST(front ? uDesignUnderF : uDesignUnderB), uv = vec2(st.x, 1.0 - st.y);
-          if (front) dc = designColourF(uv, designLam, fib); else dc = designColourB(uv, designLam, fib);
+          if (front) dc = designColourF(uv, designLam, fib, designRip); else dc = designColourB(uv, designLam, fib, designRip);
           vec3 s0 = vec3(0.0), s1 = vec3(0.0);
           vec2 pm = vSailUv;                                                     // the cloth laid flat (metres)
           if (uDesignRole < 2.5 || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // the cloth, and pockets under it
@@ -732,8 +762,18 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
             }
           }
           le = max(le, trim * onLe);   // in that cloth's colour, a shade darker
-          dc = mix(dc, vec4(gl_FrontFacing ? uDesignPalF[${P1}] : uDesignPalB[${P1}], 1.0), le);
-          designLam *= (1.0 - le) * (1.0 - trim);
+          // The leading-edge cloth can be laminate too: its film and fibres (uDesignFilm, as a zone's).
+          vec4 leFilm = gl_FrontFacing ? uDesignFilmF[${P1}] : uDesignFilmB[${P1}];
+          dc = mix(dc, vec4(gl_FrontFacing ? uDesignPalF[${P1}] : uDesignPalB[${P1}], leFilm.x), le);
+          fib = mix(fib, vec3(leFilm.z), le);
+          if (uDesignPick > 0.5) {
+            // The zone under this pixel, as its number in the design's map (${P1}: the leading-edge cloth).
+            float zone = front ? texture2D(uDesignMapF, uv).r : texture2D(uDesignMapB, uv).r;
+            gl_FragColor = vec4(le > 0.5 ? ${P1}.0 / 255.0 : zone, 1.0, 0.0, 1.0);
+            return;
+          }
+          designLam = mix(designLam, leFilm.y, le) * (1.0 - trim);
+          designRip = mix(designRip, leFilm.w, le) * (1.0 - trim);
           dc.rgb *= mix(1.0, 0.55, trim);                                       // bound edges, wire-exit patches
           if (uDesignRole < 2.5) {                                              // the cloth: its seams and hems
             // Only where the cloth lies flat enough to the plan (not where it rolls round the
@@ -749,7 +789,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
             dc.rgb = mix(c0, dc.rgb, keep);
             designGrad = g * keep;
           }
-          if (uDesignRole > 2.5) designLam = 0.0;                              // thread, laps, tape: woven
+          if (uDesignRole > 2.5) { designLam = 0.0; designRip = 0.0; }         // thread, laps, tape: woven
           if (uDesignRole > 2.5 && uDesignRole < 3.5) dc.rgb *= 0.8;            // thread and laps on the cloth
           if (uDesignRole > 3.5 && uDesignRole < 4.5) dc.rgb *= 0.92;           // pocket tape: two layers
           if (uDesignRole > 4.5) dc.rgb *= 0.85;                                // thread on the leading-edge cloth
@@ -758,20 +798,36 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
             dc.rgb *= texture2D(map, vMapUv).rgb;
           #endif
           diffuseColor.rgb = dc.rgb;
+          // On the plan for the panels; on the cloth laid flat where it rolls round the leading edge.
+          vec2 pp = vec2(vSailPlan.x * uDesignHalf, vSailPlan.y);
+          float fibres = mix(designFibres(pp), designFibres(pm), le), ribs = mix(designRipstop(pp), designRipstop(pm), le);
+          // Ripstop threads: proud of the cloth, and a shade darker (on white a lighter thread would not show) [EST].
+          designRib = ribs * designRip;
+          diffuseColor.rgb *= 1.0 - designRib * 0.16;
+          designRelief = designRib * WEAVE_RIB + fibres * designLam * 0.00006 + designWeave(pm) * (1.0 - designLam) * WEAVE_H;
           if (designLam > 0.0) {
             // Film: tinted and hazy; the fibres are opaque, in their own colour.
-            float fibre = designFibres() * designLam;
+            float fibre = fibres * designLam;
             diffuseColor.rgb = mix(diffuseColor.rgb, fib, fibre);
             designA = mix(dc.a, 1.0, fibre);
             diffuseColor.a *= designA;
             // The film's tint, as a colour that lets the brightest channel fully through.
             designTint = dc.rgb / max(max(dc.r, max(dc.g, dc.b)), 1e-3);
-            // In the picture of what lies behind the films, a film leaves only its opaque parts: its
-            // fibres here, its woven panels and stripes anyway (seen through the other skin's film).
-            ${canFrost ? 'if (uFrostPass > 0.5 && designA < 0.999 && fibre < 0.5) discard;' : ''}
+            // In the picture of what lies behind the films, a film leaves only its opaque cloth: woven
+            // panels, stripes and solid laminates (seen through the other skin's film). Not its own
+            // fibres: where they merge under a pixel they would paint that picture dark, and the film
+            // then showed a black patch over anything lying close behind it.
+            ${canFrost ? 'if (uFrostPass > 0.5 && dc.a < 0.999) discard;' : ''}
           }
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        // The weave, ripstop threads and laminate fibres stand proud (heights in metres, as lib/cloth.js).
+        if (uDesignOn < 0.5) designRelief = designWeave(vSailUv) * WEAVE_H;   // as built: woven polyester
+        {
+          vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
+          float det = dot(sx, r1) * faceDirection;
+          normal = normalize(abs(det) * normal - sign(det) * (dFdx(designRelief) * r1 + dFdy(designRelief) * r2));
+        }
         // The design's seams stand proud, as the model's own in its normal map.
         if (designGrad != vec2(0.0)) {
           vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
@@ -780,7 +836,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         // As the Falcon's cloth (lib/cloth.js): woven polyester matt, the film's gloss in its clear coat.
-        if (uDesignOn > 0.5) roughnessFactor = mix(0.7, 0.6, designLam);`)
+        if (uDesignOn > 0.5) roughnessFactor = min(1.0, mix(0.7, 0.6, designLam) + designRib * 0.1);`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
           material.clearcoat *= designLam;
@@ -944,7 +1000,28 @@ function toPhysical(old) {
   return m;
 }
 
-/** Paints a design on a loaded glider; set(null) shows the sail as built. */
+/**
+ * "As built" as a design: the model's own cloths as zones (leading edge, top skin, undersurface), each in
+ * its own colour until another cloth is chosen; a zone offers the cloths the picker's designs list for it.
+ */
+function builtDesign(skins, upper, designs) {
+  const name = (m) => m.userData.materials.base.name;
+  const plain = (m) => !LE_CLOTH.test(name(m)) && !TRIM.test(name(m));
+  const hex = (test) => { const m = skins.find(test); return m ? `#${m.userData.materials.base.color.getHexString()}` : '#808080'; };
+  const own = { P1: hex((m) => LE_CLOTH.test(name(m))), P3: hex((m) => upper.has(m) && plain(m)), P5: hex((m) => !upper.has(m) && plain(m)) };
+  const listOf = (id) => designs.designs.map((d) => d.zones.find((z) => z.id === id)?.fabrics || []).sort((a, b) => b.length - a.length)[0] || [];
+  const zone = (id, title, sides) => ({ id, name: title, sides, default: 'as-built', fabrics: [['as-built', 'As built', own[id], 1], ...listOf(id)] });
+  return { id: 'built', label: 'As built', zones: [zone('P1', 'Leading edge', ['top', 'bottom']), zone('P3', 'Top', ['top']), zone('P5', 'Undersurface', ['bottom'])] };
+}
+/** A drawing of one zone all over (zone number k). */
+function flatMap(k) {
+  const t = new THREE.DataTexture(new Uint8Array([k, 0, 0, 255]), 1, 1);
+  t.colorSpace = THREE.NoColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Paints a design on a loaded glider; set('built') shows the sail as built, its cloths open to choice. */
 export class SailDesigns {
   constructor(rec, designs) {
     this.designs = designs;
@@ -963,6 +1040,8 @@ export class SailDesigns {
     this.upper = new Set(skins.filter((m) => /^Upper/.test(m.userData.part.name)));
     this.lower = new Set(skins.filter((m) => !this.upper.has(m)));
     this.clear = { top: false, bottom: false };
+    this.built = builtDesign(skins, this.upper, designs);
+    this.flat = { top: flatMap(2), bottom: flatMap(3) };   // as built: the top skin is zone 2 (P3), the undersurface zone 3 (P5)
     const { profile, profile2, half, le, te, un, et, eb, line, cref, eref } = planCoords(skins, sewn, rec.root.children[0]);
     this.prof = { half, le, te, un, et, eb, line, cref, eref };
     const straight = { value: 0 };   // the design's bands run straight to the tip (bottom maps)
@@ -977,7 +1056,7 @@ export class SailDesigns {
     const uniforms = () => ({ map: { value: null }, on: { value: 0 }, half: { value: half }, straight, cref: { value: cref },
       seam: { value: noSeams }, seam2: { value: noSeams }, seamBox: { value: new THREE.Vector4(0, 0, 1, 1) },
       pal: { value: Array.from({ length: 16 }, () => new THREE.Color()) },
-      film: { value: Array.from({ length: 16 }, () => new THREE.Vector3(1, 0, 0)) },   // film alpha, laminate, fibre grey
+      film: { value: Array.from({ length: 16 }, () => new THREE.Vector4(1, 0, 0, 0)) },   // film alpha, laminate, fibre grey, ripstop
       sdf: [0, 1, 2].map(() => ({ value: blank })), band: { value: designs.map?.band || 4 }, profile: { value: profile },
       profile2: { value: profile2 }, eref: { value: eref } });
     // kind (designST): the bottom maps 1; the top maps 0, or 2 for a design whose top is measured to the undersurface's seam.
@@ -986,7 +1065,7 @@ export class SailDesigns {
     // not striped with the panels it crosses. They lie up to half an inch off the cloth, so a pocket that
     // changed colour with the cloth showed past a stripe's edge from the side, through a clear film.
     const pal = () => ({ value: Array.from({ length: 16 }, () => new THREE.Color()) });
-    this.u.pocket = { ...this.u.bottom, pal: pal(), film: { value: Array.from({ length: 16 }, () => new THREE.Vector3(1, 0, 0)) } };
+    this.u.pocket = { ...this.u.bottom, pal: pal(), film: { value: Array.from({ length: 16 }, () => new THREE.Vector4(1, 0, 0, 0)) } };
     for (const mesh of skins) {
       const upper = /^Upper/.test(mesh.userData.part.name);
       const M = mesh.userData.materials;
@@ -1027,20 +1106,124 @@ export class SailDesigns {
   seamsOf(id, side) {
     const key = `${id}-${side}`;
     if (!this.seams.has(key)) {
-      this.seams.set(key, fetch(`${this.designs.dir}/${key}-seams.json`)
+      // (As built: no drawing, only the model's own seams.)
+      this.seams.set(key, (id === 'built' ? Promise.resolve([]) : fetch(`${this.designs.dir}/${key}-seams.json`)
         .then((r) => (r.ok ? r.json() : []))
-        .catch(() => [])
+        .catch(() => []))
         .then((lines) => seamField([...drawingLines(lines, this.prof, side === 'bottom' ? 1 : this.design(id)?.topHem ? 2 : 0, this.toPattern[side], this.design(id)?.straight), ...this.own[side]])));
     }
     return this.seams.get(key);
   }
 
-  /** True for a sail skin with a see-through laminate in the design on it. */
+  /** True for a part of a sail skin with a see-through laminate in the design on it. */
   seeThrough(mesh) {
-    return this.ok && ((this.clear.top && this.upper.has(mesh)) || (this.clear.bottom && this.lower.has(mesh)));
+    if (!this.ok || !(this.upper.has(mesh) || this.lower.has(mesh))) return false;
+    // The leading-edge cloth (P1) is its own part of each skin.
+    if (LE_CLOTH.test(mesh.userData.materials.base.name)) return this.clear.le;
+    return this.upper.has(mesh) ? this.clear.top : this.clear.bottom;
   }
 
-  design(id) { return this.designs.designs.find((d) => d.id === id) || null; }
+  design(id) { return id === 'built' ? this.built : this.designs.designs.find((d) => d.id === id) || null; }
+
+  /** Draws skin meshes with each pixel's zone number in red; returns the bytes (RGBA, rows bottom up). */
+  zonePixels(renderer, camera, meshes, target) {
+    const before = { target: renderer.getRenderTarget(), auto: renderer.autoClear, colour: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.autoClear = false;
+    pick.value = 1;
+    renderer.info.render.frame++;   // (so the plan attributes are bound in this program too: see lib/frost.js)
+    for (const m of meshes) if (m.visible) renderer.render(m, camera);
+    pick.value = 0;
+    const px = new Uint8Array(target.width * target.height * 4);
+    renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, px);
+    renderer.setRenderTarget(before.target);
+    renderer.setClearColor(before.colour, before.alpha);
+    renderer.autoClear = before.auto;
+    return px;
+  }
+
+  zoneOfByte(v) {
+    const d = this.design(this.current);
+    if (!d || !v) return null;
+    return v === P1 ? (d.zones.find((z) => z.id === 'P1')?.id ?? null) : d.zones[v - 1]?.id ?? null;
+  }
+
+  /** The design zone drawn on a skin mesh at a point of the view (ndc: -1..1), or null. */
+  zoneAt(renderer, camera, mesh, ndc) {
+    if (!this.ok || !this.current || !(this.upper.has(mesh) || this.lower.has(mesh))) return null;
+    this.one ??= new THREE.WebGLRenderTarget(1, 1);
+    // (A perspective camera takes its aspect from the full size given here and keeps it afterwards:
+    // the full size has the view's own aspect, and the aspect is put back.)
+    const aspect = camera.isPerspectiveCamera ? camera.aspect : 1, high = 4096, wide = Math.round(high * aspect);
+    const had = camera.view ? { ...camera.view } : null;
+    camera.setViewOffset(wide, high, Math.floor((ndc.x + 1) / 2 * wide), Math.floor((1 - ndc.y) / 2 * high), 1, 1);
+    const px = this.zonePixels(renderer, camera, [mesh], this.one);
+    if (had?.enabled) camera.setViewOffset(had.fullWidth, had.fullHeight, had.offsetX, had.offsetY, had.width, had.height); else camera.clearViewOffset();
+    if (camera.isPerspectiveCamera) { camera.aspect = aspect; camera.updateProjectionMatrix(); }
+    return px[3] ? this.zoneOfByte(px[0]) : null;
+  }
+
+  /**
+   * A point on the sail in each zone of the design (the model's frame), for its label: the zone's
+   * pixel nearest the middle of its area on one wing, seen straight from above (zones on the top
+   * drawing) or below. Returns zone id -> { p, top }.
+   */
+  anchors(renderer, root) {
+    if (this.anchored?.id === this.current) return this.anchored.map;
+    const map = new Map(), d = this.design(this.current);
+    this.anchored = { id: this.current, map };
+    if (!this.ok || !d) return map;
+    root.updateWorldMatrix(true, true);
+    const toModel = new THREE.Matrix4().copy(root.matrixWorld).invert(), m4 = new THREE.Matrix4();
+    const skins = [...this.upper, ...this.lower], box = new THREE.Box3();
+    for (const m of skins) {
+      m.geometry.computeBoundingBox();
+      box.union(m.geometry.boundingBox.clone().applyMatrix4(m4.multiplyMatrices(toModel, m.matrixWorld)));
+    }
+    const c = box.getCenter(new THREE.Vector3()), hx = (box.max.x - box.min.x) / 2 + 0.05, hz = (box.max.z - box.min.z) / 2 + 0.05;
+    const W = 512, H = Math.max(64, Math.round(W * hz / hx));
+    this.plan ??= new THREE.WebGLRenderTarget(W, H);
+    this.plan.setSize(W, H);
+    const cam = new THREE.OrthographicCamera(-hx, hx, hz, -hz, 0.01, box.max.y - box.min.y + 2);
+    cam.matrixAutoUpdate = false;
+    const ray = new THREE.Raycaster();
+    for (const top of [true, false]) {
+      // Looking down the model's -Y (x right, -z up on the picture), or up its +Y (x right, z up).
+      const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 0, top ? -1 : 1), Z = new THREE.Vector3(0, top ? 1 : -1, 0);
+      const eye = new THREE.Vector3(c.x, top ? box.max.y + 1 : box.min.y - 1, c.z);
+      cam.matrixWorld.copy(root.matrixWorld).multiply(m4.makeBasis(X, Y, Z).setPosition(eye));
+      cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+      const px = this.zonePixels(renderer, cam, top ? [...this.upper] : skins, this.plan);
+      d.zones.forEach((z, i) => {
+        if (map.has(z.id) || (z.sides?.includes('top') ?? true) !== top) return;
+        const want = z.id === 'P1' ? P1 : i + 1, side = i % 2 ? -1 : 1;   // the wings in turn, so the labels spread
+        let n = 0, su = 0, sv = 0;
+        const own = [];
+        // (A zone astride the centre line, as a centre stripe, has little or nothing out on one wing: all of it then.)
+        for (const clear of [W * 0.04, -W]) {
+          for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+            if (px[(v * W + u) * 4] !== want || !px[(v * W + u) * 4 + 3] || (u - W / 2) * side < clear) continue;
+            own.push(u, v); n++; su += u; sv += v;
+          }
+          if (n > 20) break;
+          n = 0; su = 0; sv = 0; own.length = 0;
+        }
+        if (!n) return;
+        let best = Infinity, bu = 0, bv = 0;
+        for (let k = 0; k < own.length; k += 2) {
+          const e = (own[k] - su / n) ** 2 + (own[k + 1] - sv / n) ** 2;
+          if (e < best) { best = e; bu = own[k]; bv = own[k + 1]; }
+        }
+        const from = eye.clone().addScaledVector(X, ((bu + 0.5) / W * 2 - 1) * hx).addScaledVector(Y, ((bv + 0.5) / H * 2 - 1) * hz).applyMatrix4(root.matrixWorld);
+        ray.set(from, Z.clone().negate().transformDirection(root.matrixWorld));
+        const hit = ray.intersectObjects(top ? [...this.upper] : skins, false)[0];
+        if (hit) map.set(z.id, { p: hit.point.applyMatrix4(toModel), top });
+      });
+    }
+    return map;
+  }
 
   /**
    * colours: zone -> fabric id (the design's default where missing); hexOf turns a fabric into a
@@ -1049,35 +1232,42 @@ export class SailDesigns {
    */
   set(id, colours = {}, hexOf = (f) => f[2]) {
     if (!this.ok) return;
-    const d = this.design(id);
+    const d = this.design(id), built = d === this.built;
+    // As built with no cloth chosen: the model's own materials draw. The design stays loaded, for the
+    // zone under a click and the labels.
+    const paint = Boolean(d) && !(built && d.zones.every((z) => (colours[z.id] || z.default) === z.default));
     this.current = d?.id ?? null;
-    this.clear = { top: false, bottom: false };
+    this.clear = { top: false, bottom: false, le: false };
     for (const side of ['top', 'bottom']) {
       const u = this.u[side];
-      u.on.value = d ? 1 : 0;
+      u.on.value = paint ? 1 : 0;
       u.straight.value = d?.straight ? 1 : 0;
       if (side === 'top') u.kind.value = d?.topHem ? 2 : 0;
       if (!d) continue;
-      u.map.value = texture(this.designs, `${d.id}-${side}.png`, true);
+      u.map.value = built ? this.flat[side] : texture(this.designs, `${d.id}-${side}.png`, true);
       this.seamsOf(d.id, side).then((f) => {
         if (this.current !== d.id) return;
         u.seam.value = f ? f.tex[0] : noSeams; u.seam2.value = f ? f.tex[1] : noSeams;
         if (f) u.seamBox.value.copy(f.box);
       });
-      u.sdf.forEach((t, i) => { t.value = i * 4 < d.zones.length ? texture(this.designs, `${d.id}-${side}-sdf${i}.png`, false) : blank; });
+      u.sdf.forEach((t, i) => { t.value = !built && i * 4 < d.zones.length ? texture(this.designs, `${d.id}-${side}-sdf${i}.png`, false) : blank; });
       for (const c of u.pal.value) c.set(0x808080);
-      for (const v of u.film.value) v.set(1, 0, 0);
+      for (const v of u.film.value) v.set(1, 0, 0, 0);
       d.zones.forEach((z, i) => {
         const f = z.fabrics.find((x) => x[0] === (colours[z.id] || z.default)) || z.fabrics[0];
         // Clear laminates (opacity < 1 in the picker): hazy film between opaque fibres, as lib/cloth.js.
         const lam = clothKind(f[0]) >= CLOTH.laminate;
-        const film = new THREE.Vector3(lam && f[3] < 1 ? filmAlpha(f[3]) : 1, lam ? 1 : 0, /^uvpxb|^uvp2lxb|^uvodl|^odl/.test(f[0]) ? 0.006 : 0.82);
+        const film = new THREE.Vector4(lam && f[3] < 1 ? filmAlpha(f[3]) : 1, lam ? 1 : 0, /^uvpxb|^uvp2lxb|^uvodl|^odl/.test(f[0]) ? 0.006 : 0.82, clothKind(f[0]) === CLOTH.ripstop ? 1 : 0);
         // P1 and P4 on the bottom drawing are the top skin seen from below, not the undersurface.
         const onSkin = side === 'top' || !/^P[14]$/.test(z.id);
         if (film.x < 1 && z.id !== 'P1' && onSkin && (z.sides || [side]).includes(side)) this.clear[side] = true;
         clothColour(u.pal.value[i + 1], hexOf(f));
         u.film.value[i + 1].copy(film);
-        if (z.id === 'P1') clothColour(u.pal.value[P1], hexOf(f));
+        if (z.id === 'P1') {
+          clothColour(u.pal.value[P1], hexOf(f));
+          u.film.value[P1].copy(film);
+          if (film.x < 1) this.clear.le = true;
+        }
       });
       if (side === 'bottom') {
         const base = d.zones.findIndex((z) => z.id === 'P5') + 1;

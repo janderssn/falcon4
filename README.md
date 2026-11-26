@@ -142,7 +142,7 @@ through the VG blocks carry a route instead (`vg_route`: points held by the part
 and `RoutedRope` in `viewer/lib/rope.js` redraws them along it, so the falls stay straight.
 
 A build can have sail designs (`"designs": "designs/sport3"`). The Sport 3 offers the Wills Wing
-colour picker's designs for it: 3-panel, Woosh and Butterfly (Monarch), in Customize under *Sail
+colour picker's designs for it: 3-panel, Woosh and Monarch, in Customize under *Sail
 colours* (`?design=woosh&dz=P6:bright-yellow-5280`). `python3 tools/sail_designs.py`
 downloads the picker's plan-view drawings and fabric lists, reads each zone's outline as vectors and
 writes it to `viewer/public/designs/` (the 3-panel's stripes under the wing run straight to the tip, as on the real
