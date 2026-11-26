@@ -56,6 +56,7 @@ export const frost = {
   uFrostOn: { value: 0 },
   uFrostColor: { value: null },
   uFrostSize: { value: new THREE.Vector2(1, 1) },   // drawing buffer, px
+  uFrostPass: { value: 0 },   // 1 while the scene behind the films is drawn: a film's own opaque parts stay in it
 };
 
 /**

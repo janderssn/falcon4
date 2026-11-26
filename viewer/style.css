@@ -389,6 +389,7 @@ body.quad #labels { display: none; }
 .row:not(.open) > .swatches { display: none; }
 .row.open { background: rgba(255, 255, 255, .04); }
 .row.open > .swatches { padding: 4px 6px 10px 6px; }
+.row.open > .swatches.designs { display: grid; gap: 6px; }
 .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-head small { max-width: 130px; }
 /* Part name over the chosen fabric, so neither is cut short. */

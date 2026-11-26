@@ -152,7 +152,7 @@ export class FilmBlur {
    * films: the laminate meshes in view. hide: the other meshes to leave out of the scene
    * behind (see-through ones). Restores every visibility it changes.
    */
-  render(renderer, scene, camera, films, hide) {
+  render(renderer, scene, camera, films, hide, keep = [], pass = null) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     this.resize(size.x, size.y);
     const T = this.targets;
@@ -160,11 +160,18 @@ export class FilmBlur {
     renderer.shadowMap.autoUpdate = false;   // the main render keeps the shadows up to date
     const set = (list, v) => { for (const o of list) o.visible = v; };
 
-    // 1. The scene without the laminates.
-    set(films, false); set(hide, false);
+    // 1. The scene without the laminates. Those in `keep` stay and draw their opaque parts only
+    // (`pass`, a uniform their shader reads): a stripe on a film undersurface shows through a film top.
+    set(films, false); set(hide, false); set(keep, true);
+    if (pass) pass.value = 1;
+    // three updates a geometry's buffers once per frame number, and the shadow pass of the last render
+    // has already claimed this one: a vertex attribute replaced since (the sail's plan coordinates) would
+    // have no buffer in this first render and stay unbound in this pass's program for good.
+    renderer.info.render.frame++;
     renderer.setRenderTarget(T.scene);
     renderer.clear();
     renderer.render(scene, camera);
+    if (pass) pass.value = 0;
     set(hide, true);
 
     // 2. The laminates alone, depth only.
