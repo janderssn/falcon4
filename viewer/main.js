@@ -9,7 +9,7 @@ import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
 import { openOrder } from './lib/order.js';
 import { clothUniforms, setCloth, toCloth, patchCloth, filmAlpha, frost, clothKind } from './lib/cloth.js';
 import { FilmBlur } from './lib/frost.js';
-import { loadDesigns, SailDesigns } from './lib/designs.js';
+import { loadDesigns, SailDesigns, asCloth } from './lib/designs.js';
 
 const $ = (s, root = document) => root.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,14 +33,23 @@ const ZONES = {
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
   // The Sport 3's nose cone: its own cloth, in any solid colour of the leading edge's list.
   nose: { name: 'Nose cone', parts: /^Sail nose cone$/ },
-  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'] },
+  // The Sport 3's kingpost and control frame are black anodised as built (`black`: those parts in that
+  // material); its battens share a material with small frame parts and keep their own finish (`not`).
+  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'],
+    black: [/^(Kingpost|Downtube [LR]|Basetube \(speedbar\))$/, 'Black anodised aluminium'], not: /^Sail .*batten/ },
 };
 const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
 const zoneOf = (mesh) => {
   const part = mesh.userData.part.name, mat = mesh.userData.materials.base.name;
-  return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part)) || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat));
+  const { black } = ZONES.frame;
+  return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part))
+    || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat) && !ZONES[z].not?.test(part))
+    || (black[0].test(part) && mat === black[1] ? 'frame' : undefined);
 };
-const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1]];
+// A fifth entry: a two-tone finish. The parts that are black anodised as built (ZONES.frame.black: the Sport 3's
+// kingpost and control frame) keep that; the swatch shows it as its second colour.
+const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1],
+  ['gold-black', 'Gold, black control frame', '#b8954a', 1, '#1d1e21']];
 // Each panel offers the Wills Wing fabrics for that panel; the pockets offer the solid colours of P3.
 const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
   : zone === 'nose' ? FALCON_FABRICS.P1.filter((f) => f[3] === 1 && clothKind(f[0]) === 0)
@@ -242,6 +251,8 @@ function prepareTints(rec) {
     if (!zone) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
+    const { black } = ZONES.frame;
+    mesh.userData.ownBlack = zone === 'frame' && black[0].test(mesh.userData.part.name) && name === black[1];
     // Sail cloth becomes a physical material whose look follows the cloth type (lib/cloth.js).
     const cloth = SAIL_ZONES.includes(zone);
     if (cloth) {
@@ -253,8 +264,11 @@ function prepareTints(rec) {
     for (const [key, m] of Object.entries(mesh.userData.materials)) {
       m.userData.original = m.color.clone();
       m.userData.originalRough = m.roughness;
+      // As the sail's skins (lib/designs.js, toPhysical): no sheen, which turns a colour milky, and a faint gloss.
+      if (zone === 'nose') { if (m.sheen !== undefined) m.sheen = 0; m.specularIntensity = 0.2; }
       if (!m.map && !cloth) continue;
-      const baked = /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
+      // (The nose cone's map holds its seams only, over the material's own colour: the tint takes that colour's place.)
+      const baked = zone === 'nose' ? m.color.toArray() : /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
       const tinted = Boolean(m.map);
       m.onBeforeCompile = (s) => {
         // Only the sail panels take the panel's cloth; pockets coloured with it stay woven.
@@ -308,10 +322,12 @@ function withFalconFabrics(designs) {
   return designs;
 }
 const currentDesigns = () => (record?.sailDesigns?.ok ? record.sailDesigns : null);
+/** The design in use: one of the picker's, or the sail as built (its own cloths as zones). */
+const designNow = (sd = currentDesigns()) => (sd ? sd.design(state.design) || sd.built : null);
 function applyDesign() {
   for (const rec of [record, other]) {
     const sd = rec?.sailDesigns;
-    if (sd?.ok) sd.set(sd.design(state.design) ? state.design : null, state.designFab, hexOf);
+    if (sd?.ok) sd.set(sd.design(state.design) ? state.design : 'built', state.designFab, hexOf);
   }
 }
 function designSwatch(zone, f) {
@@ -333,7 +349,7 @@ function renderDesignRows() {
   const box = $('#design-rows');
   const sd = currentDesigns();
   if (!sd) { box.innerHTML = ''; if (record) buildLabels(); return; }
-  const d = sd.design(state.design);
+  const d = designNow(sd);
   const head = (key, title) => `<button type="button" class="row-head" data-dtoggle="${key}" aria-expanded="false"><span class="cur" data-dcur="${key}"><i></i></span><span class="row-title">${esc(title)}</span><small data-dname="${key}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`;
   const step = (by, label, path) => `<button type="button" class="step" data-dstep="${by}" aria-label="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg></button>`;
   box.innerHTML = `<div class="design-step" role="group" aria-label="Sail design">${step(-1, 'Previous design', 'M15 6l-6 6 6 6')}<b data-dname="design" aria-live="polite"></b>${step(1, 'Next design', 'M9 6l6 6-6 6')}</div>`
@@ -344,7 +360,7 @@ function renderDesignRows() {
 function syncDesignRows() {
   const sd = currentDesigns();
   if (!sd) return;
-  const d = sd.design(state.design);
+  const d = designNow(sd);
   const fabOf = (z) => state.designFab[z.id] || z.default;
   for (const b of document.querySelectorAll('[data-dfab]')) {
     const z = d?.zones.find((x) => x.id === b.dataset.dzone);
@@ -371,7 +387,7 @@ function syncDesignRows() {
 /** The zone of the design in use behind a key such as "d:P4", or null. */
 function designZone(key) {
   if (typeof key !== 'string' || !key.startsWith('d:')) return null;
-  return currentDesigns()?.design(state.design)?.zones.find((z) => z.id === key.slice(2)) || null;
+  return designNow()?.zones.find((z) => z.id === key.slice(2)) || null;
 }
 /** Clicks in the design rows; true when handled. */
 function designClick(e) {
@@ -390,7 +406,7 @@ function designClick(e) {
   }
   const sw = e.target.closest('[data-dfab]');
   if (sw) {
-    const z = currentDesigns()?.design(state.design)?.zones.find((x) => x.id === sw.dataset.dzone);
+    const z = designNow()?.zones.find((x) => x.id === sw.dataset.dzone);
     if (!z) return true;
     if (sw.dataset.dfab === z.default) delete state.designFab[z.id]; else state.designFab[z.id] = sw.dataset.dfab;
     // The row stays open to try colours; it closes when another row is opened.
@@ -402,7 +418,7 @@ function designClick(e) {
 
 function fabricOf(zone, id) {
   const hit = fabricsFor(zone).find((c) => c[0] === id);
-  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1] } : null;
+  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1], twoTone: Boolean(hit[4]) } : null;
 }
 
 function applyLook() {
@@ -428,12 +444,16 @@ function lookOf(rec, side) {
       setCloth(t.plain, mats(t.meshes.filter((mesh) => !panel(mesh))), null);
     }
     if (colour) t.uTint.value.copy(colour);
+    // The nose cone: the same cloth as the sail's panels, so a fabric looks the same on both (lib/designs.js).
+    if (colour && zone === 'nose') asCloth(t.uTint.value);
     for (const mesh of t.meshes) {
       mesh.userData.zone = zone;
       for (const m of Object.values(mesh.userData.materials)) {
+        if (zone === 'nose') m.roughness = colour ? 0.7 : m.userData.originalRough;
         if (m.map) continue;
-        m.color.copy(colour || m.userData.original);
-        if (zone === 'frame') m.roughness = colour ? 0.38 : m.userData.originalRough;
+        const finish = fabric?.twoTone && mesh.userData.ownBlack ? null : colour;   // two-tone: black as built stays
+        m.color.copy(finish || m.userData.original);
+        if (zone === 'frame') m.roughness = finish ? 0.38 : m.userData.originalRough;
       }
     }
   }
@@ -1341,7 +1361,7 @@ let labelList = [];
 function labelItems() {
   const items = LABEL_ZONES.filter(([z]) => record.tints[z]?.meshes.length).map(([z, side, at]) => ({
     key: z, name: ZONES[z].name, anchor: () => zoneAnchor(record, z, side, at), seen: () => record.tints[z].meshes.some((mesh) => mesh.visible) }));
-  const sd = currentDesigns(), d = sd?.design(state.design);
+  const sd = currentDesigns(), d = designNow(sd);
   const at = (id) => sd.anchors(renderer, record.root).get(id);
   if (d) for (const z of d.zones) items.push({ key: `d:${z.id}`, name: z.name, anchor: () => at(z.id)?.p || null,
     seen: (eye) => { const a = at(z.id); return Boolean(a) && (a.top ? eye.y > a.p.y : eye.y < a.p.y); } });
@@ -1645,13 +1665,13 @@ const thumb = (name) => `url('./thumbs/${name}.jpg')`;
 // cloths with a faint ripstop and the laminates with a faint scrim (dark in the "B" cloths).
 // Dark swatches get a light ring. The row header names the swatch under the pointer.
 const luma = (hex) => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
-function swatch(zone, [id, name, hex, opacity]) {
+function swatch(zone, [id, name, hex, opacity, second]) {
   const kind = clothKind(id);
   const sail = SAIL_ZONES.includes(zone) && zone !== 'pockets';
   const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
-    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
+    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark', zone === 'frame' && second && 'two'].filter(Boolean).join(' ');
   const label = sail && isUpgrade(id) ? `${name} · extra cost` : name;
-  return `<button type="button" class="${cls}" data-zone="${zone}" data-colour="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}"><i></i></button>`;
+  return `<button type="button" class="${cls}" data-zone="${zone}" data-colour="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf([id, name, hex])};--o:${opacity}${zone === 'frame' && second ? `;--c2:${second}` : ''}"><i></i></button>`;
 }
 function swatches(zone) {
   const all = fabricsFor(zone);
@@ -1673,7 +1693,7 @@ function buildPanel() {
     ${swatches(z)}</div>`;
   $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
   $('#nose-row').innerHTML = row('nose', ZONES.nose.name);
-  $('#frame-row').innerHTML = row('frame', 'Tubes');
+  $('#frame-row').innerHTML = row('frame', 'Frame');
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -1734,6 +1754,9 @@ function syncPanel() {
   }
   syncNames();
   syncDesignRows();
+  // The two-tone frame finishes: only on a glider with parts that are black as built.
+  const twoTone = Boolean(record?.tints.frame?.meshes.some((mesh) => mesh.userData.ownBlack));
+  for (const b of document.querySelectorAll('.sw.two')) b.hidden = !twoTone;
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
@@ -2013,11 +2036,9 @@ function saveUrl() {
   if (!state.battens) q.set('battens', '0');
   if (state.pose !== DEFAULTS.pose) q.set('pose', state.pose);
   if (state.vg !== 1) q.set('vg', state.vg.toFixed(2));
-  if (state.design) {
-    q.set('design', state.design);
-    const dz = Object.entries(state.designFab).map(([z, f]) => `${z}:${f}`).join(',');
-    if (dz) q.set('dz', dz);
-  }
+  if (state.design) q.set('design', state.design);
+  const dz = Object.entries(state.designFab).map(([z, f]) => `${z}:${f}`).join(',');   // (as built too)
+  if (dz) q.set('dz', dz);
   if (state.compare) { q.set('compare', '1'); if (Math.abs(state.split - 0.5) > 0.005) q.set('split', state.split.toFixed(3)); }
   if (state.names) q.set('names', '1');
   if (state.grid) q.set('grid', '1');

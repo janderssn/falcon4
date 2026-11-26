@@ -314,6 +314,7 @@ function applyBackdrop(studio, name) {
   u.uGridGain.value = look.grid[1];
   u.uSpotColor.value.set(look.spot[0]);
   u.uSpotGain.value = look.spot[1];
+  u.uBack.value.copy(studio.background).convertLinearToSRGB();   // as shown on screen
   studio.catcher.material.color.set(look.shadow[0]);
   studio.catcher.material.opacity = look.shadow[1];
   studio.hemi = look.hemi;
@@ -333,6 +334,7 @@ function buildFloor() {
       uGrid: { value: 0 }, uGridColor: { value: new THREE.Color(0xffffff) }, uGridGain: { value: 1 },
       uSpot: { value: 1 }, uSpotColor: { value: new THREE.Color('#bdeeff') }, uSpotGain: { value: 0.42 },
       uCentre: { value: new THREE.Vector2() },
+      uBack: { value: new THREE.Color('#222c38').convertLinearToSRGB() },                // the background behind the sheet (for the dither)
       uFade: { value: 1 },                                         // fades the whole floor, for 2D view changes
     },
     vertexShader: `#include <common>
@@ -346,9 +348,10 @@ function buildFloor() {
     fragmentShader: `#include <common>
       #include <logdepthbuf_pars_fragment>
       uniform float uGrid, uGridGain, uSpot, uSpotGain, uFade;
-      uniform vec3 uGridColor, uSpotColor;
+      uniform vec3 uGridColor, uSpotColor, uBack;
       uniform vec2 uCentre;
       varying vec2 vXY;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
       // Anti-aliased grid lines that also fade where they get closer together than a few pixels.
       float lines(float step, float width) {
         vec2 p = vXY / step, d = fwidth(p);
@@ -364,10 +367,16 @@ function buildFloor() {
         grid *= exp(-r * r / 45.0) * uGridGain * uGrid;                      // gone by about 14 m
         grid = min(grid, 1.0);
         float a = (grid + spotA * (1.0 - grid)) * uFade;
-        if (a < 0.002) discard;
+        if (a < 0.0005) discard;
         vec3 c = mix(uSpotColor, uGridColor, grid / max(grid + spotA * (1.0 - grid), 1e-4));
         gl_FragColor = vec4(c, a);
         #include <colorspace_fragment>
+        // Dither: the pool's slow fade steps through the 8-bit levels of the screen in rings. Noise of one
+        // level (triangular, per pixel) on the alpha hides the steps; it fades out with the pool's last level.
+        vec3 d3 = abs(gl_FragColor.rgb - uBack);
+        float level = 1.0 / (255.0 * max(max(d3.r, max(d3.g, d3.b)), 0.05));   // alpha of one screen level
+        float n = hash(gl_FragCoord.xy) + hash(gl_FragCoord.xy + 17.31) - 1.0;
+        gl_FragColor.a = clamp(a + n * level * min(1.0, a / (2.0 * level)), 0.0, 1.0);
       }`,
   }));
   floor.rotation.x = -Math.PI / 2;
