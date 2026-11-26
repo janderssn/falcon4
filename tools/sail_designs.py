@@ -50,7 +50,7 @@ GLIDERS = {
                                       "P6A": "Light Yellow 5076", "P6R": "White 170"}),
         ("woosh", "96", "Woosh", {"P1": "Black 2100", "P3": "White 170", "P4": "Black 2100", "P5": "White 170",
                                   "P6": "Bright Orange 4197", "P6A": "Black 2100", "P6R": "Bright Orange 4197"}),
-        ("butterfly", "94", "Butterfly (Monarch)", {"P1": "Black 2100", "P3": "White 170", "P4": "Black 2100",
+        ("butterfly", "94", "Monarch", {"P1": "Black 2100", "P3": "White 170", "P4": "Black 2100",
                                                     "P5": "Black 2100", "A": "Bright Orange 4197",
                                                     "B": "Bright Orange 4197", "C": "Bright Orange 4197",
                                                     "D": "Bright Orange 4197", "E": "Bright Orange 4197"}),

@@ -31,6 +31,8 @@ const ZONES = {
   p1: { name: 'P1 · Leading edge', panel: 'P1', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
   p2: { name: 'P2 · Forward', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
+  // The Sport 3's nose cone: its own cloth, in any solid colour of the leading edge's list.
+  nose: { name: 'Nose cone', parts: /^Sail nose cone$/ },
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'] },
 };
 const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
@@ -41,6 +43,7 @@ const zoneOf = (mesh) => {
 const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1]];
 // Each panel offers the Wills Wing fabrics for that panel; the pockets offer the solid colours of P3.
 const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
+  : zone === 'nose' ? FALCON_FABRICS.P1.filter((f) => f[3] === 1 && clothKind(f[0]) === 0)
   : zone === 'pockets' ? FALCON_FABRICS.P3.filter((f) => f[3] === 1)
   : FALCON_FABRICS[ZONES[zone].panel]);
 // The fabric's colour in the chosen colour profile (settings): the Wills Wing picker's, or calibrated.
@@ -281,7 +284,7 @@ async function designsOf(rec) {
   const dir = rec.source.designs;
   if (!dir || rec.sailDesigns) return;
   try {
-    if (!designCache.has(dir)) designCache.set(dir, loadDesigns(dir));
+    if (!designCache.has(dir)) designCache.set(dir, loadDesigns(dir).then(withFalconFabrics));
     const designs = await designCache.get(dir);
     rec.sailDesigns = new SailDesigns(rec, designs);
   } catch (e) { console.warn('Sail designs:', e); return; }
@@ -291,6 +294,19 @@ async function designsOf(rec) {
   }
   applyLook();
 }
+/**
+ * Every zone of a design also offers the Falcon's cloths its own picker list leaves out (laminates,
+ * ripstop, Technora): marked "extra", as the cloths added in tools/sail_designs.py.
+ */
+function withFalconFabrics(designs) {
+  const all = new Map();
+  for (const list of Object.values(FALCON_FABRICS)) for (const f of list) if (!all.has(f[0])) all.set(f[0], f);
+  for (const d of designs.designs) for (const z of d.zones) {
+    const have = new Set(z.fabrics.map((f) => f[0]));
+    for (const f of all.values()) if (!have.has(f[0])) z.fabrics.push([f[0], f[1], f[2], f[3], true]);
+  }
+  return designs;
+}
 const currentDesigns = () => (record?.sailDesigns?.ok ? record.sailDesigns : null);
 function applyDesign() {
   for (const rec of [record, other]) {
@@ -299,63 +315,77 @@ function applyDesign() {
   }
 }
 function designSwatch(zone, f) {
-  const [id, name, hex, opacity, extra] = f;
-  const cls = ['sw', opacity < 1 && 'clear', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
-  // "extra": a cloth the Sport 3 is built with that the Wills Wing picker does not list for this panel.
+  const [id, name, hex, opacity, extra] = f, kind = clothKind(id);
+  const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
+    /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
+  // "extra": a cloth the Wills Wing picker does not list for this panel of the Sport 3.
   const label = extra ? `${name} (not in the Wills Wing picker)` : name;
   return `<button type="button" class="${cls}" data-dzone="${zone}" data-dfab="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf(f)};--o:${opacity}"><i></i></button>`;
 }
+function designSwatches(z) {
+  const colours = z.fabrics.filter((f) => clothKind(f[0]) === 0), cloths = z.fabrics.filter((f) => clothKind(f[0]) > 0);
+  return `<div class="swatches" role="radiogroup" aria-label="${esc(z.name)}">${colours.map((f) => designSwatch(z.id, f)).join('')}
+    ${cloths.length ? `<span class="sw-gap" aria-hidden="true"></span>${cloths.map((f) => designSwatch(z.id, f)).join('')}` : ''}</div>`;
+}
+/** The designs on offer, "As built" first; the design row steps through them. */
+const designChoices = (sd) => [{ id: '', label: 'As built' }, ...sd.designs.designs];
 function renderDesignRows() {
   const box = $('#design-rows');
   const sd = currentDesigns();
-  if (!sd) { box.innerHTML = ''; return; }
+  if (!sd) { box.innerHTML = ''; if (record) buildLabels(); return; }
   const d = sd.design(state.design);
   const head = (key, title) => `<button type="button" class="row-head" data-dtoggle="${key}" aria-expanded="false"><span class="cur" data-dcur="${key}"><i></i></span><span class="row-title">${esc(title)}</span><small data-dname="${key}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`;
-  const choices = [{ id: '', label: 'As built' }, ...sd.designs.designs].map((x) =>
-    `<button type="button" class="profile" data-design="${x.id}" role="radio"><b>${esc(x.label)}</b>${x.picker ? `<small>Wills Wing picker: ${esc(x.picker)}</small>` : '<small>The sail as modelled</small>'}</button>`).join('');
-  box.innerHTML = `<div class="row" data-drow="design">${head('design', 'Design')}<div class="swatches designs" role="radiogroup" aria-label="Sail design">${choices}</div></div>`
-    + (d ? d.zones.map((z) => `<div class="row" data-drow="${z.id}">${head(z.id, z.name)}
-      <div class="swatches" role="radiogroup" aria-label="${esc(z.name)}">${z.fabrics.map((f) => designSwatch(z.id, f)).join('')}</div></div>`).join('') : '');
+  const step = (by, label, path) => `<button type="button" class="step" data-dstep="${by}" aria-label="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg></button>`;
+  box.innerHTML = `<div class="design-step" role="group" aria-label="Sail design">${step(-1, 'Previous design', 'M15 6l-6 6 6 6')}<b data-dname="design" aria-live="polite"></b>${step(1, 'Next design', 'M9 6l6 6-6 6')}</div>`
+    + (d ? d.zones.map((z) => `<div class="row" data-drow="${z.id}">${head(z.id, z.name)}${designSwatches(z)}</div>`).join('') : '');
   syncDesignRows();
+  if (record) buildLabels();
 }
 function syncDesignRows() {
   const sd = currentDesigns();
   if (!sd) return;
   const d = sd.design(state.design);
-  for (const b of document.querySelectorAll('#design-rows [data-design]')) {
-    const on = b.dataset.design === (d ? d.id : '');
-    b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
-  }
   const fabOf = (z) => state.designFab[z.id] || z.default;
-  for (const b of document.querySelectorAll('#design-rows [data-dfab]')) {
+  for (const b of document.querySelectorAll('[data-dfab]')) {
     const z = d?.zones.find((x) => x.id === b.dataset.dzone);
     const on = Boolean(z) && fabOf(z) === b.dataset.dfab;
     b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
   }
+  const name = document.querySelector('#design-rows [data-dname="design"]');
+  if (name) name.textContent = d ? d.label : 'As built';
+  const show = (cur, small, z) => {
+    const f = z.fabrics.find((x) => x[0] === fabOf(z)) || z.fabrics[0];
+    if (cur) { cur.className = `cur${f[3] < 1 ? ' clear' : ''}`; cur.style.cssText = `--c:${hexOf(f)};--o:${f[3]}`; }
+    if (small) small.textContent = f[1];
+  };
   for (const row of document.querySelectorAll('#design-rows [data-drow]')) {
     const key = row.dataset.drow, open = ui.open === `d:${key}`;
     row.classList.toggle('open', open);
     row.querySelector('.row-head').setAttribute('aria-expanded', String(open));
-    const cur = row.querySelector('.cur'), name = row.querySelector('[data-dname]');
-    if (key === 'design') {
-      cur.hidden = true;
-      name.textContent = d ? d.label : 'As built';
-      continue;
-    }
-    const z = d.zones.find((x) => x.id === key), f = z.fabrics.find((x) => x[0] === fabOf(z)) || z.fabrics[0];
-    cur.className = `cur${f[3] < 1 ? ' clear' : ''}`; cur.style.cssText = `--c:${hexOf(f)};--o:${f[3]}`;
-    name.textContent = f[1];
+    show(row.querySelector('.cur'), row.querySelector('[data-dname]'), d.zones.find((x) => x.id === key));
   }
+  const pz = designZone(ui.picker);
+  if (pz) show($('#picker .cur'), $('#picker [data-dname]'), pz);
+  syncLabelSwatches();
+}
+/** The zone of the design in use behind a key such as "d:P4", or null. */
+function designZone(key) {
+  if (typeof key !== 'string' || !key.startsWith('d:')) return null;
+  return currentDesigns()?.design(state.design)?.zones.find((z) => z.id === key.slice(2)) || null;
 }
 /** Clicks in the design rows; true when handled. */
 function designClick(e) {
   const head = e.target.closest('[data-dtoggle]');
   if (head) { const k = `d:${head.dataset.dtoggle}`; ui.open = ui.open === k ? null : k; syncRows(); syncDesignRows(); return true; }
-  const choice = e.target.closest('[data-design]');
-  if (choice) {
-    state.design = choice.dataset.design || null; state.designFab = {};
-    ui.open = null;
+  const step = e.target.closest('[data-dstep]');
+  if (step) {
+    const list = designChoices(currentDesigns()), by = Number(step.dataset.dstep);
+    const at = Math.max(0, list.findIndex((x) => x.id === (state.design || '')));
+    state.design = list[(at + by + list.length) % list.length].id || null; state.designFab = {};
+    if (ui.open?.startsWith?.('d:')) ui.open = null;
+    closePicker();
     applyLook(); renderDesignRows(); saveUrlSoon();
+    document.querySelector(`#design-rows [data-dstep="${by}"]`)?.focus({ preventScroll: true });   // (the row was redrawn)
     return true;
   }
   const sw = e.target.closest('[data-dfab]');
@@ -1227,6 +1257,9 @@ function pickZone(e) {
   for (const hit of raycaster.intersectObjects(meshes, false)) {
     const z = hit.object.userData.zone;
     if (z) return z;
+    // A sail with a design on it: the zone drawn under the pointer (lib/designs.js reads it back from the cloth's shader).
+    const dz = rec === record && rec.sailDesigns?.zoneAt(renderer, view.camera, hit.object, view.ndc);
+    if (dz) return `d:${dz}`;
     if (hit.object.userData.part?.group === '01') return null;   // other sail parts hide what is behind
   }
   return null;
@@ -1264,7 +1297,7 @@ function renderChip() {
 // "Labels on the glider" names each colour row of Customize (P1 to P5, the batten pockets,
 // the frame) where it is on the glider, with its current colour as a swatch. Each sits on
 // one wing (side: the left wing is +X) at its own fraction of the span, so they spread out.
-const LABEL_ZONES = [['p1', 1, 0.55], ['p2', -1, 0.35], ['p3', 1, 0.3], ['p4', -1, 0.75], ['p5', 1, 0.8], ['pockets', -1, 0.55], ['frame', -1, 0.12]];
+const LABEL_ZONES = [['nose', 1, 0.3], ['p1', 1, 0.55], ['p2', -1, 0.35], ['p3', 1, 0.3], ['p4', -1, 0.75], ['p5', 1, 0.8], ['pockets', -1, 0.55], ['frame', -1, 0.12]];
 const labelEls = new Map();
 /**
  * A point on the zone's own surface in the model's frame, so it holds for every pose: the
@@ -1300,6 +1333,20 @@ function zoneAnchor(rec, zone, side, at) {
   }
   return (rec.zoneAnchors[zone] = anchor);
 }
+/**
+ * What gets a label: the zones with parts in this build, and the zones of the sail design in use
+ * (each on the side of the sail it is drawn on, and shown from that side).
+ */
+let labelList = [];
+function labelItems() {
+  const items = LABEL_ZONES.filter(([z]) => record.tints[z]?.meshes.length).map(([z, side, at]) => ({
+    key: z, name: ZONES[z].name, anchor: () => zoneAnchor(record, z, side, at), seen: () => record.tints[z].meshes.some((mesh) => mesh.visible) }));
+  const sd = currentDesigns(), d = sd?.design(state.design);
+  const at = (id) => sd.anchors(renderer, record.root).get(id);
+  if (d) for (const z of d.zones) items.push({ key: `d:${z.id}`, name: z.name, anchor: () => at(z.id)?.p || null,
+    seen: (eye) => { const a = at(z.id); return Boolean(a) && (a.top ? eye.y > a.p.y : eye.y < a.p.y); } });
+  return items;
+}
 const SVGNS = 'http://www.w3.org/2000/svg';
 const leaderEls = new Map();   // zone: { line, dot }
 function buildLabels() {
@@ -1312,13 +1359,13 @@ function buildLabels() {
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.classList.add('leaders');
   host.append(svg);
-  for (const [zone] of LABEL_ZONES) {
-    if (!record.tints[zone]?.meshes.length) continue;
+  labelList = labelItems();
+  for (const { key: zone, name } of labelList) {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'label';
     el.tabIndex = -1;
-    el.innerHTML = `<span class="label-tag"><span class="sw"><i></i></span><b>${esc(ZONES[zone].name)}</b></span>`;
+    el.innerHTML = `<span class="label-tag"><span class="sw"><i></i></span><b>${esc(name)}</b></span>`;
     el.onclick = () => { const r = el.getBoundingClientRect(); showRow(zone, r.right, r.top + r.height / 2); };
     host.append(el);
     labelEls.set(zone, el);
@@ -1332,7 +1379,7 @@ function buildLabels() {
 /** Each label's swatch looks like the option chosen in its row. */
 function syncLabelSwatches() {
   for (const [zone, el] of labelEls) {
-    const on = document.querySelector(`.swatches .sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
+    const on = document.querySelector(zone.startsWith('d:') ? `#design-rows .sw.on[data-dzone="${zone.slice(2)}"]` : `.swatches .sw.on[data-zone="${zone}"]`), sw = el.querySelector('.sw');
     if (!on) continue;
     sw.className = on.className.replace(/\bon\b/, '').trim();
     sw.style.cssText = on.style.cssText;
@@ -1359,12 +1406,13 @@ function syncRows() {
 // Clicking a part of the glider, or its label, opens a small colour picker right there.
 /** Opens the inline picker for a zone, next to a point on the screen (CSS px). */
 function showRow(zone, x = innerWidth / 2, y = innerHeight / 2) {
-  if (!ZONES[zone]) return;
+  const dz = designZone(zone);
+  if (!ZONES[zone] && !dz) return;
   const el = $('#picker');
   ui.picker = zone;
-  el.innerHTML = `<header><span class="cur" aria-hidden="true"><i></i></span><span class="pk-title"><b>${esc(zone === 'frame' ? 'Frame' : ZONES[zone].name)}</b><small data-name="${zone}"></small></span>
+  el.innerHTML = `<header><span class="cur" aria-hidden="true"><i></i></span><span class="pk-title"><b>${esc(dz ? dz.name : zone === 'frame' ? 'Frame' : ZONES[zone].name)}</b><small ${dz ? `data-dname="${dz.id}"` : `data-name="${zone}"`}></small></span>
     <button type="button" class="pk-close" aria-label="Close"><svg viewBox="0 0 24 24" class="ic"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
-    ${swatches(zone)}`;
+    ${dz ? designSwatches(dz) : swatches(zone)}`;
   el.hidden = false;
   syncPanel();
   // Beside the point, flipped or nudged to stay on screen.
@@ -1521,13 +1569,14 @@ function layoutLabels() {
   // The labels in view, each with its candidate spots: the nearest clear spot in each of 12
   // directions, scored on its own (leader length, leader over the glider, a change of side).
   const items = [];
-  for (const [z, side, at] of LABEL_ZONES) {
-    const el = labelEls.get(z), lead = leaderEls.get(z);
+  const eye = new THREE.Vector3().copy(cam.position).applyMatrix4(new THREE.Matrix4().copy(m).invert());   // in the model's frame
+  for (const item of labelList) {
+    const z = item.key, el = labelEls.get(z), lead = leaderEls.get(z);
     if (!el) continue;
-    const a = zoneAnchor(record, z, side, at);
+    const a = item.anchor();
     if (a) tmp.copy(a).applyMatrix4(m).project(cam);
     const p = a && { x: (tmp.x + 1) / 2 * W, y: (1 - tmp.y) / 2 * H };
-    const shown = Boolean(a && record.tints[z].meshes.some((mesh) => mesh.visible) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
+    const shown = Boolean(a && item.seen(eye) && tmp.z < 1 && p.x > 0 && p.x < W && p.y > 0 && p.y < H
       && !(other && state.compare && p.x > state.split * W - 20));
     el.style.opacity = shown ? 1 : 0;
     el.style.pointerEvents = shown ? 'auto' : 'none';
@@ -1623,6 +1672,7 @@ function buildPanel() {
     <button type="button" class="row-head" data-toggle="${z}" aria-expanded="false"><span class="cur" data-cur="${z}"><i></i></span><span class="row-title">${name}</span><small data-name="${z}"></small><svg viewBox="0 0 24 24" class="chev" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
     ${swatches(z)}</div>`;
   $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
+  $('#nose-row').innerHTML = row('nose', ZONES.nose.name);
   $('#frame-row').innerHTML = row('frame', 'Tubes');
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
@@ -1877,6 +1927,7 @@ function wireUi() {
   // Esc, or a press anywhere else.
   $('#picker').addEventListener('click', (e) => {
     if (e.target.closest('.pk-close')) return closePicker();
+    if (designClick(e)) return;
     const sw = e.target.closest('.swatches .sw');
     if (sw) { state.colours[sw.dataset.zone] = sw.dataset.colour || null; applyLook(); syncPanel(); saveUrlSoon(); }
   });

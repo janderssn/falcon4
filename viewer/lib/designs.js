@@ -102,6 +102,8 @@ const STRAIGHT_FROM = 0.12;   // as tools/sail_designs.py STRAIGHT
 const EDGE = 0.1;                                                                   // share of the chord texels up to the leading-edge panel's rear edge (tools/sail_designs.py)
 const UNDER = 0.85, CLOSE = 6;                 // bottom maps: share of the chord texels up to the undersurface's trailing edge
 const P1 = 15;                      // palette slot of the leading-edge colour
+/** 1 while a skin is drawn to read back which zone lies under a pixel (zoneAt, anchors). */
+const pick = { value: 0 };
 const ZONES = 12;                   // at most: three distance-field images of four channels
 
 /** The designs of a glider ("designs" in models.json: the folder with designs.json and the maps). */
@@ -626,6 +628,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
     if (canFrost) Object.assign(s.uniforms, frost);
     sideUniforms(s, u, 'F'); sideUniforms(s, back, 'B');
     seamUniforms(s, seamsFront, 'F'); seamUniforms(s, seamsBack, 'B');
+    s.uniforms.uDesignPick = pick;
     s.uniforms.uDesignOn = u.on; s.uniforms.uDesignBand = u.band; s.uniforms.uDesignProfile = u.profile;
     s.uniforms.uDesignProfile2 = u.profile2; s.uniforms.uDesignEref = u.eref;
     s.uniforms.uDesignHalf = u.half; s.uniforms.uDesignRole = { value: role };
@@ -637,6 +640,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSailPlan = aSailPlan; vSailUv = aSailUv;');
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
+        uniform float uDesignPick;
         uniform float uDesignOn, uDesignRole, uDesignBand, uDesignHalf, uDesignUnderF, uDesignUnderB, uDesignStraight, uDesignCref, uDesignEref, uDesignBaked;
         uniform sampler2D uDesignProfile, uDesignProfile2;
         ${SIDE_GLSL('F')}
@@ -733,6 +737,12 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           }
           le = max(le, trim * onLe);   // in that cloth's colour, a shade darker
           dc = mix(dc, vec4(gl_FrontFacing ? uDesignPalF[${P1}] : uDesignPalB[${P1}], 1.0), le);
+          if (uDesignPick > 0.5) {
+            // The zone under this pixel, as its number in the design's map (${P1}: the leading-edge cloth).
+            float zone = front ? texture2D(uDesignMapF, uv).r : texture2D(uDesignMapB, uv).r;
+            gl_FragColor = vec4(le > 0.5 ? ${P1}.0 / 255.0 : zone, 1.0, 0.0, 1.0);
+            return;
+          }
           designLam *= (1.0 - le) * (1.0 - trim);
           dc.rgb *= mix(1.0, 0.55, trim);                                       // bound edges, wire-exit patches
           if (uDesignRole < 2.5) {                                              // the cloth: its seams and hems
@@ -766,9 +776,11 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
             diffuseColor.a *= designA;
             // The film's tint, as a colour that lets the brightest channel fully through.
             designTint = dc.rgb / max(max(dc.r, max(dc.g, dc.b)), 1e-3);
-            // In the picture of what lies behind the films, a film leaves only its opaque parts: its
-            // fibres here, its woven panels and stripes anyway (seen through the other skin's film).
-            ${canFrost ? 'if (uFrostPass > 0.5 && designA < 0.999 && fibre < 0.5) discard;' : ''}
+            // In the picture of what lies behind the films, a film leaves only its opaque cloth: woven
+            // panels, stripes and solid laminates (seen through the other skin's film). Not its own
+            // fibres: where they merge under a pixel they would paint that picture dark, and the film
+            // then showed a black patch over anything lying close behind it.
+            ${canFrost ? 'if (uFrostPass > 0.5 && dc.a < 0.999) discard;' : ''}
           }
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -1041,6 +1053,102 @@ export class SailDesigns {
   }
 
   design(id) { return this.designs.designs.find((d) => d.id === id) || null; }
+
+  /** Draws skin meshes with each pixel's zone number in red; returns the bytes (RGBA, rows bottom up). */
+  zonePixels(renderer, camera, meshes, target) {
+    const before = { target: renderer.getRenderTarget(), auto: renderer.autoClear, colour: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.autoClear = false;
+    pick.value = 1;
+    renderer.info.render.frame++;   // (so the plan attributes are bound in this program too: see lib/frost.js)
+    for (const m of meshes) if (m.visible) renderer.render(m, camera);
+    pick.value = 0;
+    const px = new Uint8Array(target.width * target.height * 4);
+    renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, px);
+    renderer.setRenderTarget(before.target);
+    renderer.setClearColor(before.colour, before.alpha);
+    renderer.autoClear = before.auto;
+    return px;
+  }
+
+  zoneOfByte(v) {
+    const d = this.design(this.current);
+    if (!d || !v) return null;
+    return v === P1 ? (d.zones.find((z) => z.id === 'P1')?.id ?? null) : d.zones[v - 1]?.id ?? null;
+  }
+
+  /** The design zone drawn on a skin mesh at a point of the view (ndc: -1..1), or null. */
+  zoneAt(renderer, camera, mesh, ndc) {
+    if (!this.ok || !this.current || !(this.upper.has(mesh) || this.lower.has(mesh))) return null;
+    this.one ??= new THREE.WebGLRenderTarget(1, 1);
+    const full = 4096, had = camera.view ? { ...camera.view } : null;
+    camera.setViewOffset(full, full, Math.floor((ndc.x + 1) / 2 * full), Math.floor((1 - ndc.y) / 2 * full), 1, 1);
+    const px = this.zonePixels(renderer, camera, [mesh], this.one);
+    if (had?.enabled) camera.setViewOffset(had.fullWidth, had.fullHeight, had.offsetX, had.offsetY, had.width, had.height); else camera.clearViewOffset();
+    return px[3] ? this.zoneOfByte(px[0]) : null;
+  }
+
+  /**
+   * A point on the sail in each zone of the design (the model's frame), for its label: the zone's
+   * pixel nearest the middle of its area on one wing, seen straight from above (zones on the top
+   * drawing) or below. Returns zone id -> { p, top }.
+   */
+  anchors(renderer, root) {
+    if (this.anchored?.id === this.current) return this.anchored.map;
+    const map = new Map(), d = this.design(this.current);
+    this.anchored = { id: this.current, map };
+    if (!this.ok || !d) return map;
+    root.updateWorldMatrix(true, true);
+    const toModel = new THREE.Matrix4().copy(root.matrixWorld).invert(), m4 = new THREE.Matrix4();
+    const skins = [...this.upper, ...this.lower], box = new THREE.Box3();
+    for (const m of skins) {
+      m.geometry.computeBoundingBox();
+      box.union(m.geometry.boundingBox.clone().applyMatrix4(m4.multiplyMatrices(toModel, m.matrixWorld)));
+    }
+    const c = box.getCenter(new THREE.Vector3()), hx = (box.max.x - box.min.x) / 2 + 0.05, hz = (box.max.z - box.min.z) / 2 + 0.05;
+    const W = 512, H = Math.max(64, Math.round(W * hz / hx));
+    this.plan ??= new THREE.WebGLRenderTarget(W, H);
+    this.plan.setSize(W, H);
+    const cam = new THREE.OrthographicCamera(-hx, hx, hz, -hz, 0.01, box.max.y - box.min.y + 2);
+    cam.matrixAutoUpdate = false;
+    const ray = new THREE.Raycaster();
+    for (const top of [true, false]) {
+      // Looking down the model's -Y (x right, -z up on the picture), or up its +Y (x right, z up).
+      const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 0, top ? -1 : 1), Z = new THREE.Vector3(0, top ? 1 : -1, 0);
+      const eye = new THREE.Vector3(c.x, top ? box.max.y + 1 : box.min.y - 1, c.z);
+      cam.matrixWorld.copy(root.matrixWorld).multiply(m4.makeBasis(X, Y, Z).setPosition(eye));
+      cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+      const px = this.zonePixels(renderer, cam, top ? [...this.upper] : skins, this.plan);
+      d.zones.forEach((z, i) => {
+        if (map.has(z.id) || (z.sides?.includes('top') ?? true) !== top) return;
+        const want = z.id === 'P1' ? P1 : i + 1, side = i % 2 ? -1 : 1;   // the wings in turn, so the labels spread
+        let n = 0, su = 0, sv = 0;
+        const own = [];
+        // (A zone astride the centre line, as a centre stripe, has little or nothing out on one wing: all of it then.)
+        for (const clear of [W * 0.04, -W]) {
+          for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+            if (px[(v * W + u) * 4] !== want || !px[(v * W + u) * 4 + 3] || (u - W / 2) * side < clear) continue;
+            own.push(u, v); n++; su += u; sv += v;
+          }
+          if (n > 20) break;
+          n = 0; su = 0; sv = 0; own.length = 0;
+        }
+        if (!n) return;
+        let best = Infinity, bu = 0, bv = 0;
+        for (let k = 0; k < own.length; k += 2) {
+          const e = (own[k] - su / n) ** 2 + (own[k + 1] - sv / n) ** 2;
+          if (e < best) { best = e; bu = own[k]; bv = own[k + 1]; }
+        }
+        const from = eye.clone().addScaledVector(X, ((bu + 0.5) / W * 2 - 1) * hx).addScaledVector(Y, ((bv + 0.5) / H * 2 - 1) * hz).applyMatrix4(root.matrixWorld);
+        ray.set(from, Z.clone().negate().transformDirection(root.matrixWorld));
+        const hit = ray.intersectObjects(top ? [...this.upper] : skins, false)[0];
+        if (hit) map.set(z.id, { p: hit.point.applyMatrix4(toModel), top });
+      });
+    }
+    return map;
+  }
 
   /**
    * colours: zone -> fabric id (the design's default where missing); hexOf turns a fabric into a

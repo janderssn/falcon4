@@ -389,7 +389,12 @@ body.quad #labels { display: none; }
 .row:not(.open) > .swatches { display: none; }
 .row.open { background: rgba(255, 255, 255, .04); }
 .row.open > .swatches { padding: 4px 6px 10px 6px; }
-.row.open > .swatches.designs { display: grid; gap: 6px; }
+/* The sail design: step through them, the name between the arrows. */
+.design-step { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; margin: 0 -6px 6px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, .05); }
+.design-step b { text-align: center; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-step .step { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--muted); cursor: pointer; }
+.design-step .step:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
+.design-step .step svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-head small { max-width: 130px; }
 /* Part name over the chosen fabric, so neither is cut short. */
