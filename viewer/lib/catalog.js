@@ -39,18 +39,18 @@ export async function loadCatalog() {
 
 const cache = new Map();
 
-/** Loads a source once; returns a record shared by every caller. */
-export function loadModel(source, onProgress) {
-  if (!cache.has(source.id)) {
+/** Loads a source once per key; returns a record shared by every caller. (A second key gives a second copy, to compare a glider with itself.) */
+export function loadModel(source, onProgress, key = source.id) {
+  if (!cache.has(key)) {
     const entry = { listeners: new Set(), promise: null };
     if (onProgress) entry.listeners.add(onProgress);
     entry.promise = load(source, (...a) => entry.listeners.forEach((f) => f(...a))).catch((error) => {
-      cache.delete(source.id);
+      cache.delete(key);
       throw error;
     });
-    cache.set(source.id, entry);
-  } else if (onProgress) cache.get(source.id).listeners.add(onProgress);
-  return cache.get(source.id).promise;
+    cache.set(key, entry);
+  } else if (onProgress) cache.get(key).listeners.add(onProgress);
+  return cache.get(key).promise;
 }
 
 /** Frees models that are not in `keep` (source ids), keeping a couple for quick switching. */

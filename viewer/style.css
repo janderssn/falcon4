@@ -240,6 +240,21 @@ body.bg-light .leaders polyline { stroke: rgba(20, 28, 36, .6); }
 .swipe-tag { position: absolute; top: 84px; padding: 5px 11px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); font-family: var(--serif); font-size: 15px; white-space: nowrap; pointer-events: none; }
 .swipe-tag.left { right: calc(50% + 12px); }
 .swipe-tag.right { left: calc(50% + 12px); }
+button.swipe-tag { pointer-events: auto; cursor: pointer; color: var(--ink); line-height: inherit; }
+button.swipe-tag::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 2px 1px 9px; border: solid currentColor; border-width: 1.5px 1.5px 0 0; transform: rotate(45deg); opacity: .7; }
+button.swipe-tag:hover, button.swipe-tag[aria-expanded="true"] { background: rgba(255, 255, 255, .18); }
+#gl-search { width: 100%; margin: 6px 0 10px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, .07); color: var(--ink); font: inherit; font-size: 14px; }
+#gl-search::placeholder { color: var(--muted); }
+#gl-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; margin: 0 0 14px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
+.seg button { padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: rgba(255, 255, 255, .14); color: var(--ink); }
+/* The gliders to compare with: the picture across the card, the name under it. */
+#gl-list .build { display: block; padding: 6px 6px 10px; }
+#gl-list .build .art { height: auto; aspect-ratio: 5 / 2; }
+#gl-list .build-text { display: block; padding: 9px 6px 0; }
+.gl-none { margin: 6px 2px; font-size: 13px; color: var(--muted); }
 #swipe:focus-visible .swipe-grip { outline: 2px solid var(--accent); outline-offset: 3px; }
 .switch:has(input:disabled) { opacity: .45; cursor: default; }
 .switch .hint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
@@ -405,6 +420,15 @@ body.quad #labels { display: none; }
 .row-head .row-title { grid-area: title; }
 .row-head small { grid-area: sub; max-width: none; }
 .row-head .chev { grid-area: chev; }
+
+/* ---------------------------------------------------------------- saved gliders (their cards in "Compare with") */
+#gl-list .build { position: relative; cursor: pointer; }
+.gl-acts { position: absolute; right: 6px; bottom: 8px; display: flex; gap: 2px; }
+.saved-btn { min-width: 28px; height: 28px; display: grid; place-items: center; padding: 0 5px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.saved-btn:hover { background: rgba(255, 255, 255, .12); color: var(--ink); }
+.saved-btn.sure { color: #ff8a7a; }
+.saved-btn .ic { width: 16px; height: 16px; }
+#gl-list .build-text input { width: calc(100% - 96px); font: 600 15px/1.2 inherit; color: var(--ink); background: rgba(255, 255, 255, .1); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 
 /* ---------------------------------------------------------------- inline colour picker */
 #picker {
