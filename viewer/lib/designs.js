@@ -13,20 +13,24 @@
 import * as THREE from 'three';
 import { clothKind, CLOTH, filmAlpha, frost } from './cloth.js';
 
-const SKIN = /^(Sail( [LR])?|(Upper sail|Undersurface) [LR])$/;
+// Also the names of a sail built with hgkit.sail (the U2): one top and one undersurface mesh over both wings,
+// the leading-edge cloth the material of slot P1, pockets "Batten pocket R 5".
+const SKIN = /^(Sail( [LR])?|(Upper sail|Undersurface) [LR]|Sail (top surface|undersurface))$/;
 const isSail = (m) => /^Sail( [LR])?$/.test(m.userData.part?.name || '');
+/** A skin that covers both wings in one mesh (its seams are read on the right wing). */
+const bothWings = (m) => isSail(m) || /^Sail (top surface|undersurface)$/.test(m.userData.part?.name || '');
 const isLowerMat = (m) => /lower panel|undersurface/i.test(m.userData.materials.base.name);
 const isSharedMat = (m) => isSail(m) && (LE_CLOTH.test(m.userData.materials.base.name) || TRIM.test(m.userData.materials.base.name));
-const isUpperMesh = (m) => (isSail(m) ? !isLowerMat(m) : /^Upper/.test(m.userData.part.name));
-const isLowerMesh = (m) => (isSail(m) ? isLowerMat(m) : /^Undersurface/.test(m.userData.part.name));
+const isUpperMesh = (m) => (isSail(m) ? !isLowerMat(m) : /^(Upper|Sail top)/.test(m.userData.part.name));
+const isLowerMesh = (m) => (isSail(m) ? isLowerMat(m) : /^(Undersurface|Sail undersurface)/.test(m.userData.part.name));
 // Sewn on the skins: the panel laps and the batten pockets take the colour of the cloth under them.
 const LAP = /^Upper panel lap [LR]$/;
 const ZIP = /^Sail .*zipper( [LR])?$/;
 const PATCH = /^Sail sprog patch [LR]$/;
-const UNDER_TOP = (m) => /^Sail (nose )?batten /.test(m.userData.part?.name || '');   // pockets under the top skin
-const POCKET = /^Sail (nose batten|(lower |speed )?batten [\d-]+ [LR]) pocket$/;
+const UNDER_TOP = (m) => /^(Sail (nose )?batten |Batten pocket |Nose batten pocket|(Inner|Outer) transverse batten pocket)/.test(m.userData.part?.name || '');   // pockets under the top skin
+const POCKET = /^(Sail (nose batten|(lower |speed )?batten [\d-]+ [LR]) pocket|(Bottom batten|Batten) pocket [LR] \d+|Nose batten pocket|(Inner|Outer) transverse batten pocket [LR])$/;
 const THREAD = /^Topstitch/;
-const LE_CLOTH = /leading-edge cloth/;
+const LE_CLOTH = /leading-edge cloth| P1$/;
 const TRIM = /bound panel edge|reinforced wire exits/;
 // The outline profile, the same as tools/sail_designs.py (smooth_profile): bins over the half span;
 // the trailing edge runs straight between the batten tips (over the scallops), then both edges are smoothed,
@@ -331,7 +335,7 @@ function meshLines(meshes, half, up = 0, smooth = 4) {
   // Each part's outline (right wing): its boundary edges chained into lines, each resampled every
   // 5 mm, with the part's cloth to the left.
   const prims = meshes.filter((m) => {
-    if (isSail(m)) return true;
+    if (bothWings(m)) return true;
     const a = m.geometry.attributes.aSailPlan;
     let sx = 0;
     for (let i = 0; i < a.count; i += 17) sx += a.getX(i);
@@ -341,7 +345,7 @@ function meshLines(meshes, half, up = 0, smooth = 4) {
     const keys = Array.from({ length: pos.count }, (_, i) => `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getY(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`);
     const P = (i) => [pat.getX(i), pat.getY(i), plan.getX(i) * half];   // pattern (metres), plan x
     const idx = g.index ? g.index.array : Array.from({ length: pos.count }, (_, i) => i);
-    const filterSide = isSail(m), filterUp = isSharedMat(m) && up !== 0;
+    const filterSide = bothWings(m), filterUp = isSharedMat(m) && up !== 0;
     const count = new Map(), edges = [];
     for (let t = 0; t + 2 < idx.length; t += 3) {
       const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];

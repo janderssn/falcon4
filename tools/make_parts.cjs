@@ -21,7 +21,8 @@ const rules = [
   ['05', /^Top .*wire|Bridle|Sweep wire/i],                                    // Upper wires & bridles
   ['04', /^Bottom .*wire/i],                                                   // Lower wires
   ['06', /bolt|nut\b|washer|rivet|screw|pin\b|ring\b|bracket|cap\b|lug|plug|spacer|lock|grip|stud|ball|hub|flange|spigot|elbow|label|slot|collar|Noseplate|saddle|tab\b|bush|fitting|shackle|insert|channel|block|sheave|bearing|cord|rope|line\b|tie\b|swage|thimble|eyelet|grommet|sticker|lashing|keeper|clip|pad\b/i], // Hardware
-  ['02', /Keel|^LE |Crossbar|Kingpost|Downtube|Basetube|Basebar|Control bar|Upright|Link\b/i], // Main frame
+  ['06', /jam ?cleat/i],                                                       // U2: the VG cleat of each basetube option
+  ['02', /Keel|^LE |Crossbar|Kingpost|Downtube|Basetube|Basebar|Speedbar|Stinger|Control bar|Upright|Link\b/i], // Main frame
 ];
 const parts = {};
 const unmatched = [];

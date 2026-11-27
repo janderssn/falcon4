@@ -33,7 +33,7 @@ const ZONES = {
   p2: { name: 'P2 · Forward', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
   // The Sport 3's nose cone: its own cloth, in any solid colour of the leading edge's list.
-  nose: { name: 'Nose cone', parts: /^Sail nose cone$/ },
+  nose: { name: 'Nose cone', parts: /^Sail nose cone$/, mats: ['U2 160 Nosecone'] },   // (the Falcon's "Nosecone" is leading-edge cloth: p1)
   // The Sport 3's kingpost and control frame are black anodised as built (`black`: those parts in that
   // material); its battens share a material with small frame parts and keep their own finish (`not`).
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'],
@@ -111,6 +111,7 @@ const state = {
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  options: optionsFrom(params.get('opt')),          // option slot -> variant (a model's other uprights, basetube, ...)
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -144,6 +145,36 @@ const state = {
  * A glider: its model and everything chosen in Customize (not the view). As a link's query it is what
  * the address, a comparison's other side (b=) and a saved glider all carry.
  */
+/** "uprights:round,basebar:streamline_wheels" -> { uprights: 'round', ... } */
+function optionsFrom(text) { return Object.fromEntries((text || '').split(',').filter(Boolean).map((p) => p.split(':')).filter((p) => p.length === 2)); }
+const OPTION_NAMES = {
+  uprights: ['Uprights', { litestream: 'Litestream', round: 'Round' }],
+  basebar: ['Basetube', { streamline: 'Streamlined', streamline_wheels: 'With wheels', round_speedbar: 'Round' }],
+};
+/** A model's option slots: slot -> { variants, default } (from its parts). */
+function optionsOf(rec) {
+  if (rec.options) return rec.options;
+  rec.options = {};
+  for (const part of rec.parts.values()) {
+    if (!part.option) continue;
+    const o = rec.options[part.option.slot] ||= { variants: [], default: null };
+    if (!o.variants.includes(part.option.variant)) o.variants.push(part.option.variant);
+    if (part.option.default) o.default = part.option.variant;
+  }
+  for (const [slot, o] of Object.entries(rec.options)) {
+    o.default ??= o.variants[0];
+    const order = Object.keys(OPTION_NAMES[slot]?.[1] || {});   // as listed above; unknown variants after them
+    o.variants.sort((x, y) => (order.indexOf(x) + 1 || 99) - (order.indexOf(y) + 1 || 99));
+  }
+  return rec.options;
+}
+/** Whether a part is fitted on this glider: every part without a slot, and the chosen variant of each slot. */
+function fitted(rec, part, g) {
+  if (!part.option) return true;
+  const o = optionsOf(rec)[part.option.slot], want = g.options?.[part.option.slot];
+  return part.option.variant === (o.variants.includes(want) ? want : o.default);
+}
+const gliderOf = (rec) => (rec === other && state.b ? state.b : state);
 function gliderQuery(g) {
   const q = new URLSearchParams();
   q.set('model', g.model);
@@ -151,15 +182,17 @@ function gliderQuery(g) {
   if (g.design) q.set('design', g.design);
   const dz = Object.entries(g.designFab).map(([z, f]) => `${z}:${f}`).join(',');   // (as built too)
   if (dz) q.set('dz', dz);
+  const opt = Object.entries(g.options || {}).map(([k, v]) => `${k}:${v}`).join(',');
+  if (opt) q.set('opt', opt);
   return q;
 }
 function gliderFrom(q, name) {
   const colour = (z) => { const v = q.get(z); return v === 'built' ? null : fabricsFor(z).some((x) => x[0] === v) ? v : DEFAULTS.colours[z] ?? null; };
   return { model: q.get('model'), name, colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, colour(z)])), design: q.get('design') || null,
-    designFab: Object.fromEntries((q.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))) };
+    designFab: Object.fromEntries((q.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))), options: optionsFrom(q.get('opt')) };
 }
 /** The glider being edited, as it is now (a copy). */
-const gliderNow = (name = state.name) => ({ model: state.model, name, colours: { ...state.colours }, design: state.design, designFab: { ...state.designFab } });
+const gliderNow = (name = state.name) => ({ model: state.model, name, colours: { ...state.colours }, design: state.design, designFab: { ...state.designFab }, options: { ...state.options } });
 /** A model as it comes: the default colours, the sail as built. */
 const stockGlider = (model) => gliderFrom(new URLSearchParams({ model }));
 if (params.get('b')) { const q = new URLSearchParams(params.get('b')); state.b = { ...gliderFrom(q, q.get('name') || undefined), self: q.get('self') === '1' }; }
@@ -236,6 +269,7 @@ async function setModel(id, first = false) {
   if (state.model !== id) return;
   if (record && record !== rec) record.root.removeFromParent();
   record = rec;
+  optionRows();
   record.cacheKey = key;
   prepareTints(record);
   renderDesignRows();
@@ -278,6 +312,9 @@ function prepareTints(rec) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
     if (!zone) continue;
+    // A glider with the picker's designs colours its sail through them: its hem and pockets follow the cloth
+    // they are sewn to, and have no row of their own (the U2's part names match the Falcon's zones).
+    if (rec.source.designs && SAIL_ZONES.includes(zone)) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
     const { black } = ZONES.frame;
@@ -492,6 +529,7 @@ function lookOf(rec, side) {
     let mat = selected ? M.selected : M.base;
     let visible = true;
     if (part.group === '04' || part.group === '05') visible = state.wires;
+    const on = fitted(rec, part, gliderOf(rec));
     const role = mesh.userData.battenRole === undefined ? (mesh.userData.battenRole = battenRole(part)) : mesh.userData.battenRole;
     const sailGone = state.seeThrough >= 0.98;
     if (role === 'batten') visible = state.battens;
@@ -522,7 +560,7 @@ function lookOf(rec, side) {
     // Laminates shade what is under them too (film and fibres take about half the light).
     if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35;
     mesh.material = mat;
-    mesh.visible = visible;
+    mesh.visible = visible && on;
   }
 }
 
@@ -568,6 +606,7 @@ function restingPose(rec) {
   for (const m of rec.meshes) {
     const part = m.userData.part;
     if (!part.ground || part.group === '04' || part.group === '05') continue;   // soft ropes and slack wires do not hold the glider up
+    if (!fitted(rec, part, gliderOf(rec))) continue;                              // nor a basetube that is not fitted
     const pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
@@ -1383,6 +1422,30 @@ function showOrder() {
   if (!record) return;
   saveUrl();
   const builtHex = (z) => document.querySelector(`.sw.original[data-zone="${z}"]`)?.style.getPropertyValue('--c') || '#ccc';
+  // The glider's name and size from its title ("Wills Wing U2 160"); the Falcon builds are titled by build.
+  const named = /^(.*\S)\s+(\d[\w.]*)$/.exec(record.source.title), title = named || [0, 'Wills Wing Falcon 4', '170'];
+  const head = { model: title[1], size: title[2], prefix: named ? record.source.id.slice(0, 2).toUpperCase() : 'F4',
+    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker' };
+  const extras = [];
+  const sd = record.sailDesigns?.ok ? record.sailDesigns : null;
+  if (sd) {
+    // A glider with the picker's designs: the design's zones, each with the cloth chosen for it.
+    const d = designNow(sd);
+    const panels = d.zones.map((z) => {
+      const id = state.designFab[z.id] || z.default, f = z.fabrics.find((c) => c[0] === id);
+      const own = id === 'as-built';
+      return { zone: z.id, label: z.name, asBuilt: f ? hexOf(f) : '#ccc', fabric: f && !own ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
+    });
+    extras.push({ name: 'Sail design', value: d.label });
+    if (state.colours.nose) extras.push({ name: 'Nose cone', value: fabricOf('nose', state.colours.nose)?.name });
+    for (const [slot, o] of Object.entries(optionsOf(record))) {
+      const [name, names] = OPTION_NAMES[slot] || [slot, {}], v = o.variants.includes(state.options[slot]) ? state.options[slot] : o.default;
+      extras.push({ name, value: names[v] || v });
+    }
+    if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
+    openOrder({ ...head, diagram: `<img src="${snapshot(900, 360)}" alt="The glider from above">`, panels, extras }, orderOptions);
+    return;
+  }
   const panels = ['p1', 'p2', 'p3', 'p4', 'p5'].filter((z) => record.tints[z]?.meshes.length).map((z) => {
     const id = state.colours[z];
     const f = id && fabricsFor(z).find((c) => c[0] === id);
@@ -1390,14 +1453,9 @@ function showOrder() {
   });
   const fill = (p) => (p.fabric ? p.fabric.hex : p.asBuilt);
   const by = Object.fromEntries(panels.map((p) => [p.zone, p]));
-  const extras = [];
   if (state.colours.pockets) extras.push({ name: 'Batten pockets', value: fabricOf('pockets', state.colours.pockets)?.name });
   if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
-  openOrder({
-    model: 'Wills Wing Falcon 4', size: '170',
-    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker',
-    diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
-  }, orderOptions);
+  openOrder({ ...head, diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras }, orderOptions);
 }
 
 /**
@@ -1871,6 +1929,7 @@ function buildPanel() {
   $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
   $('#nose-row').innerHTML = row('nose', ZONES.nose.name);
   $('#frame-row').innerHTML = row('frame', 'Frame');
+  optionRows();
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -1907,6 +1966,18 @@ function syncNames(hover = null) {
   }
 }
 
+/** The model's option slots in the Customize panel (Frame): one row of choices per slot. */
+function optionRows() {
+  const box = $('#option-rows');
+  const opts = record ? optionsOf(record) : {};
+  if (record) for (const [k, v] of Object.entries(state.options)) if (!opts[k]?.variants.includes(v)) delete state.options[k];   // another model's
+  box.innerHTML = Object.entries(opts).map(([slot, o]) => {
+    const [title, names] = OPTION_NAMES[slot] || [slot, {}];
+    const now = o.variants.includes(state.options[slot]) ? state.options[slot] : o.default;
+    return `<div class="opt-row"><span>${esc(title)}</span><div class="seg" role="radiogroup" aria-label="${esc(title)}">${o.variants.map((v) =>
+      `<button type="button" role="radio" aria-checked="${v === now}" class="${v === now ? 'on' : ''}" data-opt="${esc(slot)}" data-variant="${esc(v)}">${esc(names[v] || v)}</button>`).join('')}</div></div>`;
+  }).join('');
+}
 function syncPanel() {
   document.body.classList.toggle('panel-open', Boolean(state.panel));
   placeBars();
@@ -2111,6 +2182,14 @@ function wireUi() {
   $('#opt-outline-wires').addEventListener('change', (e) => { state.outlineWires = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
+  $('#option-rows').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-opt]');
+    if (!b || !record) return;
+    const o = optionsOf(record)[b.dataset.opt];
+    if (b.dataset.variant === o.default) delete state.options[b.dataset.opt]; else state.options[b.dataset.opt] = b.dataset.variant;
+    record.rest = null;            // another basetube: the glider rests on other points
+    applyLook(); poseOf(record); optionRows(); saveUrlSoon();
+  });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });

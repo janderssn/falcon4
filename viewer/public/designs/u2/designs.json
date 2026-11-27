@@ -1,0 +1,999 @@
+{
+ "source": "https://www.willswing.com/inventory/ colour picker, /assets/data/color-picker/models.json",
+ "map": {
+  "size": [
+   2048,
+   1024
+  ],
+  "s": "half span, keel to tip",
+  "t": "chord, LE to TE",
+  "edge": 0.1,
+  "band": 4,
+  "sdf": "zone k: texture (k-1)//4, channel (k-1)%4; 0.5 the edge"
+ },
+ "designs": [
+  {
+   "id": "3-panel",
+   "label": "3-panel",
+   "picker": "U2 3-Panel (model type 27)",
+   "straight": true,
+   "zones": [
+    {
+     "id": "P1",
+     "name": "P1 \u00b7 Leading edge",
+     "default": "white-205mt",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       1.0
+      ],
+      [
+       "white-205mt",
+       "White 205MT",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P3",
+     "name": "P3 \u00b7 Top",
+     "default": "red-3125",
+     "sides": [
+      "top"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P4",
+     "name": "P4 \u00b7 Trailing edge",
+     "default": "white-205mt",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "white-205mt",
+       "White 205MT",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P5",
+     "name": "P5 \u00b7 Undersurface",
+     "default": "blue-7304",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ],
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       0.4,
+       "extra"
+      ],
+      [
+       "uvpxw10-white",
+       "UVPXW10 White",
+       "#ffffff",
+       1.0,
+       "extra"
+      ]
+     ]
+    },
+    {
+     "id": "P6A",
+     "name": "P6A \u00b7 Stripe",
+     "default": "white-170",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P6R",
+     "name": "P6R \u00b7 Centre stripe",
+     "default": "white-170",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "mylar",
+   "label": "Mylar 3-panel",
+   "picker": "U2 Mylar 3-Panel (model type 26)",
+   "straight": true,
+   "zones": [
+    {
+     "id": "P1",
+     "name": "P1 \u00b7 Leading edge",
+     "default": "uvpxb05",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P4",
+     "name": "P4 \u00b7 Trailing edge",
+     "default": "uvpxb05",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       0.4
+      ]
+     ]
+    },
+    {
+     "id": "P5",
+     "name": "P5 \u00b7 Undersurface",
+     "default": "blue-7304",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ],
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       0.4,
+       "extra"
+      ],
+      [
+       "uvpxw10-white",
+       "UVPXW10 White",
+       "#ffffff",
+       1.0,
+       "extra"
+      ]
+     ]
+    },
+    {
+     "id": "P6A",
+     "name": "P6A \u00b7 Stripe",
+     "default": "white-170",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P6R",
+     "name": "P6R \u00b7 Centre stripe",
+     "default": "white-170",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "window",
+   "label": "Window",
+   "picker": "U2 Window (model type 65)",
+   "zones": [
+    {
+     "id": "P1",
+     "name": "P1 \u00b7 Leading edge",
+     "default": "uvpxb05",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       1.0
+      ]
+     ]
+    },
+    {
+     "id": "P4",
+     "name": "P4 \u00b7 Trailing edge",
+     "default": "uvpxb05",
+     "sides": [
+      "top",
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       0.4
+      ]
+     ]
+    },
+    {
+     "id": "P5",
+     "name": "P5 \u00b7 Undersurface",
+     "default": "bright-lime-6094",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "mint-6223",
+       "Mint 6223",
+       "#aed1b3",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ],
+      [
+       "uvpxb05",
+       "UVPXB05",
+       "#c8c8c8",
+       0.4,
+       "extra"
+      ],
+      [
+       "uvpxw10-white",
+       "UVPXW10 White",
+       "#ffffff",
+       1.0,
+       "extra"
+      ]
+     ]
+    },
+    {
+     "id": "P6",
+     "name": "P6 \u00b7 Swoosh",
+     "default": "uvp2lxb-1",
+     "sides": [
+      "bottom"
+     ],
+     "fabrics": [
+      [
+       "black-2100",
+       "Black 2100",
+       "#000000",
+       1.0
+      ],
+      [
+       "blue-7304",
+       "Blue 7304",
+       "#00009b",
+       1.0
+      ],
+      [
+       "bright-lime-6094",
+       "Bright Lime 6094",
+       "#c4ff47",
+       1.0
+      ],
+      [
+       "bright-orange-4197",
+       "Bright Orange 4197",
+       "#ff6700",
+       1.0
+      ],
+      [
+       "bright-red-3105",
+       "Bright Red 3105",
+       "#ff3200",
+       1.0
+      ],
+      [
+       "bright-yellow-5280",
+       "Bright Yellow 5280",
+       "#e0ff36",
+       1.0
+      ],
+      [
+       "green-6047",
+       "Green 6047",
+       "#059033",
+       1.0
+      ],
+      [
+       "light-yellow-5076",
+       "Light Yellow 5076",
+       "#ffff36",
+       1.0
+      ],
+      [
+       "magenta-3958",
+       "Magenta 3958",
+       "#ff00c3",
+       1.0
+      ],
+      [
+       "medium-blue-7314",
+       "Medium Blue 7314",
+       "#47b4fa",
+       1.0
+      ],
+      [
+       "mint-6223",
+       "Mint 6223",
+       "#aed1b3",
+       1.0
+      ],
+      [
+       "red-3125",
+       "Red 3125",
+       "#ff1721",
+       1.0
+      ],
+      [
+       "silver-2328",
+       "Silver 2328",
+       "#a8a8a8",
+       1.0
+      ],
+      [
+       "uvp2lxb-1",
+       "UVP2LXB-1",
+       "#c8c8c8",
+       0.4
+      ],
+      [
+       "white-170",
+       "White 170",
+       "#ffffff",
+       1.0
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

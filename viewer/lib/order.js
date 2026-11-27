@@ -34,17 +34,17 @@ function sailRows(panels) {
 }
 
 // A short reference for this configuration, from its link.
-const reference = (s) => {
+const reference = (s, prefix = 'F4') => {
   let h = 2166136261;
   for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
-  return `F4-${(h >>> 0).toString(36).toUpperCase().slice(0, 6)}`;
+  return `${prefix}-${(h >>> 0).toString(36).toUpperCase().slice(0, 6)}`;
 };
 
 /** Opens the order. data: { model, size, build, colours, diagram, panels, extras: [{ name, value }] }. */
 export function openOrder(data, chosen = new Set()) {
   const root = $('#order');
   const rows = sailRows(data.panels);
-  const ref = reference(location.search);
+  const ref = reference(location.search, data.prefix);
   const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const render = () => {
     const options = ORDER.options.map((o) => ({ ...o, on: chosen.has(o.id) }));

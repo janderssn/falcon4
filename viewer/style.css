@@ -250,6 +250,9 @@ button.swipe-tag:hover, button.swipe-tag[aria-expanded="true"] { background: rgb
 .seg button { padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
 .seg button:hover { color: var(--ink); }
 .seg button.on { background: rgba(255, 255, 255, .14); color: var(--ink); }
+.opt-row { margin: 10px 0 0; }
+.opt-row > span { display: block; margin: 0 0 6px; font-size: 13px; }
+.opt-row .seg { margin: 0; }
 /* The gliders to compare with: the picture across the card, the name under it. */
 #gl-list .build { display: block; padding: 6px 6px 10px; }
 #gl-list .build .art { height: auto; aspect-ratio: 5 / 2; }
@@ -446,3 +449,5 @@ body.quad #labels { display: none; }
 #picker .pk-close { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); }
 #picker .pk-close:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
 #picker .pk-close .ic { width: 16px; height: 16px; }
+
+.of-plan img { display: block; grid-column: 1 / -1; width: 100%; height: auto; border-radius: 4px; }
