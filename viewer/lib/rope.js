@@ -126,6 +126,9 @@ export class Rope {
     this.mesh = mesh;
     this.radius = spec.radius || 0.0016;
     this.start = new THREE.Vector3(...spec.start);
+    // The rope before it turns soft (the U2: from the corner bearing through the cleat), model space, ending
+    // at start: drawn as it is, with the glider.
+    this.lead = (spec.lead || []).map((p) => new THREE.Vector3(...p));
     this.lay = spec.lay || null;   // model space, SEG apart, from the cleat
     this.dir = new THREE.Vector3(...(spec.dir || [0, -1, 0])).normalize();
     const toModel = new THREE.Matrix4().copy(model.matrixWorld).invert();
@@ -292,7 +295,8 @@ export class Rope {
     const scale = new THREE.Vector3().setFromMatrixScale(inv).x;
     // Smooth through the points: three rings per step.
     const pts = new THREE.CatmullRomCurve3(this.p.map((x) => x.clone().applyMatrix4(inv))).getPoints((this.p.length - 1) * SMOOTH);
-    drawTube(this.geometry, [pts], this.radius * scale, scale, this.pitch, this.vPerMetre);
+    const lead = this.lead.length > 1 ? [this.lead.map((x) => x.clone().applyMatrix4(this.model.matrixWorld).applyMatrix4(inv))] : [];
+    drawTube(this.geometry, [...lead, pts], this.radius * scale, scale, this.pitch, this.vPerMetre);
   }
 }
 

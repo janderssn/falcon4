@@ -25,6 +25,7 @@ export async function loadCatalog() {
       rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
       glider: m.glider || 'Falcon 4', subtitle: m.subtitle || `Wills Wing · 170 · ${m.label} build`,
       poseShapes: m.poseShapes || null,
+      optionSplit: m.optionSplit || null,
       ropes: m.ropes || null,
       designs: m.designs ? `./${m.designs}` : null,   // sail designs (lib/designs.js, tools/sail_designs.py)             // soft rope ends drawn by lib/rope.js (see main.js, ropesOf)   // shape-key weights per resting pose (see main.js, poseOf)
     };
@@ -99,7 +100,9 @@ async function load(source, progress) {
       // Soft parts that hang free (a rope's surplus) are tagged ground_contact = 0 in the model:
       // they do not hold the glider up, so the resting pose leaves them out.
       const ground = !(node && Number(node.userData.ground_contact) === 0);
-      part = { name, group: hit ? hit.group : '06', meshes: [], info, ground, triangles: 0, vertices: 0, key: name.toLowerCase() };
+      // One of several parts for the same place (hgkit option slots: round or streamlined uprights, ...).
+      const option = node?.userData.hg_option ? { slot: String(node.userData.hg_option), variant: String(node.userData.hg_variant), default: String(node.userData.hg_default) === '1' } : null;
+      part = { name, group: hit ? hit.group : '06', meshes: [], info, ground, option, triangles: 0, vertices: 0, key: name.toLowerCase() };
       parts.set(name, part);
     }
     const g = o.geometry;

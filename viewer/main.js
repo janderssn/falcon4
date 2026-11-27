@@ -34,11 +34,13 @@ const ZONES = {
   p2: { name: 'P2 · Forward', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
   // The Sport 3's nose cone: its own cloth, in any solid colour of the leading edge's list.
-  nose: { name: 'Nose cone', parts: /^Sail nose cone$/ },
+  nose: { name: 'Nose cone', parts: /^Sail nose cone$/, mats: ['U2 160 Nosecone'] },   // (the Falcon's "Nosecone" is leading-edge cloth: p1)
   // The Sport 3's kingpost and control frame are black anodised as built (`black`: those parts in that
   // material); its battens share a material with small frame parts and keep their own finish (`not`).
-  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'],
-    black: [/^(Kingpost|Downtube [LR]|Basetube \(speedbar\))$/, 'Black anodised aluminium'], not: /^Sail .*batten/ },
+  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve',
+      'Tube aluminium (anodised)', 'Sleeve aluminium (anodised)'],
+    black: [/^(Kingpost|Downtube( Litestream| round)? [LR]|Basetube \(speedbar\)|Basetube streamline( \(wheel kit\))?|Speedbar round)$/,
+      ['Black anodised aluminium', 'Control bar black anodise']], not: /^Sail .*batten/ },
 };
 const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
 const zoneOf = (mesh) => {
@@ -46,12 +48,17 @@ const zoneOf = (mesh) => {
   const { black } = ZONES.frame;
   return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part))
     || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat) && !ZONES[z].not?.test(part))
-    || (black[0].test(part) && mat === black[1] ? 'frame' : undefined);
+    || (black[0].test(part) && black[1].includes(mat) ? 'frame' : undefined);
 };
 // A fifth entry: a two-tone finish. The parts that are black anodised as built (ZONES.frame.black: the Sport 3's
 // kingpost and control frame) keep that; the swatch shows it as its second colour.
-const FRAME_FINISHES = [['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1],
-  ['gold-black', 'Gold, black control frame', '#b8954a', 1, '#1d1e21']];
+// A two-tone finish has a second colour for those parts (5th) and may keep one side as built (6th): 'black'
+// the parts that are black as built, 'rest' all the others.
+const ALUMINIUM = '#e5e6e8';   // clear anodised, as the U2's and the Sport 3's own tubes
+const FRAME_FINISHES = [['aluminium', 'Aluminium', ALUMINIUM, 1, ALUMINIUM, 'rest'],
+  ['black', 'Black anodised', '#1d1e21', 1], ['graphite', 'Graphite', '#5b5e63', 1], ['gold', 'Gold anodised', '#b8954a', 1],
+  ['gold-aluminium', 'Gold, aluminium control frame', '#b8954a', 1, ALUMINIUM],
+  ['gold-black', 'Gold, black control frame', '#b8954a', 1, '#1d1e21', 'black']];
 // Each panel offers the Wills Wing fabrics for that panel; the pockets offer the solid colours of P3.
 const fabricsFor = (zone) => (zone === 'frame' ? FRAME_FINISHES
   : zone === 'nose' ? FALCON_FABRICS.P1.filter((f) => f[3] === 1 && clothKind(f[0]) === 0)
@@ -112,6 +119,7 @@ const state = {
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  options: optionsFrom(params.get('opt')),          // option slot -> variant (a model's other uprights, basetube, ...)
   offsetX: 0,
   offsetZ: 0,
   yaw: 0,
@@ -153,6 +161,57 @@ const state = {
  * A glider: its model and everything chosen in Customize (not the view). As a link's query it is what
  * the address, a comparison's other side (b=) and a saved glider all carry.
  */
+/** "uprights:round,basebar:streamline_wheels" -> { uprights: 'round', ... } */
+function optionsFrom(text) { return Object.fromEntries((text || '').split(',').filter(Boolean).map((p) => p.split(':')).filter((p) => p.length === 2)); }
+const OPTION_NAMES = {
+  uprights: ['Uprights', { litestream: 'Litestream', round: 'Round' }],
+  basebar: ['Basetube', { streamline: 'Streamlined', streamline_wheels: 'With wheels', round_speedbar: 'Round', carbon_speedbar: 'Carbon' }],
+};
+// The order form's line for a variant that Wills Wing sells as an option: [name, part number, note].
+const ORDER_OPTIONS = {
+  basebar: {
+    carbon_speedbar: ['Carbon speedbar', '01A-B3', 'In place of the aluminium basetube'],
+    streamline_wheels: ['Control bar wheel kit', '70M-1240', 'Streamlined 4 in wheels on the Litestream basetube'],
+    round_speedbar: ['Round speedbar', '40F-1368', 'With Litestream-to-round corner brackets'],
+  },
+};
+/** A model's option slots: slot -> { variants, default } (from its parts). */
+function optionsOf(rec) {
+  if (rec.options) return rec.options;
+  rec.options = {};
+  for (const part of rec.parts.values()) {
+    if (!part.option) continue;
+    const o = rec.options[part.option.slot] ||= { variants: [], default: null };
+    if (!o.variants.includes(part.option.variant)) o.variants.push(part.option.variant);
+    if (part.option.default) o.default = part.option.variant;
+  }
+  for (const [slot, o] of Object.entries(rec.options)) {
+    o.default ??= o.variants[0];
+    const order = Object.keys(OPTION_NAMES[slot]?.[1] || {});   // as listed above; unknown variants after them
+    o.variants.sort((x, y) => (order.indexOf(x) + 1 || 99) - (order.indexOf(y) + 1 || 99));
+    // A slot shown as two rows of choices (models.json "optionSplit": a basetube, and what it stands on): each of
+    // the model's variants is one pair of choices. A pair the model has no variant of its own for is a variant
+    // less some of its parts (a basetube without its skids): [first choice, second choice, variant, parts left off].
+    const split = rec.source.optionSplit?.[slot];
+    if (!split) continue;
+    o.split = { rows: split.rows, pair: {} };
+    o.less = {};
+    for (const [id, [first, second, of, without]] of Object.entries(split.variants)) {
+      if (!o.variants.includes(of || id)) continue;
+      o.split.pair[id] = [first, second];
+      if (of) { o.less[id] = { of, without: new RegExp(without) }; o.variants.push(id); }
+    }
+  }
+  return rec.options;
+}
+/** Whether a part is fitted on this glider: every part without a slot, and the chosen variant of each slot. */
+function fitted(rec, part, g) {
+  if (!part.option) return true;
+  const o = optionsOf(rec)[part.option.slot], want = g.options?.[part.option.slot];
+  const now = o.variants.includes(want) ? want : o.default, less = o.less?.[now];
+  return less ? part.option.variant === less.of && !less.without.test(part.name) : part.option.variant === now;
+}
+const gliderOf = (rec) => (rec === other && state.b ? state.b : state);
 function gliderQuery(g) {
   const q = new URLSearchParams();
   q.set('model', g.model);
@@ -160,15 +219,17 @@ function gliderQuery(g) {
   if (g.design) q.set('design', g.design);
   const dz = Object.entries(g.designFab).map(([z, f]) => `${z}:${f}`).join(',');   // (as built too)
   if (dz) q.set('dz', dz);
+  const opt = Object.entries(g.options || {}).map(([k, v]) => `${k}:${v}`).join(',');
+  if (opt) q.set('opt', opt);
   return q;
 }
 function gliderFrom(q, name) {
   const colour = (z) => { const v = q.get(z); return v === 'built' ? null : fabricsFor(z).some((x) => x[0] === v) ? v : DEFAULTS.colours[z] ?? null; };
   return { model: q.get('model'), name, colours: Object.fromEntries(Object.keys(ZONES).map((z) => [z, colour(z)])), design: q.get('design') || null,
-    designFab: Object.fromEntries((q.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))) };
+    designFab: Object.fromEntries((q.get('dz') || '').split(',').filter(Boolean).map((p) => p.split(':'))), options: optionsFrom(q.get('opt')) };
 }
 /** The glider being edited, as it is now (a copy). */
-const gliderNow = (name = state.name) => ({ model: state.model, name, colours: { ...state.colours }, design: state.design, designFab: { ...state.designFab } });
+const gliderNow = (name = state.name) => ({ model: state.model, name, colours: { ...state.colours }, design: state.design, designFab: { ...state.designFab }, options: { ...state.options } });
 /** A model as it comes: the default colours, the sail as built. */
 const stockGlider = (model) => gliderFrom(new URLSearchParams({ model }));
 if (params.get('b')) { const q = new URLSearchParams(params.get('b')); state.b = { ...gliderFrom(q, q.get('name') || undefined), self: q.get('self') === '1' }; }
@@ -262,6 +323,7 @@ async function setModel(id, first = false) {
   if (state.model !== id) return;
   if (record && record !== rec) record.root.removeFromParent();
   record = rec;
+  optionRows();
   record.cacheKey = key;
   prepareTints(record);
   renderDesignRows();
@@ -311,10 +373,13 @@ function prepareTints(rec) {
     const name = mesh.userData.materials.base.name;
     const zone = zoneOf(mesh);
     if (!zone) continue;
+    // A glider with the picker's designs colours its sail through them: its hem and pockets follow the cloth
+    // they are sewn to, and have no row of their own (the U2's part names match the Falcon's zones).
+    if (rec.source.designs && SAIL_ZONES.includes(zone)) continue;
     const t = rec.tints[zone];
     t.meshes.push(mesh);
     const { black } = ZONES.frame;
-    mesh.userData.ownBlack = zone === 'frame' && black[0].test(mesh.userData.part.name) && name === black[1];
+    mesh.userData.ownBlack = zone === 'frame' && black[0].test(mesh.userData.part.name) && black[1].includes(name);
     // Sail cloth becomes a physical material whose look follows the cloth type (lib/cloth.js).
     const cloth = SAIL_ZONES.includes(zone);
     if (cloth) {
@@ -478,7 +543,7 @@ function designClick(e) {
 
 function fabricOf(zone, id) {
   const hit = fabricsFor(zone).find((c) => c[0] === id);
-  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1], twoTone: Boolean(hit[4]) } : null;
+  return hit ? { colour: new THREE.Color().setStyle(hexOf(hit)), opacity: hit[3], name: hit[1], second: hit[4] ? new THREE.Color().setStyle(hit[4]) : null, own: hit[5] } : null;
 }
 
 function applyLook() {
@@ -512,7 +577,9 @@ function lookOf(rec, side) {
       for (const m of Object.values(mesh.userData.materials)) {
         if (zone === 'nose') m.roughness = colour ? 0.7 : m.userData.originalRough;
         if (m.map) continue;
-        const finish = fabric?.twoTone && mesh.userData.ownBlack ? null : colour;   // two-tone: black as built stays
+        // Two-tone: the parts that are black as built take the second colour, and either side may stay as built.
+        const finish = fabric?.second && mesh.userData.ownBlack ? (fabric.own === 'black' ? null : fabric.second)
+          : fabric?.own === 'rest' ? null : colour;
         m.color.copy(finish || m.userData.original);
         if (zone === 'frame') m.roughness = finish ? 0.38 : m.userData.originalRough;
       }
@@ -525,6 +592,7 @@ function lookOf(rec, side) {
     let mat = selected ? M.selected : M.base;
     let visible = true;
     if (part.group === '04' || part.group === '05') visible = state.wires;
+    const on = fitted(rec, part, gliderOf(rec));
     const role = mesh.userData.battenRole === undefined ? (mesh.userData.battenRole = battenRole(part)) : mesh.userData.battenRole;
     const sailGone = state.seeThrough >= 0.98;
     if (role === 'batten') visible = state.battens;
@@ -555,7 +623,7 @@ function lookOf(rec, side) {
     // Laminates shade what is under them too (film and fibres take about half the light).
     if (part.group === '01') mesh.castShadow = state.seeThrough < 0.35;
     mesh.material = mat;
-    mesh.visible = visible;
+    mesh.visible = visible && on;
   }
 }
 
@@ -598,9 +666,11 @@ function restingPose(rec) {
   // Flat arrays and plain loops: the models have up to a million vertices.
   const v = new THREE.Vector3(), SLICE = 0.002;
   const low = new Map();
+  const soft = new Set((rec.source.ropes || []).map((r) => r.part));          // a rope's loose end lies where it fell in the last pose
   for (const m of rec.meshes) {
     const part = m.userData.part;
-    if (!part.ground || part.group === '04' || part.group === '05') continue;   // soft ropes and slack wires do not hold the glider up
+    if (!part.ground || part.group === '04' || part.group === '05' || soft.has(part.name)) continue;   // soft ropes and slack wires do not hold the glider up
+    if (!fitted(rec, part, gliderOf(rec))) continue;                              // nor a basetube that is not fitted
     const pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
@@ -1767,6 +1837,39 @@ function showOrder() {
   if (!record) return;
   saveUrl();
   const builtHex = (z) => document.querySelector(`.sw.original[data-zone="${z}"]`)?.style.getPropertyValue('--c') || '#ccc';
+  // The glider's name and size from its title ("Wills Wing U2 160"); the Falcon builds are titled by build.
+  const named = /^(.*\S)\s+(\d[\w.]*)$/.exec(record.source.title), title = named || [0, 'Wills Wing Falcon 4', '170'];
+  const head = { model: title[1], size: title[2], prefix: named ? record.source.id.slice(0, 2).toUpperCase() : 'F4',
+    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker' };
+  const extras = [];
+  const sd = record.sailDesigns?.ok ? record.sailDesigns : null;
+  if (sd) {
+    // A glider with the picker's designs: the design's zones, each with the cloth chosen for it.
+    const d = designNow(sd);
+    const panels = d.zones.map((z) => {
+      const id = state.designFab[z.id] || z.default, f = z.fabrics.find((c) => c[0] === id);
+      const own = id === 'as-built';
+      return { zone: z.id, label: z.name, asBuilt: f ? hexOf(f) : '#ccc', standard: id === z.default, fabric: f && !own ? { id, name: f[1], hex: hexOf(f), opacity: f[3] } : null };
+    });
+    if (state.colours.nose) extras.push({ name: 'Nose cone', value: fabricOf('nose', state.colours.nose)?.name });
+    // The glider's own options: what the model can be fitted with (its other basetubes), ticked as chosen.
+    const options = [];
+    orderOptions.clear();
+    for (const [slot, o] of Object.entries(optionsOf(record))) {
+      const now = o.variants.includes(state.options[slot]) ? state.options[slot] : o.default, less = o.less?.[now];
+      for (const v of o.variants) {
+        const item = ORDER_OPTIONS[slot]?.[v];
+        if (!item) continue;
+        options.push({ id: `${slot}:${v}`, name: item[0], part: item[1], note: item[2], price: null });
+        if (v === (less ? less.of : now)) orderOptions.add(`${slot}:${v}`);
+      }
+      if (less) extras.push({ name: OPTION_NAMES[slot]?.[0] || slot, value: 'without skids' });
+    }
+    options.push({ id: 'container', name: 'Deluxe transport / storage container', note: 'Foam liner in a ballistic-cloth bag', part: '45G-1310', price: null });
+    if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
+    openOrder({ ...head, design: d.id === 'built' ? 'As built' : d.label, options, diagram: `<img src="${snapshot(900, 360)}" alt="The glider from above">`, panels, extras }, orderOptions);
+    return;
+  }
   const panels = ['p1', 'p2', 'p3', 'p4', 'p5'].filter((z) => record.tints[z]?.meshes.length).map((z) => {
     const id = state.colours[z];
     const f = id && fabricsFor(z).find((c) => c[0] === id);
@@ -1774,14 +1877,9 @@ function showOrder() {
   });
   const fill = (p) => (p.fabric ? p.fabric.hex : p.asBuilt);
   const by = Object.fromEntries(panels.map((p) => [p.zone, p]));
-  const extras = [];
   if (state.colours.pockets) extras.push({ name: 'Batten pockets', value: fabricOf('pockets', state.colours.pockets)?.name });
   if (state.colours.frame) extras.push({ name: 'Frame', value: fabricOf('frame', state.colours.frame)?.name });
-  openOrder({
-    model: 'Wills Wing Falcon 4', size: '170',
-    colours: state.profile === 'calibrated' ? 'calibrated to the cloth' : 'Wills Wing colour picker',
-    diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras,
-  }, orderOptions);
+  openOrder({ ...head, diagram: planSvg((z) => (by[z] ? { fill: fill(by[z]), opacity: by[z].fabric?.opacity ?? 1 } : null)), panels, extras }, orderOptions);
 }
 
 /**
@@ -2255,6 +2353,7 @@ function buildPanel() {
   $('#sail-rows').innerHTML = SAIL_ZONES.map((z) => row(z, ZONES[z].name)).join('');
   $('#nose-row').innerHTML = row('nose', ZONES.nose.name);
   $('#frame-row').innerHTML = row('frame', 'Frame');
+  optionRows();
   $('#scene-fly').innerHTML = Object.entries(SCENES).map(([id, s]) =>
     `<button type="button" class="tile" data-scene="${id}" title="${s.label}"><span class="art" style="background-image:${thumb(`scene-${id}`)}"></span><span class="cap">${s.label}</span></button>`).join('');
 }
@@ -2291,6 +2390,33 @@ function syncNames(hover = null) {
   }
 }
 
+/** The variant of a split slot with choice c in a row, from the pair chosen now: the other row's choice kept when
+ *  the model has that pair; else, for the first row, that basetube as the model has it first; else none. */
+function splitVariant(o, here, row, c) {
+  const ids = Object.keys(o.split.pair).filter((id) => o.split.pair[id][row] === c);
+  return ids.find((id) => o.split.pair[id][1 - row] === here[1 - row]) || (row === 0 ? ids[0] : null);
+}
+/** The model's option slots in the Customize panel (Frame): one row of choices per slot. */
+function optionRows() {
+  const box = $('#option-rows');
+  const opts = record ? optionsOf(record) : {};
+  if (record) for (const [k, v] of Object.entries(state.options)) if (!opts[k]?.variants.includes(v)) delete state.options[k];   // another model's
+  box.innerHTML = Object.entries(opts).filter(([, o]) => o.variants.length > 1).map(([slot, o]) => {
+    const [title, names] = OPTION_NAMES[slot] || [slot, {}];
+    const now = o.variants.includes(state.options[slot]) ? state.options[slot] : o.default;
+    if (o.split) {
+      // Two rows: each button goes to the variant of that choice with the other row's choice as it is; the second
+      // row offers only what the chosen basetube can have, the first every basetube (with its own default below it).
+      const here = o.split.pair[now];
+      return o.split.rows.map(([label, choices], row) => `<div class="opt-row"><span>${esc(label)}</span><div class="seg" role="radiogroup" aria-label="${esc(label)}">${Object.entries(choices).map(([c, name]) => {
+        const to = splitVariant(o, here, row, c);
+        return `<button type="button" role="radio" aria-checked="${c === here[row]}" class="${c === here[row] ? 'on' : ''}" data-opt="${esc(slot)}" data-variant="${esc(to || '')}"${to ? '' : ' disabled'}>${esc(name)}</button>`;
+      }).join('')}</div></div>`).join('');
+    }
+    return `<div class="opt-row"><span>${esc(title)}</span><div class="seg" role="radiogroup" aria-label="${esc(title)}">${o.variants.map((v) =>
+      `<button type="button" role="radio" aria-checked="${v === now}" class="${v === now ? 'on' : ''}" data-opt="${esc(slot)}" data-variant="${esc(v)}">${esc(names[v] || v)}</button>`).join('')}</div></div>`;
+  }).join('');
+}
 function syncRotUI() {
   const btnRot = $('#btn-rot'), btnReset = $('#btn-rot-reset');
   if (btnRot) btnRot.setAttribute('aria-pressed', String(state.rotOpen));
@@ -2611,6 +2737,14 @@ function wireUi() {
   $('#opt-outline-wires').addEventListener('change', (e) => { state.outlineWires = e.target.checked; saveUrlSoon(); });
   $('#opt-spot').addEventListener('change', (e) => { state.spot = e.target.checked; scenes.setSpot(state.spot); saveUrlSoon(); });
   $('#xray').addEventListener('input', (e) => { state.seeThrough = Number(e.target.value); applyLook(); saveUrlSoon(); });
+  $('#option-rows').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-opt]');
+    if (!b || !record || !b.dataset.variant) return;
+    const o = optionsOf(record)[b.dataset.opt];
+    if (b.dataset.variant === o.default) delete state.options[b.dataset.opt]; else state.options[b.dataset.opt] = b.dataset.variant;
+    record.rest = null;            // another basetube: the glider rests on other points
+    applyLook(); poseOf(record); optionRows(); saveUrlSoon();
+  });
   $('#opt-wires').addEventListener('change', (e) => { state.wires = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-battens').addEventListener('change', (e) => { state.battens = e.target.checked; applyLook(); saveUrlSoon(); });
   $('#opt-names').addEventListener('change', (e) => { state.names = e.target.checked; syncPanel(); saveUrlSoon(); });

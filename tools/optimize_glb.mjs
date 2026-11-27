@@ -14,6 +14,9 @@ const sharp = (await imp('sharp')).default;
 
 const [, , input, output, errArg, reportPath] = process.argv;
 const ERR = Number(errArg || 0.0003);
+// KEEP: a pattern of part names that keep every triangle (the U2's sail: its undersurface is sewn to the top
+// surface inside that surface's triangles, and a simplified top surface would leave the seam).
+const KEEP = process.env.KEEP ? new RegExp(process.env.KEEP) : null;
 await Promise.all([MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 const doc = await io.read(input);
@@ -56,7 +59,7 @@ for (const node of doc.getRoot().listNodes()) {
       const idx = prim.getIndices();
       const n = idx.getCount() / 3;
       b += n;
-      if (n < 64) { a += n; continue; }
+      if (n < 64 || KEEP?.test(node.getName())) { a += n; continue; }
       const pos = prim.getAttribute('POSITION').getArray();
       // Shape targets (morphs) count too: the simplified mesh must hold every shape, not only the
       // base one, so each target's offsets go in as attributes (in metres, weight 1).
@@ -91,15 +94,17 @@ for (const node of doc.getRoot().listNodes()) {
   report.push({ name: node.getName(), before: b, after: a });
 }
 // (textureCompress matches a pattern against the name or the URI: give them the name as URI meanwhile.)
-const atlases = doc.getRoot().listTextures().filter((t) => /seams and/i.test(t.getName()) && !t.getURI());
+// Also the atlas of a sail built with hgkit.sail ("u2_160_sail_normal", "..._base", "..._orm").
+const ATLAS = /seams and|[ _]sail[ _](normal|base|orm)$/i, ATLAS_FILE = /seams and|[ _]sail[ _](normal|base|orm)(\.png)?$/i;
+const atlases = doc.getRoot().listTextures().filter((t) => ATLAS.test(t.getName()) && !t.getURI());
 for (const t of atlases) t.setURI(`${t.getName()}.png`);
 await doc.transform(
   dedup(), prune({ keepLeaves: true, keepAttributes: true, keepExtras: true }),
   reorder({ encoder: MeshoptEncoder, target: 'size' }),
   // A sail's detail atlas (seams and stitching over the whole cloth, sport3-opus s3/sail_detail.py) keeps
   // its size; every other texture is a small tile.
-  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024], pattern: /^(?!.*seams and).*$/i }),
-  textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 92, pattern: /seams and/i }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [1024, 1024], pattern: /^(?!.*(seams and|[ _]sail[ _](normal|base|orm)(\.png)?$)).*$/i }),
+  textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 92, pattern: ATLAS_FILE }),
 );
 for (const t of atlases) t.setURI('');
 doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });

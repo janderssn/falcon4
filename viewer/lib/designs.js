@@ -13,20 +13,24 @@
 import * as THREE from 'three';
 import { clothKind, CLOTH, filmAlpha, frost } from './cloth.js';
 
-const SKIN = /^(Sail( [LR])?|(Upper sail|Undersurface) [LR])$/;
+// Also the names of a sail built with hgkit.sail (the U2): one top and one undersurface mesh over both wings,
+// the leading-edge cloth the material of slot P1, pockets "Batten pocket R 5".
+const SKIN = /^(Sail( [LR])?|(Upper sail|Undersurface) [LR]|Sail (top surface|undersurface))$/;
 const isSail = (m) => /^Sail( [LR])?$/.test(m.userData.part?.name || '');
-const isLowerMat = (m) => /lower panel|undersurface/i.test(m.userData.materials.base.name);
+/** A skin that covers both wings in one mesh (its seams are read on the right wing). */
+const bothWings = (m) => isSail(m) || /^Sail (top surface|undersurface)$/.test(m.userData.part?.name || '');
+const isLowerMat = (m) => /lower panel|undersurface| P5$/i.test(m.userData.materials.base.name);
 const isSharedMat = (m) => isSail(m) && (LE_CLOTH.test(m.userData.materials.base.name) || TRIM.test(m.userData.materials.base.name));
-const isUpperMesh = (m) => (isSail(m) ? !isLowerMat(m) : /^Upper/.test(m.userData.part.name));
-const isLowerMesh = (m) => (isSail(m) ? isLowerMat(m) : /^Undersurface/.test(m.userData.part.name));
+const isUpperMesh = (m) => (isSail(m) ? !isLowerMat(m) : /^(Upper|Sail top)/.test(m.userData.part.name));
+const isLowerMesh = (m) => (isSail(m) ? isLowerMat(m) : /^(Undersurface|Sail undersurface)/.test(m.userData.part.name));
 // Sewn on the skins: the panel laps and the batten pockets take the colour of the cloth under them.
 const LAP = /^Upper panel lap [LR]$/;
 const ZIP = /^Sail .*zipper( [LR])?$/;
 const PATCH = /^Sail sprog patch [LR]$/;
-const UNDER_TOP = (m) => /^Sail (nose )?batten /.test(m.userData.part?.name || '');   // pockets under the top skin
-const POCKET = /^Sail (nose batten|(lower |speed )?batten [\d-]+ [LR]) pocket$/;
+const UNDER_TOP = (m) => /^(Sail (nose )?batten |Batten pocket |Nose batten pocket|(Inner|Outer) transverse batten pocket)/.test(m.userData.part?.name || '');   // pockets under the top skin
+const POCKET = /^(Sail (nose batten|(lower |speed )?batten [\d-]+ [LR]) pocket|(Bottom batten|Batten) pocket [LR] \d+|Nose batten pocket|(Inner|Outer) transverse batten pocket [LR])$/;
 const THREAD = /^Topstitch/;
-const LE_CLOTH = /leading-edge cloth/;
+const LE_CLOTH = /leading-edge cloth| P1$/;
 const TRIM = /bound panel edge|reinforced wire exits/;
 // The outline profile, the same as tools/sail_designs.py (smooth_profile): bins over the half span;
 // the trailing edge runs straight between the batten tips (over the scallops), then both edges are smoothed,
@@ -331,7 +335,7 @@ function meshLines(meshes, half, up = 0, smooth = 4) {
   // Each part's outline (right wing): its boundary edges chained into lines, each resampled every
   // 5 mm, with the part's cloth to the left.
   const prims = meshes.filter((m) => {
-    if (isSail(m)) return true;
+    if (bothWings(m)) return true;
     const a = m.geometry.attributes.aSailPlan;
     let sx = 0;
     for (let i = 0; i < a.count; i += 17) sx += a.getX(i);
@@ -341,7 +345,7 @@ function meshLines(meshes, half, up = 0, smooth = 4) {
     const keys = Array.from({ length: pos.count }, (_, i) => `${Math.round(pos.getX(i) * 1e4)},${Math.round(pos.getY(i) * 1e4)},${Math.round(pos.getZ(i) * 1e4)}`);
     const P = (i) => [pat.getX(i), pat.getY(i), plan.getX(i) * half];   // pattern (metres), plan x
     const idx = g.index ? g.index.array : Array.from({ length: pos.count }, (_, i) => i);
-    const filterSide = isSail(m), filterUp = isSharedMat(m) && up !== 0;
+    const filterSide = bothWings(m), filterUp = isSharedMat(m) && up !== 0;
     const count = new Map(), edges = [];
     for (let t = 0; t + 2 < idx.length; t += 3) {
       const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
@@ -646,6 +650,7 @@ const seamUniforms = (s, u, n) => { s.uniforms[`uSeam${n}`] = u.seam; s.uniforms
  */
 function patch(material, u, role, back = u, seamsBack = back, canFrost = false, seamsFront = u) {
   const prev = material.onBeforeCompile;
+  const own = material.userData.designOwn = { value: 0 };   // a panel of the model that is a zone of the design (set())
   material.onBeforeCompile = (s, r) => {
     prev?.call(material, s, r);
     if (canFrost) Object.assign(s.uniforms, frost);
@@ -655,6 +660,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
     s.uniforms.uDesignOn = u.on; s.uniforms.uDesignBand = u.band; s.uniforms.uDesignProfile = u.profile;
     s.uniforms.uDesignProfile2 = u.profile2; s.uniforms.uDesignEref = u.eref;
     s.uniforms.uDesignHalf = u.half; s.uniforms.uDesignRole = { value: role };
+    s.uniforms.uDesignOwn = own;
     s.uniforms.uDesignUnderF = u.kind; s.uniforms.uDesignUnderB = back.kind;
     s.uniforms.uDesignStraight = u.straight; s.uniforms.uDesignCref = u.cref;
     s.uniforms.uDesignBaked = { value: material.map && material.normalMap ? 1 : 0 };   // seams and hems in the model's detail map
@@ -664,7 +670,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uDesignPick;
-        uniform float uDesignOn, uDesignRole, uDesignBand, uDesignHalf, uDesignUnderF, uDesignUnderB, uDesignStraight, uDesignCref, uDesignEref, uDesignBaked;
+        uniform float uDesignOn, uDesignRole, uDesignOwn, uDesignBand, uDesignHalf, uDesignUnderF, uDesignUnderB, uDesignStraight, uDesignCref, uDesignEref, uDesignBaked;
         uniform sampler2D uDesignProfile, uDesignProfile2;
         ${SIDE_GLSL('F')}
         ${SIDE_GLSL('B')}
@@ -753,6 +759,14 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           bool front = gl_FrontFacing;
           vec2 st = designST(front ? uDesignUnderF : uDesignUnderB), uv = vec2(st.x, 1.0 - st.y);
           if (front) dc = designColourF(uv, designLam, fib, designRip); else dc = designColourB(uv, designLam, fib, designRip);
+          if (uDesignOwn > 0.5) {
+            // A panel the model has itself (its own material, sewn on its own seam) that is a zone of the
+            // design: all of it in that zone's cloth. The picker's drawing has the seam a few centimetres off.
+            int ko = int(uDesignOwn + 0.5);
+            vec4 fo = front ? uDesignFilmF[ko] : uDesignFilmB[ko];
+            dc = vec4(front ? uDesignPalF[ko] : uDesignPalB[ko], fo.x);
+            designLam = fo.y; fib = vec3(fo.z); designRip = fo.w;
+          }
           vec3 s0 = vec3(0.0), s1 = vec3(0.0);
           vec2 pm = vSailUv;                                                     // the cloth laid flat (metres)
           if (uDesignRole < 0.5 || (uDesignRole > 1.5 && uDesignRole < 2.5) || (uDesignRole > 3.5 && uDesignRole < 4.5)) {   // body cloth, trim and pockets (welded LE cloth stays pure P1)
@@ -790,7 +804,7 @@ function patch(material, u, role, back = u, seamsBack = back, canFrost = false, 
           if (uDesignPick > 0.5) {
             // The zone under this pixel, as its number in the design's map (${P1}: the leading-edge cloth).
             float zone = front ? texture2D(uDesignMapF, uv).r : texture2D(uDesignMapB, uv).r;
-            gl_FragColor = vec4(le > 0.5 ? ${P1}.0 / 255.0 : zone, 1.0, 0.0, 1.0);
+            gl_FragColor = vec4(le > 0.5 ? ${P1}.0 / 255.0 : uDesignOwn > 0.5 ? uDesignOwn / 255.0 : zone, 1.0, 0.0, 1.0);
             return;
           }
           designLam = mix(designLam, leFilm.y, le) * (1.0 - trim);
@@ -1035,10 +1049,14 @@ function builtDesign(skins, upper, designs) {
   const name = (m) => m.userData.materials.base.name;
   const plain = (m) => !LE_CLOTH.test(name(m)) && !TRIM.test(name(m));
   const hex = (test) => { const m = skins.find(test); return m ? `#${m.userData.materials.base.color.getHexString()}` : '#808080'; };
-  const own = { P1: hex((m) => LE_CLOTH.test(name(m))), P3: hex((m) => upper.has(m) && plain(m)), P5: hex((m) => !upper.has(m) && plain(m)) };
+  // A trailing-edge panel of its own (the U2's P4, in its own material): a zone too, so it keeps its cloth
+  // when another zone is given a colour.
+  const rear = (m) => upper.has(m) && / P4$/.test(name(m));
+  const own = { P1: hex((m) => LE_CLOTH.test(name(m))), P3: hex((m) => upper.has(m) && plain(m) && !rear(m)), P4: hex(rear), P5: hex((m) => !upper.has(m) && plain(m)) };
   const listOf = (id) => designs.designs.map((d) => d.zones.find((z) => z.id === id)?.fabrics || []).sort((a, b) => b.length - a.length)[0] || [];
   const zone = (id, title, sides) => ({ id, name: title, sides, default: 'as-built', fabrics: [['as-built', 'As built', own[id], 1], ...listOf(id)] });
-  return { id: 'built', label: 'As built', zones: [zone('P1', 'Leading edge', ['top', 'bottom']), zone('P3', 'Top', ['top']), zone('P5', 'Undersurface', ['bottom'])] };
+  return { id: 'built', label: 'As built', zones: [zone('P1', 'Leading edge', ['top', 'bottom']), zone('P3', 'Top', ['top']),
+    ...(skins.some(rear) ? [zone('P4', 'Trailing edge', ['top'])] : []), zone('P5', 'Undersurface', ['bottom'])] };
 }
 /** A drawing of one zone all over (zone number k). */
 function flatMap(k) {
@@ -1064,11 +1082,14 @@ export class SailDesigns {
     const sewn = [...laps, ...pockets, ...zips, ...patches];
     this.ok = skins.length > 0;
     if (!this.ok) return;
+    // The keel pocket is a piece of the undersurface's cloth (P5) in every design [PHOTO U004].
+    this.keelPocket = rec.meshes.filter((m) => /^Keel pocket (front|rear)$/.test(m.userData.part?.name || ''));
     this.upper = new Set(skins.filter((m) => isUpperMesh(m)));
     this.lower = new Set(skins.filter((m) => isLowerMesh(m) || isSharedMat(m)));
     this.clear = { top: false, bottom: false };
     this.built = builtDesign(skins, this.upper, designs);
-    this.flat = { top: flatMap(2), bottom: flatMap(3) };   // as built: the top skin is zone 2 (P3), the undersurface zone 3 (P5)
+    const zoneNo = (id) => this.built.zones.findIndex((z) => z.id === id) + 1;
+    this.flat = { top: flatMap(zoneNo('P3')), bottom: flatMap(zoneNo('P5')) };   // as built: the top skin is all P3, the undersurface all P5
     const { profile, profile2, half, le, te, un, et, eb, line, cref, eref } = planCoords(skins, sewn, rec.root.children[0]);
     this.prof = { half, le, te, un, et, eb, line, cref, eref };
     const straight = { value: 0 };   // the design's bands run straight to the tip (bottom maps)
@@ -1301,6 +1322,12 @@ export class SailDesigns {
     const paint = Boolean(d) && !(built && d.zones.every((z) => (colours[z.id] || z.default) === z.default));
     this.current = d?.id ?? null;
     this.clear = { top: false, bottom: false, le: false };
+    // The top skin's own panels (materials named for their slot, "... P3") that are zones of this design.
+    for (const mesh of this.upper) {
+      const slot = / (P\d\w*)$/.exec(mesh.userData.materials.base.name)?.[1];
+      const k = d && slot ? d.zones.findIndex((z) => z.id === slot && (z.sides || ['top']).includes('top')) + 1 : 0;
+      for (const m of Object.values(mesh.userData.materials)) if (m.userData.designOwn) m.userData.designOwn.value = k;
+    }
     for (const side of ['top', 'bottom']) {
       const u = this.u[side];
       u.on.value = paint ? 1 : 0;
@@ -1334,6 +1361,7 @@ export class SailDesigns {
       });
       if (side === 'bottom') {
         const base = d.zones.findIndex((z) => z.id === 'P5') + 1;
+        if (base) for (const mesh of this.keelPocket) for (const m of Object.values(mesh.userData.materials)) m.color?.copy(u.pal.value[base]);
         d.zones.forEach((z, i) => {
           const from = base && !/^P[1345]$/.test(z.id) ? base : i + 1;
           this.u.pocket.pal.value[i + 1].copy(u.pal.value[from]);

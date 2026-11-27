@@ -36,7 +36,16 @@ NS, NT = 2048, 1024           # cloth maps: span texels (keel to tip) x chord te
 # Designs whose bands under the wing run straight along the undersurface's trailing edge to the tip, as on
 # the real sails (photos; the Sport 2 the same): the picker draws them tapering and curling up at the tip.
 # From this share of the half span out, every chord takes the bands as drawn there.
-STRAIGHT = {"3-panel": 0.12}
+STRAIGHT = {"3-panel": 0.12, "mylar": 0.12}
+# The U2's stripes run straight from the keel pocket to the tip (photo U006); the picker's drawing bends them
+# at the root, where its outline has the keel pocket's tab. Every chord takes the bands as drawn at STRAIGHT.
+STRAIGHT_ALL = {"u2/3-panel", "u2/mylar"}
+# The U2's top panel seam (P3 to P4) is not where its undersurface is sewn on: the picker's top and bottom
+# drawings have the two lines at different shares of the chord, and the model (u2-gemini) has both seams.
+# Its top maps are measured from the leading to the trailing edge, as drawn. The model's top panels are the
+# design's zones (P1, P3, P4): the viewer colours each panel whole (lib/designs.js uDesignOwn), on the model's
+# own seam, and the drawn seam (2.5 cm off it, more at the tip) is left out.
+OWN_TOP_SEAM = {"u2"}
 # The undersurface in laminate (as on Sport 3s in photos), which the picker does not list for P5:
 # the clear and white X-ply laminates it offers for the other panels. Marked "extra" in designs.json.
 UNDER_EXTRA = {"P5": [["uvpxb05", "UVPXB05", "#c8c8c8", 0.4], ["uvpxw10-white", "UVPXW10 White", "#ffffff", 1.0]]}
@@ -54,6 +63,16 @@ GLIDERS = {
                                                     "P5": "Black 2100", "A": "Bright Orange 4197",
                                                     "B": "Bright Orange 4197", "C": "Bright Orange 4197",
                                                     "D": "Bright Orange 4197", "E": "Bright Orange 4197"}),
+    ],
+    # U2 160. Defaults as the 2011 U2 160 in photo U077 (u2-gemini research): red top, white leading and
+    # trailing edge, blue undersurface with a white stripe.
+    "u2": [
+        ("3-panel", "27", "3-panel", {"P1": "White 205MT", "P3": "Red 3125", "P4": "White 205MT", "P5": "Blue 7304",
+                                      "P6A": "White 170", "P6R": "White 170"}),
+        ("mylar", "26", "Mylar 3-panel", {"P1": "UVPXB05", "P4": "UVPXB05", "P5": "Blue 7304",
+                                          "P6A": "White 170", "P6R": "White 170"}),
+        # The U2C: defaults as the glider in photos U006-U016 (lime bands under a clear laminate sail).
+        ("window", "65", "Window", {"P1": "UVPXB05", "P4": "UVPXB05", "P5": "Bright Lime 6094", "P6": "UVP2LXB-1"}),
     ],
 }
 ZONE_NAMES = {"P1": "Leading edge", "P3": "Top", "P4": "Trailing edge", "P5": "Undersurface",
@@ -163,8 +182,8 @@ def zone_polys(svg_path, selectors):
     out = []
     for sel in selectors:
         polys = []
-        el = by_id[sel.lstrip("#")]
-        if el.get("display") == "none":
+        el = by_id.get(sel.lstrip("#"))   # a zone of the other side only (the U2's top body, P3) is not in this file
+        if el is None or el.get("display") == "none":
             out.append([])
             continue
         for e in el.iter():
@@ -179,7 +198,7 @@ def zone_polys(svg_path, selectors):
                 x, y, w, h = (float(e.get(k, 0)) for k in ("x", "y", "width", "height"))
                 polys.append(np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]))
         out.append(polys)
-    return out, [order[sel.lstrip("#")] for sel in selectors]
+    return out, [order.get(sel.lstrip("#"), -1) for sel in selectors]
 
 
 def segments(polys):
@@ -391,18 +410,22 @@ def without(cloth, k):
     return out
 
 
-def straighten(ids, tex, s0):
-    """From s0 out, every chord takes the zones of the chord at s0: bands of constant share of the
-    chord, parallel to the edges. Each band gets a rectangle among its polygons, so its edges (distance
-    fields, seams) are straight too."""
+def straighten(ids, tex, s0, whole=False):
+    """From s0 out (whole: over all the span), every chord takes the zones of the chord at s0: bands of
+    constant share of the chord, parallel to the edges. Each band gets a rectangle among its polygons
+    (whole: in their place), so its edges (distance fields, seams) are straight too."""
     c0 = int(round(s0 * NS))
     col = ids[:, c0].copy()
-    ids[:, c0:] = col[:, None]
+    ids[:, 0 if whole else c0:] = col[:, None]
     cut = np.flatnonzero(np.diff(col.astype(int))) + 1
+    x0 = -BAND if whole else c0
+    if whole:
+        for k in set(int(v) for v in col) - {0}:
+            tex[k - 1].clear()
     for j0, j1 in zip(np.r_[0, cut], np.r_[cut, NT]):
         k = int(col[j0])
         if k:
-            tex[k - 1].append(np.array([[c0, j0], [NS + BAND, j0], [NS + BAND, j1], [c0, j1]], float))
+            tex[k - 1].append(np.array([[x0, j0], [NS + BAND, j0], [NS + BAND, j1], [x0, j1]], float))
 
 
 def tip(ids, k, tex, top=1.0):
@@ -527,7 +550,7 @@ def main():
                 for rnd in range(2):
                     frame = outline([p for p in polys if p])
                     under = None
-                    if side == "top" and "P4" in zones:
+                    if side == "top" and "P4" in zones and glider not in OWN_TOP_SEAM:
                         # The trailing-edge panel (P4) starts at the seam where the undersurface is sewn to
                         # the top (WW S3-2017-patches-and-panels: the line across the upper body; the picker
                         # draws both at the same share of the chord): its front edge lands on that seam of
@@ -564,7 +587,7 @@ def main():
                               for k in range(len(zones))]
                     polys = [p if area[k] >= 0.001 and not hidden[k] else [] for k, p in enumerate(polys)]
                 if side == "bottom" and key in STRAIGHT:
-                    straighten(ids, tex, STRAIGHT[key])
+                    straighten(ids, tex, STRAIGHT[key], f"{glider}/{key}" in STRAIGHT_ALL)
                 used = [zones[k - 1] for k in sorted(set(np.unique(ids)) - {0})]
                 for z in used:
                     sides[z].append(side)
@@ -580,6 +603,8 @@ def main():
                 skip = {zones.index("P4") + 1} if under is not None and "P4" in zones else set()
                 seams = [{"zone": k + 1, "st": [round(float(c), 5) for q in pts for c in (q[0] / NS, q[1] / NT)]}
                          for k, pts in seam_lines(tex, ids, painted, skip) if k + 1 != p1]
+                if side == "top" and glider in OWN_TOP_SEAM:
+                    seams = []                   # the model's own panels and seams (the viewer colours them by panel)
                 with open(os.path.join(OUT, glider, f"{key}-{side}-seams.json"), "w") as f:
                     json.dump(seams, f, separators=(",", ":"))
                 n_tex = (len(zones) + 3) // 4
