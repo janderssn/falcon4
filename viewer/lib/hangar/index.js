@@ -262,7 +262,8 @@ export class HangarScene {
   }
 
   setPreset(id) {
-    const preset = this.atmosphere.applyPreset(id);
+    const alias = id === 'day' ? 'nordic_day' : id === 'golden' ? 'golden_hour' : id;
+    const preset = this.atmosphere.applyPreset(alias);
     this.state.preset = preset.id;
     this.volumetrics.syncSun(this.atmosphere.sunDir, preset);
     this.materialSys.syncSun(this.atmosphere.sunDir, preset.sunColor, preset.fogColor);

@@ -36,6 +36,7 @@ export class Scenes {
     this.indoor = new Environments(renderer, scene);
     this.meadow = null;
     this.hangar = null;
+    this.hangarPreset = 'day';
     this.gliderRoot = null;
     this.current = null;
     this.hours = 9.5;
@@ -85,7 +86,7 @@ export class Scenes {
       }
       this.hangar.setActive(true);
       this.hangar.setShadows(this.shadows);
-      this.hangar.setTime(this.hours);
+      this.hangar.setPreset(this.hangarPreset);
     } else {
       this.meadow?.setActive(false);
       this.hangar?.setActive(false);
@@ -102,6 +103,11 @@ export class Scenes {
     this.indoor.place(groundY, center);
     this.meadow?.place(groundY, center);
     this.hangar?.place(groundY, center);
+  }
+
+  setHangarPreset(mode) {
+    this.hangarPreset = mode === 'golden' || mode === 'golden_hour' ? 'golden' : 'day';
+    if (this.hangar) this.hangar.setPreset(this.hangarPreset);
   }
 
   attachGlider(gliderRoot) {
