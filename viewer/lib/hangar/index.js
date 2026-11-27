@@ -356,6 +356,35 @@ export class HangarScene {
     }
   }
 
+  _attachDitherFade(mat, fadeUniform) {
+    const cm = mat.clone();
+    const prevCompile = cm.onBeforeCompile;
+    const prevKey = cm.customProgramCacheKey ? cm.customProgramCacheKey.bind(cm) : null;
+    cm.customProgramCacheKey = () => `${prevKey ? prevKey() : cm.type}+cam-bayer-dither-v1`;
+    cm.onBeforeCompile = (shader, renderer) => {
+      if (prevCompile) prevCompile.call(cm, shader, renderer);
+      shader.uniforms.uCamFade = fadeUniform;
+      shader.fragmentShader = `uniform float uCamFade;\n${shader.fragmentShader}`.replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+        if (uCamFade < 0.999) {
+          int bx = int(mod(floor(gl_FragCoord.x), 4.0));
+          int by = int(mod(floor(gl_FragCoord.y), 4.0));
+          int bIdx = by * 4 + bx;
+          float bayer = (
+            bIdx == 0 ? 0.0 : bIdx == 1 ? 8.0 : bIdx == 2 ? 2.0 : bIdx == 3 ? 10.0 :
+            bIdx == 4 ? 12.0 : bIdx == 5 ? 4.0 : bIdx == 6 ? 14.0 : bIdx == 7 ? 6.0 :
+            bIdx == 8 ? 3.0 : bIdx == 9 ? 11.0 : bIdx == 10 ? 1.0 : bIdx == 11 ? 9.0 :
+            bIdx == 12 ? 15.0 : bIdx == 13 ? 7.0 : bIdx == 14 ? 13.0 : 5.0
+          ) / 16.0;
+          if (uCamFade <= bayer) discard;
+        }`
+      );
+    };
+    cm.needsUpdate = true;
+    return cm;
+  }
+
   _initOccluderProps(model) {
     this._occluderProps = [];
     this._lastUpdateSec = null;
@@ -364,7 +393,6 @@ export class HangarScene {
     const origin = this.worldGroup.position;
     model.traverse((o) => {
       if (!o.isMesh) return;
-      // Check mesh name or parent name
       let matched = FADE_RE.test(o.name);
       let p = o.parent;
       while (!matched && p && p !== model) {
@@ -372,18 +400,10 @@ export class HangarScene {
         p = p.parent;
       }
       if (!matched || !o.material) return;
-      // Clone materials per fadeable prop once so fading one prop never affects shared materials elsewhere
+      // Clone materials with 4x4 Bayer screen-door dither fade (keeps transparent=false, depthWrite=true ALWAYS!)
+      const fadeUniform = { value: 1.0 };
       const origMats = Array.isArray(o.material) ? o.material : [o.material];
-      const cloned = origMats.map((m) => {
-        const cm = m.clone();
-        cm.userData = {
-          ...m.userData,
-          _origTransparent: Boolean(cm.transparent),
-          _origOpacity: cm.opacity !== undefined ? cm.opacity : 1.0,
-          _origDepthWrite: cm.depthWrite !== undefined ? cm.depthWrite : true,
-        };
-        return cm;
-      });
+      const cloned = origMats.map((m) => this._attachDitherFade(m, fadeUniform));
       o.material = Array.isArray(o.material) ? cloned : cloned[0];
       const box = new THREE.Box3().setFromObject(o);
       box.min.sub(origin);
@@ -394,6 +414,7 @@ export class HangarScene {
         name: o.name,
         mesh: o,
         mats: cloned,
+        fadeUniform,
         localBox: box,
         center,
         opacity: 1.0,
@@ -407,23 +428,14 @@ export class HangarScene {
   _registerCatOccluders(catGroup) {
     if (!catGroup) return;
     if (!this._occluderProps) this._occluderProps = [];
-    // Remove any previous cat entries before re-registering
     this._occluderProps = this._occluderProps.filter((p) => !p.isCat);
     catGroup.updateMatrixWorld(true);
     const origin = this.worldGroup.position;
     catGroup.traverse((o) => {
       if (!o.isMesh || !o.material) return;
+      const fadeUniform = { value: 1.0 };
       const origMats = Array.isArray(o.material) ? o.material : [o.material];
-      const cloned = origMats.map((m) => {
-        const cm = m.clone();
-        cm.userData = {
-          ...m.userData,
-          _origTransparent: Boolean(cm.transparent),
-          _origOpacity: cm.opacity !== undefined ? cm.opacity : 1.0,
-          _origDepthWrite: cm.depthWrite !== undefined ? cm.depthWrite : true,
-        };
-        return cm;
-      });
+      const cloned = origMats.map((m) => this._attachDitherFade(m, fadeUniform));
       o.material = Array.isArray(o.material) ? cloned : cloned[0];
       const box = new THREE.Box3().setFromObject(o);
       box.min.sub(origin);
@@ -433,17 +445,19 @@ export class HangarScene {
         name: o.name || 'HangarCatMesh',
         mesh: o,
         mats: cloned,
+        fadeUniform,
         localBox: box,
         center,
         opacity: 1.0,
+        isRearProp: false,
         isChair: false,
         isCat: true,
       });
     });
   }
 
-  _segmentIntersectsBox(p0, p1, box, inflate = 0.45, maxT = 0.92) {
-    let tMin = 0.0;
+  _segmentIntersectsBox(p0, p1, box, inflate = 0.45, maxT = 0.92, minT = 0.0) {
+    let tMin = minT;
     let tMax = maxT;
     const axes = ['x', 'y', 'z'];
     for (let i = 0; i < 3; i++) {
@@ -463,7 +477,7 @@ export class HangarScene {
         if (tMin > tMax) return false;
       }
     }
-    return tMax >= 0.0 && tMin <= maxT;
+    return tMax >= minT && tMin <= maxT;
   }
 
   _updateOccluderFade(camera, dt, targetWorld) {
@@ -479,80 +493,63 @@ export class HangarScene {
     const sightLen = sightDir.length();
     if (sightLen > 1e-5) sightDir.divideScalar(sightLen);
 
-    const toBox = new THREE.Vector3();
-    const clampedPt = new THREE.Vector3();
+    const segVec = new THREE.Vector3().subVectors(tgtL, camL);
+    const segLenSq = Math.max(segVec.lengthSq(), 1e-6);
+    const segPt = new THREE.Vector3();
+    const boxPt = new THREE.Vector3();
     let fadedCount = 0;
     let rearPropsTotal = 0;
     let rearPropsFaded = 0;
-    let chairOrCatOccluded = false;
-    const inRearZone = camL.z < -1.8;
+    let chairCatMinTarget = 1.0;
+
+    // Smooth spatial ramp for rear-wall props: 1.0 at z >= -1.0, smoothly dissolving to 0.0 by z <= -2.4
+    const rearRamp = THREE.MathUtils.smoothstep(camL.z, -2.4, -1.0);
 
     for (const prop of this._occluderProps) {
-      let occluded = false;
+      let targetFade = 1.0;
       if (prop.isRearProp) {
         rearPropsTotal++;
-        // Rear-zone rule: fade ALL rear-wall props whenever orbiting behind the glider (camL.z < -1.8)
-        occluded = inRearZone || this._segmentIntersectsBox(camL, tgtL, prop.localBox, 1.2, 0.92);
+        targetFade = rearRamp;
       } else {
-        // Wide-frustum / proximity rule for side & front props (LeftRack, Chairs + Cat, RightDolly)
-        occluded = this._segmentIntersectsBox(camL, tgtL, prop.localBox, 1.4, 0.92);
-        if (!occluded) {
-          prop.localBox.clampPoint(camL, clampedPt);
-          const distToCam = clampedPt.distanceTo(camL);
-          toBox.subVectors(prop.center, camL);
-          const proj = toBox.dot(sightDir);
-          const len = toBox.length();
-          if (distToCam < 2.5 && (len < 1e-4 || proj / len > -0.35)) {
-            occluded = true;
-          } else if (proj > 0.15 && proj < sightLen - 0.3 && len > 1e-4 && proj / len > 0.86) {
-            occluded = true;
-          }
-        }
+        // Smooth spatial ramp for side/front props (Chairs + Cat, LeftRack, RightDolly):
+        // Corridor 0.45m -> 0.95m strictly between camera & glider (t in [0.05, 0.92]), plus lens proximity 0.90m -> 1.40m
+        const tProj = THREE.MathUtils.clamp(
+          ((prop.center.x - camL.x) * segVec.x + (prop.center.y - camL.y) * segVec.y + (prop.center.z - camL.z) * segVec.z) / segLenSq,
+          0.05,
+          0.92
+        );
+        segPt.copy(camL).addScaledVector(segVec, tProj);
+        prop.localBox.clampPoint(segPt, boxPt);
+        const dSeg = boxPt.distanceTo(segPt);
+        const segRamp = THREE.MathUtils.smoothstep(dSeg, 0.45, 0.95);
+
+        prop.localBox.clampPoint(camL, boxPt);
+        const dCam = boxPt.distanceTo(camL);
+        const proxRamp = THREE.MathUtils.smoothstep(dCam, 0.90, 1.40);
+
+        targetFade = Math.min(segRamp, proxRamp);
       }
-      prop._occluded = occluded;
-      if (occluded && (prop.isChair || prop.isCat)) chairOrCatOccluded = true;
+      prop._targetFade = targetFade;
+      if (prop.isChair || prop.isCat) {
+        chairCatMinTarget = Math.min(chairCatMinTarget, targetFade);
+      }
     }
 
     let catFaded = false;
     for (const prop of this._occluderProps) {
-      const occluded = (prop.isChair || prop.isCat) ? (prop._occluded || chairOrCatOccluded) : prop._occluded;
-      const targetOp = occluded ? 0.0 : 1.0;
+      const targetOp = (prop.isChair || prop.isCat) ? chairCatMinTarget : prop._targetFade;
       if (dt <= 0) {
         prop.opacity = targetOp;
       } else {
-        const rate = occluded ? 14.0 : 9.0;
-        prop.opacity += (targetOp - prop.opacity) * (1 - Math.exp(-rate * dt));
-        if (Math.abs(prop.opacity - targetOp) < 0.005) prop.opacity = targetOp;
+        prop.opacity += (targetOp - prop.opacity) * (1 - Math.exp(-7.0 * dt));
+        if (Math.abs(prop.opacity - targetOp) < 0.004) prop.opacity = targetOp;
       }
-
-      if (prop.opacity < 0.04) {
-        prop.mesh.visible = false;
+      prop.fadeUniform.value = prop.opacity;
+      prop.mesh.visible = prop.opacity > 0.01;
+      if (prop.opacity < 0.98) {
         fadedCount++;
         if (prop.isCat) catFaded = true;
         if (prop.isRearProp) rearPropsFaded++;
-      } else if (prop.opacity >= 0.995) {
-        prop.mesh.visible = true;
-        for (const m of prop.mats) {
-          if (m.transparent !== m.userData._origTransparent || m.opacity !== m.userData._origOpacity) {
-            m.transparent = m.userData._origTransparent;
-            m.opacity = m.userData._origOpacity;
-            m.depthWrite = m.userData._origDepthWrite;
-            m.needsUpdate = true;
-          }
-        }
-      } else {
-        prop.mesh.visible = true;
-        fadedCount++;
-        if (prop.isCat) catFaded = true;
-        if (prop.isRearProp) rearPropsFaded++;
-        for (const m of prop.mats) {
-          if (!m.transparent) {
-            m.transparent = true;
-            m.depthWrite = false;
-            m.needsUpdate = true;
-          }
-          m.opacity = prop.opacity * m.userData._origOpacity;
-        }
       }
     }
     this.fadedPropCount = fadedCount;

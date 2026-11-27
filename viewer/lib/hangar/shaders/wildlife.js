@@ -43,7 +43,7 @@ export class WildlifeSystem {
     // Sleeping white cat curled up snugly on the right/inner front-left folding chair slats (Chair 2)
     this.catGroup = new THREE.Group();
     this.catGroup.name = 'HangarCatAnchor';
-    this.catGroup.position.set(-4.28, 0.383, 3.55);
+    this.catGroup.position.set(-4.28, 0.394, 3.55);
     this.catGroup.rotation.y = -0.105;
     this.root.add(this.catGroup);
 
