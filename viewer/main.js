@@ -342,11 +342,23 @@ async function setModel(id, first = false) {
   buildLabels();
   renderChip();
   if (first) {
+    if (state.scene === 'hangar') {
+      try { await scenes.preload('hangar'); }
+      catch (e) { console.warn('[hangar] failed to load:', e); }
+    }
     scenes.set(state.scene);
+    limitCamera(0);
     const hasUrlCam = params.has('cam');
     const cam = hasUrlCam ? readCamera() : null;
     if (cam) { rig.setProjection(cam.projection); rig.animateTo(cam.pose, false); }
-    else if (state.scene === 'hangar') { rig.setProjection('perspective', false); rig.animateTo(hangarFrontPose(), false); }
+    else if (state.scene === 'hangar') {
+      rig.setProjection('perspective', false);
+      rig.setPose(hangarFrontPose());
+      const d = rig.camera.position.distanceTo(rig.controls.target);
+      springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+      springArm.curDist = springArm.desiredDist;
+      springArm.active = true;
+    }
     else frontView(false);
     $('#loader').classList.add('done');
     lastInput = performance.now();            // the slow idle turn counts from when the glider appears
@@ -1738,7 +1750,18 @@ window.__FALCON4_STEP__ = (orbitTest) => {
   const actualDir = rig.camera.position.clone().sub(rig.controls.target).normalize();
   const dirErrDeg = reqDir ? Math.round(THREE.MathUtils.radToDeg(actualDir.angleTo(reqDir)) * 1000) / 1000 : 0;
   return {
+    scene: scenes.current,
     hangarLoaded: Boolean(scenes?.hangar?.loaded),
+    hasFog: Boolean(scene.fog),
+    exposure: Math.round(renderer.toneMappingExposure * 1000) / 1000,
+    rotOpen: Boolean(state.rotOpen),
+    gizmoVisible: Boolean(gizmo?.root?.visible),
+    offsetX: state.offsetX,
+    offsetZ: state.offsetZ,
+    hangarBackView: Boolean(state.hangarBackView),
+    hangarAudio: Boolean(state.hangarAudio),
+    veilOn: Boolean($('#scene-veil')?.classList.contains('on')),
+    btnLoading: Boolean($('#scene-btn')?.classList.contains('loading')),
     calls: renderer.info.render.calls,
     tris: renderer.info.render.triangles,
     fadedPropCount: scenes?.hangar?.fadedPropCount ?? 0,
@@ -1763,6 +1786,8 @@ window.__FALCON4_STEP__ = (orbitTest) => {
       ],
       enablePan: rig.controls.enablePan,
       zoomToCursor: rig.controls.zoomToCursor,
+      minDistance: rig.controls.minDistance,
+      maxDistance: rig.controls.maxDistance,
     },
   };
 };
@@ -2584,27 +2609,109 @@ function setTime(h) {
   $('#time-label').textContent = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60) % 60).padStart(2, '0')}`;
   saveUrlSoon();
 }
-function setScene(id) {
-  state.scene = id;
-  if (id !== 'hangar' && state.hangarBackView) {
-    clearBackParallax();
-    state.hangarBackView = false;
+let sceneReqId = 0;
+const waitMs = (ms) => new Promise((r) => setTimeout(r, ms));
+const nextFrames = (n = 2) => Promise.race([
+  new Promise((r) => {
+    const step = (k) => (k <= 0 ? r() : requestAnimationFrame(() => step(k - 1)));
+    step(n);
+  }),
+  waitMs(250),
+]);
+
+async function setScene(id) {
+  if (!SCENES[id]) id = 'studio';
+  const veil = $('#scene-veil');
+  const btn = $('#scene-btn');
+  if (id === state.scene && scenes.current === id) {
+    sceneReqId++;
+    btn?.classList.remove('loading');
+    veil?.classList.remove('on');
+    return;
   }
-  if (id !== 'hangar' && state.hangarAudio) {
-    state.hangarAudio = false;
-    scenes.setHangarAudio(false);
-  }
-  if (id === 'hill' && !scenes.meadow) toast('Growing the meadow…', true);
-  requestAnimationFrame(() => setTimeout(() => {
-    scenes.set(id);
-    if (id === 'hangar' && record) {
-      rig.setProjection('perspective', false);
-      rig.animateTo(hangarFrontPose(), !reduced);
+  const req = ++sceneReqId;
+  const fromScene = scenes.current || state.scene;
+
+  // 1. Zero-flash lazy load: keep current scene cleanly rendered while Hangar loads
+  if (id === 'hangar' && !scenes.hangar?.loaded) {
+    btn?.classList.add('loading');
+    try {
+      await scenes.preload('hangar');
+    } catch (e) {
+      console.warn('[hangar] failed to load:', e);
+    } finally {
+      if (req === sceneReqId) btn?.classList.remove('loading');
     }
-    syncPanel();
-    saveUrlSoon();
-  }, 30));
+    if (req !== sceneReqId) return;
+  }
+
+  if (id === 'hill' && !scenes.meadow) toast('Growing the meadow…', true);
+
+  // 2. Smooth cinematic fade-out veil (~210 ms) before swapping scene/lights/env/exposure/camera
+  const doFade = Boolean(veil) && !reduced && !THUMB;
+  if (doFade) {
+    veil.classList.add('on');
+    await waitMs(210);
+    if (req !== sceneReqId) return;
+  }
+
+  // 3. Atomic state, gizmo, audio, scene & camera swap while veiled (zero 1-frame pop)
+  state.scene = id;
+  if (fromScene === 'hangar' && id !== 'hangar') {
+    if (state.hangarBackView) {
+      clearBackParallax();
+      state.hangarBackView = false;
+    }
+    if (state.hangarAudio) {
+      state.hangarAudio = false;
+      scenes.setHangarAudio(false);
+    }
+    if (state.rotOpen) state.rotOpen = false;
+    if (Math.abs(state.offsetX) > 1e-4 || Math.abs(state.offsetZ) > 1e-4) {
+      state.offsetX = 0;
+      state.offsetZ = 0;
+      applyPose(false);
+    }
+    resetSpringArm();
+  } else if (id !== 'hangar') {
+    if (state.hangarBackView) { clearBackParallax(); state.hangarBackView = false; }
+    if (state.hangarAudio) { state.hangarAudio = false; scenes.setHangarAudio(false); }
+  }
+
+  rig.transition = null;
+  rig.controls._sphericalDelta?.set(0, 0, 0);
+  rig.controls._panOffset?.set(0, 0, 0);
+
+  scenes.set(id);
+  limitCamera(0);
+
+  if (id === 'hangar' && record) {
+    rig.setProjection('perspective', false);
+    rig.setPose(hangarFrontPose());
+    limitCamera(0);
+    const d = rig.camera.position.distanceTo(rig.controls.target);
+    springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+    springArm.curDist = springArm.desiredDist;
+    springArm.active = true;
+    rig.controls.update();
+  } else if (fromScene === 'hangar' && record) {
+    frontView(false);
+    limitCamera(0);
+    rig.controls.update();
+  }
+
+  syncPanel();
+  saveUrlSoon();
+
+  // 4. Render 2 clean frames behind the veil so lights/env/shadows settle, then fade in
+  if (doFade) {
+    await nextFrames(2);
+    if (req === sceneReqId) veil.classList.remove('on');
+  } else if (veil) {
+    veil.classList.remove('on');
+  }
 }
+window.__FALCON4_SET_SCENE__ = (id) => setScene(id);
 
 let toastTimer;
 function toast(text, keep = false) {
