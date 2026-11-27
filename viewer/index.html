@@ -30,18 +30,20 @@
   <div class="hb-head">
     <button type="button" id="hb-toggle" class="hb-title" aria-expanded="true">Camera Bounds</button>
     <div class="hb-acts">
+      <button type="button" id="hb-unlock" class="hb-btn" aria-pressed="false" title="Temporarily lift orbit limits so you can move freely and capture edges">Unlock</button>
       <button type="button" id="hb-reset" class="hb-btn">Reset</button>
       <button type="button" id="hb-copy" class="hb-btn">Copy JSON</button>
     </div>
   </div>
   <div id="hb-body">
     <div class="hb-live" id="hb-live">az 0° · polar 85° · dist 7.5m</div>
-    <label class="hb-row"><span>Min Azimuth</span><em id="hb-v-minAz">-39°</em><input id="hb-minAz" type="range" min="-180" max="0" step="1" value="-39"></label>
-    <label class="hb-row"><span>Max Azimuth</span><em id="hb-v-maxAz">39°</em><input id="hb-maxAz" type="range" min="0" max="180" step="1" value="39"></label>
-    <label class="hb-row"><span>Min Polar (Top)</span><em id="hb-v-minPol">75.5°</em><input id="hb-minPol" type="range" min="15" max="88" step="0.5" value="75.5"></label>
-    <label class="hb-row"><span>Max Polar (Bot)</span><em id="hb-v-maxPol">98.0°</em><input id="hb-maxPol" type="range" min="45" max="115" step="0.5" value="98"></label>
-    <label class="hb-row"><span>Min Zoom</span><em id="hb-v-minDist">1.2m</em><input id="hb-minDist" type="range" min="0.5" max="6.0" step="0.1" value="1.2"></label>
-    <label class="hb-row"><span>Max Zoom</span><em id="hb-v-maxDist">9.8m</em><input id="hb-maxDist" type="range" min="5.0" max="20.0" step="0.2" value="9.8"></label>
+    <button type="button" id="hb-set-def" class="hb-btn hb-wide" title="Capture current camera angle & distance as the default Hangar start view">Set Default View</button>
+    <label class="hb-row"><span>Min Azimuth</span><em id="hb-v-minAz">-39°</em><button type="button" class="hb-set" data-hb-set="minAzimuthDeg">Set</button><input id="hb-minAz" type="range" min="-180" max="0" step="1" value="-39"></label>
+    <label class="hb-row"><span>Max Azimuth</span><em id="hb-v-maxAz">39°</em><button type="button" class="hb-set" data-hb-set="maxAzimuthDeg">Set</button><input id="hb-maxAz" type="range" min="0" max="180" step="1" value="39"></label>
+    <label class="hb-row"><span>Min Polar (Top)</span><em id="hb-v-minPol">75.5°</em><button type="button" class="hb-set" data-hb-set="minPolarDeg">Set</button><input id="hb-minPol" type="range" min="15" max="88" step="0.5" value="75.5"></label>
+    <label class="hb-row"><span>Max Polar (Bot)</span><em id="hb-v-maxPol">98.0°</em><button type="button" class="hb-set" data-hb-set="maxPolarDeg">Set</button><input id="hb-maxPol" type="range" min="45" max="115" step="0.5" value="98"></label>
+    <label class="hb-row"><span>Min Zoom</span><em id="hb-v-minDist">1.2m</em><button type="button" class="hb-set" data-hb-set="minDistance">Set</button><input id="hb-minDist" type="range" min="0.5" max="6.0" step="0.1" value="1.2"></label>
+    <label class="hb-row"><span>Max Zoom</span><em id="hb-v-maxDist">9.8m</em><button type="button" class="hb-set" data-hb-set="maxDistance">Set</button><input id="hb-maxDist" type="range" min="5.0" max="20.0" step="0.2" value="9.8"></label>
   </div>
 </aside>
 

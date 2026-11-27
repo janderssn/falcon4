@@ -119,8 +119,10 @@ const state = {
   rotOpen: false,
   hangarBackView: false,
   hangarPreset: 'day',
-  // TEMP: live hangar camera bounds (degrees & meters)
+  // TEMP: live hangar camera bounds (degrees & meters) + Orbit & Capture workflow
   hangarBounds: { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 98, minDistance: 1.2, maxDistance: 9.8 },
+  hangarBoundsUnlocked: false,
+  hangarDefaultView: null,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -1093,7 +1095,7 @@ function frontView(animate = !reduced) {
 function zoom(f) {
   const p = rig.pose();
   p.size *= f;
-  if (scenes.current === 'hangar') {
+  if (scenes.current === 'hangar' && !state.hangarBoundsUnlocked) {
     const b = state.hangarBounds;
     const minDist = state.hangarBackView ? 2.0 : b.minDistance;
     const maxDist = state.hangarBackView ? 14.0 : b.maxDistance;
@@ -1388,6 +1390,18 @@ function limitCamera() {
       c.maxPolarAngle = Math.PI;
       c.minDistance = 2.0;
       c.maxDistance = 14.0;
+      return;
+    }
+    if (state.hangarBoundsUnlocked) {
+      // Unlocked for free Orbit & Capture of boundary edges
+      c.enableRotate = true;
+      c.enablePan = true;
+      c.minAzimuthAngle = -Infinity;
+      c.maxAzimuthAngle = Infinity;
+      c.minPolarAngle = 0.05;
+      c.maxPolarAngle = THREE.MathUtils.degToRad(120);
+      c.minDistance = 0.4;
+      c.maxDistance = 30.0;
       return;
     }
     // Lock orbit to the open hangar front opening (driven by tunable hangarBounds)
@@ -2345,18 +2359,65 @@ function wireUi() {
     body.hidden = !body.hidden;
     btn.setAttribute('aria-expanded', String(!body.hidden));
   });
+  const getCurrentCamView = () => ({
+    azDeg: Math.round(THREE.MathUtils.radToDeg(rig.controls.getAzimuthalAngle()) * 10) / 10,
+    polarDeg: Math.round(THREE.MathUtils.radToDeg(rig.controls.getPolarAngle()) * 10) / 10,
+    dist: Math.round(rig.camera.position.distanceTo(rig.controls.target) * 100) / 100,
+    target: rig.controls.target.toArray().map((n) => Math.round(n * 1000) / 1000),
+  });
+  $('#hb-unlock')?.addEventListener('click', () => {
+    const btn = $('#hb-unlock');
+    state.hangarBoundsUnlocked = !state.hangarBoundsUnlocked;
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(state.hangarBoundsUnlocked));
+      btn.textContent = state.hangarBoundsUnlocked ? 'Unlocked' : 'Unlock';
+    }
+    limitCamera();
+    rig.controls.update();
+  });
+  for (const btn of document.querySelectorAll('[data-hb-set]')) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = btn.dataset.hbSet;
+      const cur = getCurrentCamView();
+      if (key === 'minAzimuthDeg') state.hangarBounds.minAzimuthDeg = THREE.MathUtils.clamp(Math.round(cur.azDeg), -180, 0);
+      else if (key === 'maxAzimuthDeg') state.hangarBounds.maxAzimuthDeg = THREE.MathUtils.clamp(Math.round(cur.azDeg), 0, 180);
+      else if (key === 'minPolarDeg') state.hangarBounds.minPolarDeg = THREE.MathUtils.clamp(Math.round(cur.polarDeg * 2) / 2, 15, 88);
+      else if (key === 'maxPolarDeg') state.hangarBounds.maxPolarDeg = THREE.MathUtils.clamp(Math.round(cur.polarDeg * 2) / 2, 45, 115);
+      else if (key === 'minDistance') state.hangarBounds.minDistance = THREE.MathUtils.clamp(Math.round(cur.dist * 10) / 10, 0.5, 6.0);
+      else if (key === 'maxDistance') state.hangarBounds.maxDistance = THREE.MathUtils.clamp(Math.round(cur.dist * 5) / 5, 5.0, 20.0);
+      syncHbUI();
+      limitCamera();
+      rig.controls.update();
+    });
+  }
+  $('#hb-set-def')?.addEventListener('click', () => {
+    const btn = $('#hb-set-def');
+    state.hangarDefaultView = getCurrentCamView();
+    if (btn) {
+      btn.textContent = 'Default View Saved!';
+      btn.classList.add('on');
+      setTimeout(() => { btn.textContent = 'Set Default View'; btn.classList.remove('on'); }, 1500);
+    }
+  });
   $('#hb-reset')?.addEventListener('click', () => {
     Object.assign(state.hangarBounds, hbDefaults);
+    state.hangarDefaultView = null;
+    state.hangarBoundsUnlocked = false;
+    const u = $('#hb-unlock');
+    if (u) { u.setAttribute('aria-pressed', 'false'); u.textContent = 'Unlock'; }
     syncHbUI();
     limitCamera();
     rig.controls.update();
   });
   $('#hb-copy')?.addEventListener('click', async () => {
     const btn = $('#hb-copy');
-    const azDeg = Math.round(THREE.MathUtils.radToDeg(rig.controls.getAzimuthalAngle()) * 10) / 10;
-    const polarDeg = Math.round(THREE.MathUtils.radToDeg(rig.controls.getPolarAngle()) * 10) / 10;
-    const dist = Math.round(rig.camera.position.distanceTo(rig.controls.target) * 100) / 100;
-    const payload = JSON.stringify({ ...state.hangarBounds, current: { azDeg, polarDeg, dist } }, null, 2);
+    const cur = getCurrentCamView();
+    const payload = JSON.stringify({
+      ...state.hangarBounds,
+      defaultView: state.hangarDefaultView || cur,
+    }, null, 2);
     try { await navigator.clipboard.writeText(payload); } catch {
       const ta = document.createElement('textarea'); ta.value = payload; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
     }
