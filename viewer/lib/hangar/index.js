@@ -257,6 +257,11 @@ export class HangarScene {
     return this.audio ? this.audio.setEnabled(Boolean(on)) : false;
   }
 
+  setDustParams(params = {}) {
+    this.volumetrics?.setDustParams(params);
+    this.wildlife?.setDustParams(params);
+  }
+
   toggleAudio() {
     return this.audio ? this.audio.toggle() : false;
   }

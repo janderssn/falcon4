@@ -16,6 +16,14 @@ export class VolumetricSystem {
       uColor: { value: new THREE.Color(0xfff1d6) },
       uStrength: { value: 0.85 },
       uSunDir: { value: new THREE.Vector3(0.4, 0.45, 0.78).normalize() },
+      uDustSize: { value: 0.72 },
+      uDustBrightness: { value: 0.55 },
+      uDustGodRayBoost: { value: 1.25 },
+      uDustShadowVis: { value: 0.75 },
+      uDustSoftness: { value: 1.8 },
+      uDustSpeed: { value: 1.0 },
+      uDustDensity: { value: 0.75 },
+      uDustSkyCutoffZ: { value: 3.2 },
     };
 
     this.frontShaftGroup = new THREE.Group();
@@ -163,9 +171,9 @@ export class VolumetricSystem {
   }
 
   _buildDustMotes() {
-    // 550 fine sunlit dust motes (with 350 in wildlife.js = 900 total across full hangar volume):
-    // 170 inside both side-window god-ray shafts, 80 in front sunbeam, 300 evenly across full 3D hangar volume
-    const count = 550;
+    // 420 photorealistic interior dust motes (with 220 in wildlife.js = 640 total):
+    // 160 inside both side-window god-ray shafts + 260 evenly across the hangar interior (strictly Z in [-5.1, +3.4])
+    const count = 420;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 1337;
@@ -175,30 +183,24 @@ export class VolumetricSystem {
     };
 
     for (let i = 0; i < count; i++) {
-      if (i < 170) {
-        // Dedicated ribbon directly inside both side-window god-ray shafts (X in [+-1.8, +-6.0], Z in [-3.4, -0.3])
+      if (i < 160) {
+        // Dedicated ribbon directly inside both side-window god-ray shafts (X in [+-1.8, +-5.8], Z in [-3.3, -0.4])
         const side = i % 2 === 0 ? 1 : -1;
         const along = rnd();
-        positions[i * 3 + 0] = side * (6.0 - along * 4.2);
-        positions[i * 3 + 1] = 2.65 - along * 2.15 + (rnd() - 0.5) * 0.48;
-        positions[i * 3 + 2] = -3.4 + rnd() * 3.1;
-      } else if (i < 250) {
-        // Open front hangar sunbeam corridor
-        const along = rnd();
-        positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.0;
-        positions[i * 3 + 1] = 0.4 + (1.0 - along * 0.65) * 2.6 + (rnd() - 0.5) * 0.4;
-        positions[i * 3 + 2] = 0.2 + along * 4.0;
+        positions[i * 3 + 0] = side * (5.8 - along * 4.0);
+        positions[i * 3 + 1] = 2.60 - along * 2.10 + (rnd() - 0.5) * 0.45;
+        positions[i * 3 + 2] = -3.3 + rnd() * 2.9;
       } else {
-        // Spread evenly across the entire 3D hangar interior volume (rear, around/above glider, sides, front)
-        const x = (rnd() * 2 - 1) * 5.6;
-        const maxY = Math.min(3.55, 3.65 - Math.abs(x) * Math.tan(THREE.MathUtils.degToRad(12.66)));
+        // Strictly inside hangar interior volume (Z in [-5.1, +3.4], Y under roof)
+        const x = (rnd() * 2 - 1) * 5.4;
+        const maxY = Math.min(3.25, 3.45 - Math.abs(x) * Math.tan(THREE.MathUtils.degToRad(12.66)));
         positions[i * 3 + 0] = x;
         positions[i * 3 + 1] = 0.25 + rnd() * (maxY - 0.25);
-        positions[i * 3 + 2] = -5.2 + rnd() * 9.4;
+        positions[i * 3 + 2] = -5.1 + rnd() * 8.5;
       }
       seeds[i * 3 + 0] = rnd() * 6.283;
       seeds[i * 3 + 1] = 0.45 + rnd() * 0.85;
-      seeds[i * 3 + 2] = rnd(); // normalized size 0..1
+      seeds[i * 3 + 2] = rnd(); // 0..0.75 ultra-fine specks, 0.75..1.0 softer bokeh puffs
     }
 
     const geo = new THREE.BufferGeometry();
@@ -214,6 +216,14 @@ export class VolumetricSystem {
         uColor: this.uniforms.uColor,
         uStrength: this.uniforms.uStrength,
         uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+        uDustSize: this.uniforms.uDustSize,
+        uDustBrightness: this.uniforms.uDustBrightness,
+        uDustGodRayBoost: this.uniforms.uDustGodRayBoost,
+        uDustShadowVis: this.uniforms.uDustShadowVis,
+        uDustSoftness: this.uniforms.uDustSoftness,
+        uDustSpeed: this.uniforms.uDustSpeed,
+        uDustDensity: this.uniforms.uDustDensity,
+        uDustSkyCutoffZ: this.uniforms.uDustSkyCutoffZ,
       },
       vertexShader: `
         #include <common>
@@ -221,40 +231,63 @@ export class VolumetricSystem {
         attribute vec3 aSeed;
         uniform float uTime;
         uniform float uPixelRatio;
+        uniform float uDustSize;
+        uniform float uDustGodRayBoost;
+        uniform float uDustShadowVis;
+        uniform float uDustSpeed;
+        uniform float uDustDensity;
+        uniform float uDustSkyCutoffZ;
         varying float vAlpha;
+        varying float vBokeh;
         void main() {
+          // Live density fraction gate
+          if (fract(aSeed.x * 13.73 + aSeed.z * 7.19) > uDustDensity) {
+            vAlpha = 0.0;
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            gl_PointSize = 0.0;
+            return;
+          }
           vec3 p = position;
-          // Short staggered random lifespan (~3.0-5.5s visible, ~2.5-4.5s quiet off-interval -> ~55% duty cycle)
+          // Short staggered random lifespan (~3.0-5.5s visible, ~2.5-4.5s quiet off-interval)
           float cycleDur = 5.5 + aSeed.y * 4.5;
-          float rawCycle = (uTime + aSeed.x * 2.1) / cycleDur;
+          float rawCycle = (uTime * max(uDustSpeed, 0.1) + aSeed.x * 2.1) / cycleDur;
           float cycleIdx = floor(rawCycle);
           float phase = fract(rawCycle);
-          float visFrac = 0.55;
-          float lifeFade = smoothstep(0.0, visFrac * 0.24, phase) * (1.0 - smoothstep(visFrac * 0.72, visFrac, phase));
+          float visFrac = 0.54;
+          float lifeFade = smoothstep(0.0, visFrac * 0.26, phase) * (1.0 - smoothstep(visFrac * 0.70, visFrac, phase));
 
-          // Fresh pseudo-random spawn jitter each cycle + gentle lazy drift & curl
+          // Fresh pseudo-random spawn jitter each cycle + gentle organic 3D curl drift
           p += vec3(
-            sin(cycleIdx * 12.9898 + aSeed.x * 7.1) * 0.45,
-            cos(cycleIdx * 78.233 + aSeed.z * 5.3) * 0.25,
-            sin(cycleIdx * 37.719 + aSeed.y * 9.7) * 0.45
+            sin(cycleIdx * 12.9898 + aSeed.x * 7.1) * 0.38,
+            cos(cycleIdx * 78.233 + aSeed.z * 5.3) * 0.22,
+            sin(cycleIdx * 37.719 + aSeed.y * 9.7) * 0.38
           );
-          float t = uTime * 0.15 * aSeed.y + aSeed.x;
-          p.x += sin(t * 0.9 + p.z * 0.35) * 0.24;
-          p.y += cos(t * 0.68 + aSeed.z + p.x * 0.25) * 0.14;
-          p.z += sin(t * 0.54 + aSeed.x + p.y * 0.4) * 0.20;
+          float t = uTime * 0.14 * uDustSpeed * aSeed.y + aSeed.x;
+          p.x += sin(t * 0.9 + p.z * 0.35) * 0.22;
+          p.y += cos(t * 0.68 + aSeed.z + p.x * 0.25) * 0.13;
+          p.z += sin(t * 0.54 + aSeed.x + p.y * 0.4) * 0.18;
 
-          // Brightest inside the sunlit front opening and diagonal side-panel god rays
-          float frontLit = smoothstep(-1.2, 3.2, p.z);
-          float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.65) * smoothstep(1.6, 5.4, abs(p.x));
-          float inShaft = max(frontLit, sideLit);
-          float twinkle = 0.78 + 0.22 * sin(t * 2.2 + aSeed.z * 5.0);
-          vAlpha = mix(0.62, 0.96, inShaft) * lifeFade * twinkle;
-
+          // Keep strictly inside hangar interior — fade softly near open front & near camera lens
+          float frontFade = smoothstep(uDustSkyCutoffZ + 0.3, uDustSkyCutoffZ - 1.0, p.z);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float nearFade = smoothstep(0.6, 1.8, -mv.z);
+
+          // Real sunbeam-driven illumination: warm in god rays, readable in shaded interior
+          float sideShaft = exp(-pow(p.z + 1.95, 2.0) * 0.70) * smoothstep(1.8, 5.4, abs(p.x));
+          float frontShaft = smoothstep(0.2, 2.3, p.z) * frontFade;
+          float inShaft = max(sideShaft, frontShaft * 0.85);
+          float twinkle = 0.78 + 0.22 * sin(t * 2.2 + aSeed.z * 5.0);
+
+          float isBokeh = step(0.75, aSeed.z);
+          vBokeh = isBokeh;
+          float baseAlpha = mix(0.36 * uDustShadowVis, 0.58 * uDustGodRayBoost, inShaft) * mix(1.0, 0.58, isBokeh);
+          vAlpha = baseAlpha * lifeFade * twinkle * frontFade * nearFade;
+
           gl_Position = projectionMatrix * mv;
           #include <logdepthbuf_vertex>
-          float depthScale = clamp(5.5 / max(-mv.z, 1.5), 0.72, 1.30);
-          gl_PointSize = clamp((3.4 + aSeed.z * 2.8) * uPixelRatio * depthScale, 3.0 * uPixelRatio, 8.0 * uPixelRatio);
+          float depthScale = clamp(5.5 / max(-mv.z, 1.5), 0.75, 1.20);
+          float sz = mix(1.8 + (aSeed.z / 0.75) * 1.4, 3.5 + ((aSeed.z - 0.75) / 0.25) * 1.7, isBokeh) * uDustSize;
+          gl_PointSize = clamp(sz * uPixelRatio * depthScale, 1.2 * uPixelRatio, 8.5 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -262,15 +295,19 @@ export class VolumetricSystem {
         #include <logdepthbuf_pars_fragment>
         uniform vec3 uColor;
         uniform float uStrength;
+        uniform float uDustBrightness;
+        uniform float uDustSoftness;
         varying float vAlpha;
+        varying float vBokeh;
         void main() {
-          if (vAlpha < 0.01) discard;
+          if (vAlpha < 0.008) discard;
           float r = length(gl_PointCoord - vec2(0.5));
-          float disc = smoothstep(0.5, 0.12, r);
-          float a = disc * vAlpha * clamp(uStrength, 0.85, 1.25);
-          if (a < 0.01) discard;
-          // Note: AdditiveBlending multiplies rgb by a; do NOT pre-multiply rgb by a!
-          vec3 col = mix(uColor, vec3(1.0, 0.97, 0.90), 0.35) * 1.45;
+          if (r >= 0.5) discard;
+          float falloff = pow(clamp(1.0 - r * 2.0, 0.0, 1.0), uDustSoftness + vBokeh * 0.55);
+          float a = falloff * vAlpha * uDustBrightness * clamp(uStrength, 0.85, 1.20);
+          if (a < 0.006) discard;
+          // Warm cream/amber sunlit tint (never harsh pure white)
+          vec3 col = mix(uColor, vec3(1.0, 0.90, 0.74), 0.35);
           gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
@@ -296,6 +333,17 @@ export class VolumetricSystem {
 
   setEnabled(on) {
     this.root.visible = on;
+  }
+
+  setDustParams(p = {}) {
+    if (p.size !== undefined) this.uniforms.uDustSize.value = p.size;
+    if (p.brightness !== undefined) this.uniforms.uDustBrightness.value = p.brightness;
+    if (p.godRayBoost !== undefined) this.uniforms.uDustGodRayBoost.value = p.godRayBoost;
+    if (p.shadowVis !== undefined) this.uniforms.uDustShadowVis.value = p.shadowVis;
+    if (p.softness !== undefined) this.uniforms.uDustSoftness.value = p.softness;
+    if (p.speed !== undefined) this.uniforms.uDustSpeed.value = p.speed;
+    if (p.density !== undefined) this.uniforms.uDustDensity.value = p.density;
+    if (p.skyCutoffZ !== undefined) this.uniforms.uDustSkyCutoffZ.value = p.skyCutoffZ;
   }
 
   setStrength(val) {

@@ -114,6 +114,10 @@ export class Scenes {
     return this.hangar ? this.hangar.setAudioEnabled(Boolean(on)) : false;
   }
 
+  setHangarDustParams(params) {
+    this.hangar?.setDustParams(params);
+  }
+
   attachGlider(gliderRoot) {
     this.gliderRoot = gliderRoot || null;
     this.hangar?.attachGlider(this.gliderRoot);

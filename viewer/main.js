@@ -120,6 +120,8 @@ const state = {
   hangarBackView: false,
   hangarPreset: 'day',
   hangarAudio: false,
+  // TEMP: live hangar dust tuner defaults
+  dustParams: { size: 0.72, brightness: 0.55, godRayBoost: 1.25, shadowVis: 0.75, softness: 1.8, speed: 1.0, density: 0.75, skyCutoffZ: 3.2 },
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -2347,6 +2349,8 @@ function syncHangarToolbar() {
         : '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/>';
     }
   }
+  const dt = $('#hangar-dust');
+  if (dt) dt.hidden = !inHangar;
 }
 
 function syncPanel() {
@@ -2542,6 +2546,54 @@ function wireUi() {
       gizmoPos: gizmo?.root?.position?.toArray()?.map((n) => Math.round(n * 100) / 100),
     };
   };
+  // TEMP: wire Hangar Dust Tuner widget
+  const dustDefaults = { size: 0.72, brightness: 0.55, godRayBoost: 1.25, shadowVis: 0.75, softness: 1.8, speed: 1.0, density: 0.75, skyCutoffZ: 3.2 };
+  const dustFields = [
+    ['dt-size', 'dt-v-size', 'size', (v) => v.toFixed(2)],
+    ['dt-brightness', 'dt-v-brightness', 'brightness', (v) => v.toFixed(2)],
+    ['dt-godRayBoost', 'dt-v-godRayBoost', 'godRayBoost', (v) => v.toFixed(2)],
+    ['dt-shadowVis', 'dt-v-shadowVis', 'shadowVis', (v) => v.toFixed(2)],
+    ['dt-softness', 'dt-v-softness', 'softness', (v) => v.toFixed(2)],
+    ['dt-speed', 'dt-v-speed', 'speed', (v) => v.toFixed(2)],
+    ['dt-density', 'dt-v-density', 'density', (v) => v.toFixed(2)],
+    ['dt-skyCutoffZ', 'dt-v-skyCutoffZ', 'skyCutoffZ', (v) => `${v.toFixed(1)}m`],
+  ];
+  const syncDustUI = () => {
+    for (const [id, vid, key, fmt] of dustFields) {
+      const inp = $(`#${id}`), out = $(`#${vid}`);
+      if (inp) inp.value = String(state.dustParams[key]);
+      if (out) out.textContent = fmt(state.dustParams[key]);
+    }
+    scenes.setHangarDustParams(state.dustParams);
+  };
+  for (const [id, vid, key, fmt] of dustFields) {
+    $(`#${id}`)?.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      state.dustParams[key] = v;
+      const out = $(`#${vid}`);
+      if (out) out.textContent = fmt(v);
+      scenes.setHangarDustParams(state.dustParams);
+    });
+  }
+  $('#dt-toggle')?.addEventListener('click', () => {
+    const body = $('#dt-body'), btn = $('#dt-toggle');
+    if (!body || !btn) return;
+    body.hidden = !body.hidden;
+    btn.setAttribute('aria-expanded', String(!body.hidden));
+  });
+  $('#dt-reset')?.addEventListener('click', () => {
+    Object.assign(state.dustParams, dustDefaults);
+    syncDustUI();
+  });
+  $('#dt-copy')?.addEventListener('click', async () => {
+    const btn = $('#dt-copy');
+    const payload = JSON.stringify(state.dustParams, null, 2);
+    try { await navigator.clipboard.writeText(payload); } catch {
+      const ta = document.createElement('textarea'); ta.value = payload; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    if (btn) { btn.textContent = 'Copied!'; btn.classList.add('on'); setTimeout(() => { btn.textContent = 'Copy JSON'; btn.classList.remove('on'); }, 1600); }
+  });
+  syncDustUI();
   wireSwipe();
   $('#btn-front').onclick = () => { stopTour(); frontView(); };
   $('#btn-2d').onclick = toggle2d;

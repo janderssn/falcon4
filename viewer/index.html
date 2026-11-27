@@ -25,6 +25,27 @@
   <p id="subtitle">Wills Wing · 170</p>
 </header>
 
+<!-- TEMP: hangar dust tuner (remove once final values are locked) -->
+<aside id="hangar-dust" class="hud glass" aria-label="Hangar dust tuner" hidden>
+  <div class="dt-head">
+    <button type="button" id="dt-toggle" class="dt-title" aria-expanded="true">Dust</button>
+    <div class="dt-acts">
+      <button type="button" id="dt-reset" class="dt-btn">Reset</button>
+      <button type="button" id="dt-copy" class="dt-btn">Copy JSON</button>
+    </div>
+  </div>
+  <div id="dt-body">
+    <label class="dt-row"><span>Size</span><em id="dt-v-size">0.72</em><input id="dt-size" type="range" min="0.3" max="1.8" step="0.02" value="0.72"></label>
+    <label class="dt-row"><span>Brightness</span><em id="dt-v-brightness">0.55</em><input id="dt-brightness" type="range" min="0.1" max="1.5" step="0.02" value="0.55"></label>
+    <label class="dt-row"><span>God-Ray Boost</span><em id="dt-v-godRayBoost">1.25</em><input id="dt-godRayBoost" type="range" min="0.2" max="2.5" step="0.05" value="1.25"></label>
+    <label class="dt-row"><span>Shadow Visibility</span><em id="dt-v-shadowVis">0.75</em><input id="dt-shadowVis" type="range" min="0.1" max="1.5" step="0.02" value="0.75"></label>
+    <label class="dt-row"><span>Softness</span><em id="dt-v-softness">1.80</em><input id="dt-softness" type="range" min="0.5" max="3.5" step="0.05" value="1.8"></label>
+    <label class="dt-row"><span>Speed</span><em id="dt-v-speed">1.00</em><input id="dt-speed" type="range" min="0.2" max="3.0" step="0.05" value="1.0"></label>
+    <label class="dt-row"><span>Density</span><em id="dt-v-density">0.75</em><input id="dt-density" type="range" min="0.1" max="1.0" step="0.02" value="0.75"></label>
+    <label class="dt-row"><span>Sky Cutoff Z</span><em id="dt-v-skyCutoffZ">3.2m</em><input id="dt-skyCutoffZ" type="range" min="1.5" max="4.5" step="0.1" value="3.2"></label>
+  </div>
+</aside>
+
 <div id="topbtns" class="hud">
 <button type="button" id="btn-custom" class="pillbtn glass" aria-controls="custom" aria-expanded="false" title="Customize (C)">
   <svg viewBox="0 0 24 24" class="ic"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Customize</span>
