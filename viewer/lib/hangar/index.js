@@ -98,6 +98,7 @@ export class HangarScene {
     this.materialSys = new CustomMaterialSystem(renderer);
     this.aaaEnv = new AAAEnvironment(this.worldGroup, renderer);
     this.wildlife = new WildlifeSystem(this.worldGroup, this.loader);
+    this.audio = new AirfieldWindAudio();
 
     this.gtaoExclude = [
       this.volumetrics.root,
@@ -247,7 +248,17 @@ export class HangarScene {
       this.volumetrics.setEnabled(this.state.volumetrics);
       this.wildlife.setEnabled(this.state.wildlife);
       this.atmosphere.setShadows(this.state.shadows);
+    } else if (this.audio?.active) {
+      this.audio.setEnabled(false);
     }
+  }
+
+  setAudioEnabled(on) {
+    return this.audio ? this.audio.setEnabled(Boolean(on)) : false;
+  }
+
+  toggleAudio() {
+    return this.audio ? this.audio.toggle() : false;
   }
 
   attachGlider(gliderRoot) {
@@ -271,6 +282,7 @@ export class HangarScene {
     this.materialSys.syncSun(this.atmosphere.sunDir, preset.sunColor, preset.fogColor);
     this.aaaEnv.syncSun(this.atmosphere.sunDir, preset);
     this.wildlife.syncSun(preset);
+    this.audio?.setSunPreset(preset.id);
     if (this.postFx) this.postFx.syncPreset(preset.id);
     return preset;
   }
@@ -372,6 +384,7 @@ export class HangarScene {
       box.min.sub(origin);
       box.max.sub(origin);
       const center = box.getCenter(new THREE.Vector3());
+      const fullName = `${o.name} ${o.parent?.name || ''}`;
       this._occluderProps.push({
         name: o.name,
         mesh: o,
@@ -379,7 +392,8 @@ export class HangarScene {
         localBox: box,
         center,
         opacity: 1.0,
-        isChair: /Chairs/i.test(o.name) || (o.parent && /Chairs/i.test(o.parent.name)),
+        isRearProp: /GliderRack|PackedGliders|Ladder|SwingStand|AluTubes/i.test(fullName),
+        isChair: /Chairs/i.test(fullName),
         isCat: false,
       });
     });
@@ -463,17 +477,29 @@ export class HangarScene {
     const toBox = new THREE.Vector3();
     const clampedPt = new THREE.Vector3();
     let fadedCount = 0;
+    let rearPropsTotal = 0;
+    let rearPropsFaded = 0;
     let chairOrCatOccluded = false;
+    const inRearZone = camL.z < -1.8;
 
     for (const prop of this._occluderProps) {
-      let occluded = this._segmentIntersectsBox(camL, tgtL, prop.localBox, 0.45, 0.92);
-      if (!occluded) {
-        prop.localBox.clampPoint(camL, clampedPt);
-        const distToCam = clampedPt.distanceTo(camL);
-        if (distToCam < 1.45) {
+      let occluded = false;
+      if (prop.isRearProp) {
+        rearPropsTotal++;
+        // Rear-zone rule: fade ALL rear-wall props whenever orbiting behind the glider (camL.z < -1.8)
+        occluded = inRearZone || this._segmentIntersectsBox(camL, tgtL, prop.localBox, 1.2, 0.92);
+      } else {
+        // Wide-frustum / proximity rule for side & front props (LeftRack, Chairs + Cat, RightDolly)
+        occluded = this._segmentIntersectsBox(camL, tgtL, prop.localBox, 1.4, 0.92);
+        if (!occluded) {
+          prop.localBox.clampPoint(camL, clampedPt);
+          const distToCam = clampedPt.distanceTo(camL);
           toBox.subVectors(prop.center, camL);
+          const proj = toBox.dot(sightDir);
           const len = toBox.length();
-          if (len < 1e-4 || toBox.dot(sightDir) / len > -0.35) {
+          if (distToCam < 2.5 && (len < 1e-4 || proj / len > -0.35)) {
+            occluded = true;
+          } else if (proj > 0.15 && proj < sightLen - 0.3 && len > 1e-4 && proj / len > 0.86) {
             occluded = true;
           }
         }
@@ -498,6 +524,7 @@ export class HangarScene {
         prop.mesh.visible = false;
         fadedCount++;
         if (prop.isCat) catFaded = true;
+        if (prop.isRearProp) rearPropsFaded++;
       } else if (prop.opacity >= 0.995) {
         prop.mesh.visible = true;
         for (const m of prop.mats) {
@@ -512,6 +539,7 @@ export class HangarScene {
         prop.mesh.visible = true;
         fadedCount++;
         if (prop.isCat) catFaded = true;
+        if (prop.isRearProp) rearPropsFaded++;
         for (const m of prop.mats) {
           if (!m.transparent) {
             m.transparent = true;
@@ -523,6 +551,8 @@ export class HangarScene {
       }
     }
     this.fadedPropCount = fadedCount;
+    this.rearPropsTotal = rearPropsTotal;
+    this.rearPropsFaded = rearPropsFaded;
     this.catFaded = catFaded;
   }
 

@@ -443,6 +443,12 @@ export class AirfieldWindAudio {
     }, 1400 + Math.random() * 2200);
   }
 
+  setEnabled(on) {
+    const want = Boolean(on);
+    if (want === this.active) return this.active;
+    return this.toggle();
+  }
+
   toggle() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;

@@ -119,6 +119,7 @@ const state = {
   rotOpen: false,
   hangarBackView: false,
   hangarPreset: 'day',
+  hangarAudio: false,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -1648,6 +1649,8 @@ window.__FALCON4_STEP__ = (orbitTest) => {
     calls: renderer.info.render.calls,
     tris: renderer.info.render.triangles,
     fadedPropCount: scenes?.hangar?.fadedPropCount ?? 0,
+    rearPropsTotal: scenes?.hangar?.rearPropsTotal ?? 0,
+    rearPropsFaded: scenes?.hangar?.rearPropsFaded ?? 0,
     catFaded: Boolean(scenes?.hangar?.catFaded),
     occluderTracked: scenes?.hangar?._occluderProps?.length ?? 0,
     camLocal: {
@@ -2262,6 +2265,20 @@ function syncHangarToolbar() {
     btnBack.hidden = !inHangar;
     btnBack.setAttribute('aria-pressed', String(state.hangarBackView));
   }
+  const btnAudio = $('#btn-hangar-audio');
+  if (btnAudio) {
+    btnAudio.hidden = !inHangar;
+    btnAudio.setAttribute('aria-pressed', String(state.hangarAudio));
+    btnAudio.title = state.hangarAudio
+      ? 'Ambient airfield sounds: On (click to mute)'
+      : 'Ambient airfield sounds: Muted (click to enable)';
+    const ic = $('#ic-hangar-audio');
+    if (ic) {
+      ic.innerHTML = state.hangarAudio
+        ? '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+        : '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/>';
+    }
+  }
 }
 
 function syncPanel() {
@@ -2379,6 +2396,10 @@ function setScene(id) {
     clearBackParallax();
     state.hangarBackView = false;
   }
+  if (id !== 'hangar' && state.hangarAudio) {
+    state.hangarAudio = false;
+    scenes.setHangarAudio(false);
+  }
   if (id === 'hill' && !scenes.meadow) toast('Growing the meadow…', true);
   requestAnimationFrame(() => setTimeout(() => {
     scenes.set(id);
@@ -2415,6 +2436,10 @@ function wireUi() {
     syncHangarToolbar();
   };
   $('#btn-hangar-back').onclick = () => setHangarBackView(!state.hangarBackView);
+  $('#btn-hangar-audio').onclick = () => {
+    state.hangarAudio = scenes.setHangarAudio(!state.hangarAudio);
+    syncHangarToolbar();
+  };
   window.addEventListener('pointermove', (e) => {
     if (!state.hangarBackView) return;
     backParallax.targetX = THREE.MathUtils.clamp((e.clientX / Math.max(innerWidth, 1)) * 2 - 1, -1, 1);

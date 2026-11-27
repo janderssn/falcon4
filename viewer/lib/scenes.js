@@ -110,6 +110,10 @@ export class Scenes {
     if (this.hangar) this.hangar.setPreset(this.hangarPreset);
   }
 
+  setHangarAudio(on) {
+    return this.hangar ? this.hangar.setAudioEnabled(Boolean(on)) : false;
+  }
+
   attachGlider(gliderRoot) {
     this.gliderRoot = gliderRoot || null;
     this.hangar?.attachGlider(this.gliderRoot);
