@@ -42,7 +42,9 @@ STRAIGHT = {"3-panel": 0.12, "mylar": 0.12}
 STRAIGHT_ALL = {"u2/3-panel", "u2/mylar"}
 # The U2's top panel seam (P3 to P4) is not where its undersurface is sewn on: the picker's top and bottom
 # drawings have the two lines at different shares of the chord, and the model (u2-gemini) has both seams.
-# Its top maps are measured from the leading to the trailing edge, as drawn.
+# Its top maps are measured from the leading to the trailing edge, as drawn. The model's top panels are the
+# design's zones (P1, P3, P4): the viewer colours each panel whole (lib/designs.js uDesignOwn), on the model's
+# own seam, and the drawn seam (2.5 cm off it, more at the tip) is left out.
 OWN_TOP_SEAM = {"u2"}
 # The undersurface in laminate (as on Sport 3s in photos), which the picker does not list for P5:
 # the clear and white X-ply laminates it offers for the other panels. Marked "extra" in designs.json.
@@ -601,6 +603,8 @@ def main():
                 skip = {zones.index("P4") + 1} if under is not None and "P4" in zones else set()
                 seams = [{"zone": k + 1, "st": [round(float(c), 5) for q in pts for c in (q[0] / NS, q[1] / NT)]}
                          for k, pts in seam_lines(tex, ids, painted, skip) if k + 1 != p1]
+                if side == "top" and glider in OWN_TOP_SEAM:
+                    seams = []                   # the model's own panels and seams (the viewer colours them by panel)
                 with open(os.path.join(OUT, glider, f"{key}-{side}-seams.json"), "w") as f:
                     json.dump(seams, f, separators=(",", ":"))
                 n_tex = (len(zones) + 3) // 4

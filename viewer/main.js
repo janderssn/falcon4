@@ -36,8 +36,10 @@ const ZONES = {
   nose: { name: 'Nose cone', parts: /^Sail nose cone$/, mats: ['U2 160 Nosecone'] },   // (the Falcon's "Nosecone" is leading-edge cloth: p1)
   // The Sport 3's kingpost and control frame are black anodised as built (`black`: those parts in that
   // material); its battens share a material with small frame parts and keep their own finish (`not`).
-  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve'],
-    black: [/^(Kingpost|Downtube [LR]|Basetube \(speedbar\))$/, 'Black anodised aluminium'], not: /^Sail .*batten/ },
+  frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve',
+      'Tube aluminium (anodised)', 'Sleeve aluminium (anodised)'],
+    black: [/^(Kingpost|Downtube( Litestream| round)? [LR]|Basetube \(speedbar\)|Basetube streamline( \(wheel kit\))?|Speedbar round)$/,
+      ['Black anodised aluminium', 'Control bar black anodise']], not: /^Sail .*batten/ },
 };
 const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
 const zoneOf = (mesh) => {
@@ -45,7 +47,7 @@ const zoneOf = (mesh) => {
   const { black } = ZONES.frame;
   return Object.keys(ZONES).find((z) => ZONES[z].parts?.test(part))
     || Object.keys(ZONES).find((z) => ZONES[z].mats?.includes(mat) && !ZONES[z].not?.test(part))
-    || (black[0].test(part) && mat === black[1] ? 'frame' : undefined);
+    || (black[0].test(part) && black[1].includes(mat) ? 'frame' : undefined);
 };
 // A fifth entry: a two-tone finish. The parts that are black anodised as built (ZONES.frame.black: the Sport 3's
 // kingpost and control frame) keep that; the swatch shows it as its second colour.
@@ -318,7 +320,7 @@ function prepareTints(rec) {
     const t = rec.tints[zone];
     t.meshes.push(mesh);
     const { black } = ZONES.frame;
-    mesh.userData.ownBlack = zone === 'frame' && black[0].test(mesh.userData.part.name) && name === black[1];
+    mesh.userData.ownBlack = zone === 'frame' && black[0].test(mesh.userData.part.name) && black[1].includes(name);
     // Sail cloth becomes a physical material whose look follows the cloth type (lib/cloth.js).
     const cloth = SAIL_ZONES.includes(zone);
     if (cloth) {
@@ -603,9 +605,10 @@ function restingPose(rec) {
   // Flat arrays and plain loops: the models have up to a million vertices.
   const v = new THREE.Vector3(), SLICE = 0.002;
   const low = new Map();
+  const soft = new Set((rec.source.ropes || []).map((r) => r.part));          // a rope's loose end lies where it fell in the last pose
   for (const m of rec.meshes) {
     const part = m.userData.part;
-    if (!part.ground || part.group === '04' || part.group === '05') continue;   // soft ropes and slack wires do not hold the glider up
+    if (!part.ground || part.group === '04' || part.group === '05' || soft.has(part.name)) continue;   // soft ropes and slack wires do not hold the glider up
     if (!fitted(rec, part, gliderOf(rec))) continue;                              // nor a basetube that is not fitted
     const pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {

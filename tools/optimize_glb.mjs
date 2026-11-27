@@ -14,6 +14,9 @@ const sharp = (await imp('sharp')).default;
 
 const [, , input, output, errArg, reportPath] = process.argv;
 const ERR = Number(errArg || 0.0003);
+// KEEP: a pattern of part names that keep every triangle (the U2's sail: its undersurface is sewn to the top
+// surface inside that surface's triangles, and a simplified top surface would leave the seam).
+const KEEP = process.env.KEEP ? new RegExp(process.env.KEEP) : null;
 await Promise.all([MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 const doc = await io.read(input);
@@ -56,7 +59,7 @@ for (const node of doc.getRoot().listNodes()) {
       const idx = prim.getIndices();
       const n = idx.getCount() / 3;
       b += n;
-      if (n < 64) { a += n; continue; }
+      if (n < 64 || KEEP?.test(node.getName())) { a += n; continue; }
       const pos = prim.getAttribute('POSITION').getArray();
       // Shape targets (morphs) count too: the simplified mesh must hold every shape, not only the
       // base one, so each target's offsets go in as attributes (in metres, weight 1).
