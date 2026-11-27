@@ -158,25 +158,6 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #navstack .icon[hidden] { display: none; }
 #navstack .icon.on, #navstack .icon[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 
-/* TEMP: hangar camera bounds widget (top-left below title) */
-#hangar-bounds { left: 22px; top: 86px; width: 292px; padding: 8px 10px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 6; font-size: 11px; }
-#hangar-bounds[hidden] { display: none; }
-.hb-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
-.hb-title { background: none; border: 0; color: var(--ink); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 0; cursor: pointer; white-space: nowrap; }
-.hb-acts { display: flex; gap: 4px; }
-.hb-btn { height: 22px; padding: 0 7px; border-radius: 6px; background: rgba(255, 255, 255, .1); border: 1px solid var(--line); color: var(--ink); font-size: 10px; cursor: pointer; white-space: nowrap; }
-.hb-btn:hover { background: rgba(255, 255, 255, .2); }
-.hb-btn.on, .hb-btn[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
-.hb-wide { width: 100%; height: 24px; }
-#hb-body { display: flex; flex-direction: column; gap: 4px; }
-#hb-body[hidden] { display: none; }
-.hb-live { font-family: var(--mono); font-size: 10px; color: var(--accent); padding: 3px 6px; border-radius: 6px; background: rgba(0, 0, 0, .28); text-align: center; }
-.hb-row { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 6px; align-items: center; color: var(--muted); }
-.hb-row em { font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--ink); }
-.hb-set { height: 18px; padding: 0 6px; border-radius: 5px; background: rgba(216, 240, 138, .16); border: 1px solid rgba(216, 240, 138, .35); color: var(--accent); font-size: 9.5px; font-weight: 600; cursor: pointer; }
-.hb-set:hover { background: var(--accent); color: var(--accent-ink); }
-.hb-row input { grid-column: 1 / -1; width: 100%; height: 14px; accent-color: var(--accent); cursor: pointer; margin: 0; }
-
 /* ---- part chip, bottom centre (above the pose bar) */
 #chip { left: 50%; bottom: 76px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; transition: left .28s ease, opacity .45s ease; }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }

@@ -119,10 +119,6 @@ const state = {
   rotOpen: false,
   hangarBackView: false,
   hangarPreset: 'day',
-  // TEMP: live hangar camera bounds (degrees & meters) + Orbit & Capture workflow
-  hangarBounds: { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 98, minDistance: 1.2, maxDistance: 9.8 },
-  hangarBoundsUnlocked: false,
-  hangarDefaultView: null,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -1095,10 +1091,9 @@ function frontView(animate = !reduced) {
 function zoom(f) {
   const p = rig.pose();
   p.size *= f;
-  if (scenes.current === 'hangar' && !state.hangarBoundsUnlocked) {
-    const b = state.hangarBounds;
-    const minDist = state.hangarBackView ? 2.0 : b.minDistance;
-    const maxDist = state.hangarBackView ? 14.0 : b.maxDistance;
+  if (scenes.current === 'hangar') {
+    const minDist = state.hangarBackView ? 2.0 : 0.9;
+    const maxDist = state.hangarBackView ? 14.0 : 10.2;
     const tan = Math.tan(THREE.MathUtils.degToRad(19));
     p.size = THREE.MathUtils.clamp(p.size, 2 * minDist * tan, 2 * maxDist * tan);
   }
@@ -1377,6 +1372,15 @@ function focusPart(part) {
 // Keep the camera out of the ground and inside the hangar. The orbit's lowest angle is
 // set so the camera stays above the floor; anything that still gets out (zooming out,
 // moving the target) is pulled back along the line to the target.
+const HANGAR_ROOF_TAN = Math.tan(THREE.MathUtils.degToRad(12.66));
+function hangarOrigin() {
+  if (scenes.hangar?.worldGroup) return scenes.hangar.worldGroup.position;
+  return new THREE.Vector3(record?.center?.x ?? 0, record?.ground ?? 0, record?.center?.z ?? 0);
+}
+function hangarRoofMaxY(lx, lz) {
+  return lz <= 4.4 ? (3.98 - Math.abs(lx) * HANGAR_ROOF_TAN) - 0.42 : 3.55;
+}
+
 function limitCamera() {
   const lim = record && scenes.cameraLimits();
   const c = rig.controls;
@@ -1392,30 +1396,19 @@ function limitCamera() {
       c.maxDistance = 14.0;
       return;
     }
-    if (state.hangarBoundsUnlocked) {
-      // Unlocked for free Orbit & Capture of boundary edges
-      c.enableRotate = true;
-      c.enablePan = true;
-      c.minAzimuthAngle = -Infinity;
-      c.maxAzimuthAngle = Infinity;
-      c.minPolarAngle = 0.05;
-      c.maxPolarAngle = THREE.MathUtils.degToRad(120);
-      c.minDistance = 0.4;
-      c.maxDistance = 30.0;
-      return;
-    }
-    // Lock orbit to the open hangar front opening (driven by tunable hangarBounds)
-    const b = state.hangarBounds;
+    // Full 360° free orbit inside the hangar bay & front apron
     c.enableRotate = true;
     c.enablePan = true;
-    c.minAzimuthAngle = THREE.MathUtils.degToRad(b.minAzimuthDeg);
-    c.maxAzimuthAngle = THREE.MathUtils.degToRad(b.maxAzimuthDeg);
-    c.minPolarAngle = THREE.MathUtils.degToRad(b.minPolarDeg);
-    c.maxPolarAngle = THREE.MathUtils.degToRad(b.maxPolarDeg);
-    c.minDistance = b.minDistance;
-    c.maxDistance = b.maxDistance;
-    const g = record ? record.ground : 0;
-    c.target.y = Math.max(c.target.y, g + 0.45);
+    c.minAzimuthAngle = -Infinity;
+    c.maxAzimuthAngle = Infinity;
+    c.minPolarAngle = 0.08;
+    c.maxPolarAngle = 2.05;
+    c.minDistance = 0.9;
+    c.maxDistance = 10.2;
+    const o = hangarOrigin();
+    c.target.x = THREE.MathUtils.clamp(c.target.x, o.x - 4.5, o.x + 4.5);
+    c.target.z = THREE.MathUtils.clamp(c.target.z, o.z - 4.0, o.z + 3.5);
+    c.target.y = THREE.MathUtils.clamp(c.target.y, o.y + 0.15, o.y + 2.6);
     return;
   }
   // Unconstrained orbit for Studio and Hill scenes
@@ -1438,6 +1431,20 @@ function limitCamera() {
   c.maxPolarAngle = Math.acos(THREE.MathUtils.clamp((g + lim.minY - t.y) / d, -1, 1));
 }
 function clampCamera() {
+  if (scenes.current === 'hangar') {
+    if (state.hangarBackView) return;
+    const o = hangarOrigin();
+    const cam = rig.camera.position;
+    const lx = THREE.MathUtils.clamp(cam.x - o.x, -5.70, 5.70);
+    const lz = THREE.MathUtils.clamp(cam.z - o.z, -5.05, 10.0);
+    const maxY = hangarRoofMaxY(lx, lz);
+    const ly = THREE.MathUtils.clamp(cam.y - o.y, 0.22, maxY);
+    if (Math.abs((o.x + lx) - cam.x) > 1e-5 || Math.abs((o.y + ly) - cam.y) > 1e-5 || Math.abs((o.z + lz) - cam.z) > 1e-5) {
+      cam.set(o.x + lx, o.y + ly, o.z + lz);
+      rig.camera.lookAt(rig.controls.target);
+    }
+    return;
+  }
   const lim = record && scenes.cameraLimits();
   if (!lim) return;
   const g = record.ground, cam = rig.camera.position, t = rig.controls.target;
@@ -1521,18 +1528,38 @@ function loop(now) {
     }
   }
   updateLabels();
-  updateHangarBoundsLive();
 }
 // Deterministic single-frame step hook for automated verification
-window.__FALCON4_STEP__ = () => {
+window.__FALCON4_STEP__ = (orbitTest) => {
   if (rig?.transition) { rig.setPose(rig.transition.to); rig.transition = null; }
+  if (orbitTest && rig?.controls) {
+    const az = THREE.MathUtils.degToRad(orbitTest.azDeg ?? 0);
+    const pol = THREE.MathUtils.degToRad(orbitTest.polarDeg ?? 85);
+    const dist = orbitTest.dist ?? 7.5;
+    const t = rig.controls.target;
+    const sinP = Math.sin(pol);
+    rig.camera.position.set(
+      t.x + dist * sinP * Math.sin(az),
+      t.y + dist * Math.cos(pol),
+      t.z + dist * sinP * Math.cos(az),
+    );
+    rig.camera.lookAt(t);
+  }
   limitCamera();
   rig.controls.update();
   clampCamera();
   scenes.update(rig.camera, (performance.now() - clock0) / 1000);
   renderer.render(scene, rig.camera);
-  updateHangarBoundsLive();
-  return { hangarLoaded: Boolean(scenes?.hangar?.loaded), calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
+  const o = hangarOrigin();
+  const lx = rig.camera.position.x - o.x;
+  const ly = rig.camera.position.y - o.y;
+  const lz = rig.camera.position.z - o.z;
+  return {
+    hangarLoaded: Boolean(scenes?.hangar?.loaded),
+    calls: renderer.info.render.calls,
+    tris: renderer.info.render.triangles,
+    camLocal: { x: Math.round(lx * 1000) / 1000, y: Math.round(ly * 1000) / 1000, z: Math.round(lz * 1000) / 1000, roofMaxY: Math.round(hangarRoofMaxY(lx, lz) * 1000) / 1000 },
+  };
 };
 const outline = new Outline();                      // experimental (Settings); lib/outline.js
 // ------------------------------------------------------------------ film blur
@@ -2128,17 +2155,6 @@ function syncHangarToolbar() {
     btnBack.hidden = !inHangar;
     btnBack.setAttribute('aria-pressed', String(state.hangarBackView));
   }
-  const hb = $('#hangar-bounds');
-  if (hb) hb.hidden = !inHangar;
-}
-
-function updateHangarBoundsLive() {
-  const el = $('#hb-live');
-  if (!el || state.scene !== 'hangar' || !rig?.controls) return;
-  const az = THREE.MathUtils.radToDeg(rig.controls.getAzimuthalAngle());
-  const pol = THREE.MathUtils.radToDeg(rig.controls.getPolarAngle());
-  const dist = rig.camera.position.distanceTo(rig.controls.target);
-  el.textContent = `az ${az.toFixed(1)}° · polar ${pol.toFixed(1)}° · dist ${dist.toFixed(2)}m`;
 }
 
 function syncPanel() {
@@ -2326,104 +2342,6 @@ function wireUi() {
       gizmoPos: gizmo?.root?.position?.toArray()?.map((n) => Math.round(n * 100) / 100),
     };
   };
-  // TEMP: wire Hangar Camera Bounds widget
-  const hbDefaults = { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 98, minDistance: 1.2, maxDistance: 9.8 };
-  const hbFields = [
-    ['hb-minAz', 'hb-v-minAz', 'minAzimuthDeg', (v) => `${Math.round(v)}°`],
-    ['hb-maxAz', 'hb-v-maxAz', 'maxAzimuthDeg', (v) => `${Math.round(v)}°`],
-    ['hb-minPol', 'hb-v-minPol', 'minPolarDeg', (v) => `${v.toFixed(1)}°`],
-    ['hb-maxPol', 'hb-v-maxPol', 'maxPolarDeg', (v) => `${v.toFixed(1)}°`],
-    ['hb-minDist', 'hb-v-minDist', 'minDistance', (v) => `${v.toFixed(1)}m`],
-    ['hb-maxDist', 'hb-v-maxDist', 'maxDistance', (v) => `${v.toFixed(1)}m`],
-  ];
-  const syncHbUI = () => {
-    for (const [id, vid, key, fmt] of hbFields) {
-      const inp = $(`#${id}`), out = $(`#${vid}`);
-      if (inp) inp.value = String(state.hangarBounds[key]);
-      if (out) out.textContent = fmt(state.hangarBounds[key]);
-    }
-  };
-  for (const [id, vid, key, fmt] of hbFields) {
-    $(`#${id}`)?.addEventListener('input', (e) => {
-      const v = Number(e.target.value);
-      state.hangarBounds[key] = v;
-      const out = $(`#${vid}`);
-      if (out) out.textContent = fmt(v);
-      limitCamera();
-      rig.controls.update();
-    });
-  }
-  $('#hb-toggle')?.addEventListener('click', () => {
-    const body = $('#hb-body'), btn = $('#hb-toggle');
-    if (!body || !btn) return;
-    body.hidden = !body.hidden;
-    btn.setAttribute('aria-expanded', String(!body.hidden));
-  });
-  const getCurrentCamView = () => ({
-    azDeg: Math.round(THREE.MathUtils.radToDeg(rig.controls.getAzimuthalAngle()) * 10) / 10,
-    polarDeg: Math.round(THREE.MathUtils.radToDeg(rig.controls.getPolarAngle()) * 10) / 10,
-    dist: Math.round(rig.camera.position.distanceTo(rig.controls.target) * 100) / 100,
-    target: rig.controls.target.toArray().map((n) => Math.round(n * 1000) / 1000),
-  });
-  $('#hb-unlock')?.addEventListener('click', () => {
-    const btn = $('#hb-unlock');
-    state.hangarBoundsUnlocked = !state.hangarBoundsUnlocked;
-    if (btn) {
-      btn.setAttribute('aria-pressed', String(state.hangarBoundsUnlocked));
-      btn.textContent = state.hangarBoundsUnlocked ? 'Unlocked' : 'Unlock';
-    }
-    limitCamera();
-    rig.controls.update();
-  });
-  for (const btn of document.querySelectorAll('[data-hb-set]')) {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const key = btn.dataset.hbSet;
-      const cur = getCurrentCamView();
-      if (key === 'minAzimuthDeg') state.hangarBounds.minAzimuthDeg = THREE.MathUtils.clamp(Math.round(cur.azDeg), -180, 0);
-      else if (key === 'maxAzimuthDeg') state.hangarBounds.maxAzimuthDeg = THREE.MathUtils.clamp(Math.round(cur.azDeg), 0, 180);
-      else if (key === 'minPolarDeg') state.hangarBounds.minPolarDeg = THREE.MathUtils.clamp(Math.round(cur.polarDeg * 2) / 2, 15, 88);
-      else if (key === 'maxPolarDeg') state.hangarBounds.maxPolarDeg = THREE.MathUtils.clamp(Math.round(cur.polarDeg * 2) / 2, 45, 115);
-      else if (key === 'minDistance') state.hangarBounds.minDistance = THREE.MathUtils.clamp(Math.round(cur.dist * 10) / 10, 0.5, 6.0);
-      else if (key === 'maxDistance') state.hangarBounds.maxDistance = THREE.MathUtils.clamp(Math.round(cur.dist * 5) / 5, 5.0, 20.0);
-      syncHbUI();
-      limitCamera();
-      rig.controls.update();
-    });
-  }
-  $('#hb-set-def')?.addEventListener('click', () => {
-    const btn = $('#hb-set-def');
-    state.hangarDefaultView = getCurrentCamView();
-    if (btn) {
-      btn.textContent = 'Default View Saved!';
-      btn.classList.add('on');
-      setTimeout(() => { btn.textContent = 'Set Default View'; btn.classList.remove('on'); }, 1500);
-    }
-  });
-  $('#hb-reset')?.addEventListener('click', () => {
-    Object.assign(state.hangarBounds, hbDefaults);
-    state.hangarDefaultView = null;
-    state.hangarBoundsUnlocked = false;
-    const u = $('#hb-unlock');
-    if (u) { u.setAttribute('aria-pressed', 'false'); u.textContent = 'Unlock'; }
-    syncHbUI();
-    limitCamera();
-    rig.controls.update();
-  });
-  $('#hb-copy')?.addEventListener('click', async () => {
-    const btn = $('#hb-copy');
-    const cur = getCurrentCamView();
-    const payload = JSON.stringify({
-      ...state.hangarBounds,
-      defaultView: state.hangarDefaultView || cur,
-    }, null, 2);
-    try { await navigator.clipboard.writeText(payload); } catch {
-      const ta = document.createElement('textarea'); ta.value = payload; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
-    }
-    if (btn) { btn.textContent = 'Copied!'; btn.classList.add('on'); setTimeout(() => { btn.textContent = 'Copy JSON'; btn.classList.remove('on'); }, 1600); }
-  });
-  syncHbUI();
   wireSwipe();
   $('#btn-front').onclick = () => { stopTour(); frontView(); };
   $('#btn-2d').onclick = toggle2d;

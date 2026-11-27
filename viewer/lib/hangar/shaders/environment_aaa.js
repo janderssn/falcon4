@@ -720,10 +720,12 @@ export class AAAEnvironment {
         uFogColor: this.sharedUniforms.uFogColor,
       },
       vertexShader: `
+        #include <common>
         uniform float uTime;
         varying vec2 vUv;
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        #include <logdepthbuf_pars_vertex>
         void main() {
           vUv = uv;
           vec3 p = position;
@@ -737,6 +739,7 @@ export class AAAEnvironment {
           vWorldPos = wp.xyz;
           vWorldNormal = normalize(mat3(modelMatrix) * normal);
           gl_Position = projectionMatrix * viewMatrix * wp;
+          #include <logdepthbuf_vertex>
         }
       `,
       fragmentShader: `
@@ -746,6 +749,7 @@ export class AAAEnvironment {
         varying vec2 vUv;
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;
+        #include <logdepthbuf_pars_fragment>
         void main() {
           float stripe = step(0.5, fract(vUv.y * 2.5));
           vec3 col = mix(vec3(0.86, 0.24, 0.05), vec3(0.92, 0.92, 0.90), stripe);
