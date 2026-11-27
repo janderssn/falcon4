@@ -250,6 +250,8 @@ button.swipe-tag:hover, button.swipe-tag[aria-expanded="true"] { background: rgb
 .seg button { padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
 .seg button:hover { color: var(--ink); }
 .seg button.on { background: rgba(255, 255, 255, .14); color: var(--ink); }
+.seg button:disabled { opacity: .35; cursor: default; }
+.seg button:disabled:hover { color: var(--muted); }
 .opt-row { margin: 10px 0 0; }
 .opt-row > span { display: block; margin: 0 0 6px; font-size: 13px; }
 .opt-row .seg { margin: 0; }

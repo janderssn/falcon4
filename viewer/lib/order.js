@@ -28,7 +28,7 @@ function sailRows(panels) {
     rows.push({ panel: p.label, fabric: p.fabric?.name || 'As built', cloth, part: '', cost: 0, main: true, colour: p.fabric?.hex || p.asBuilt, clear: p.fabric?.opacity < 1 });
     const c = ORDER.colouredPanel;
     if (c.zones.includes(p.zone) && id && id !== c.standard) rows.push({ fabric: `Colour choice, ${p.label}`, part: c.part, cost: c.price });
-    if (isUpgrade(id)) rows.push({ fabric: `Cloth upgrade, ${p.label} to ${p.fabric.name}`, part: upgradePart(p.zone, id) || '', cost: null });
+    if (isUpgrade(id) && !p.standard) rows.push({ fabric: `Cloth upgrade, ${p.label} to ${p.fabric.name}`, part: upgradePart(p.zone, id) || '', cost: null });
   }
   return rows;
 }
@@ -40,14 +40,15 @@ const reference = (s, prefix = 'F4') => {
   return `${prefix}-${(h >>> 0).toString(36).toUpperCase().slice(0, 6)}`;
 };
 
-/** Opens the order. data: { model, size, build, colours, diagram, panels, extras: [{ name, value }] }. */
+/** Opens the order. data: { model, size, build, colours, diagram, panels, extras: [{ name, value }] };
+ *  for a glider other than the Falcon 4 also design (its sail design) and options (its own list, as ORDER.options). */
 export function openOrder(data, chosen = new Set()) {
   const root = $('#order');
   const rows = sailRows(data.panels);
   const ref = reference(location.search, data.prefix);
   const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const render = () => {
-    const options = ORDER.options.map((o) => ({ ...o, on: chosen.has(o.id) }));
+    const options = (data.options || ORDER.options).map((o) => ({ ...o, on: chosen.has(o.id) }));
     const charges = [...rows.filter((r) => !r.main), ...options.filter((o) => o.on).map((o) => ({ cost: o.price }))];
     const listed = charges.reduce((s, c) => s + (c.cost || 0), 0);
     const quotes = charges.filter((c) => c.cost === null).length;
@@ -81,7 +82,7 @@ export function openOrder(data, chosen = new Set()) {
           <table class="of-kv">
             <tr><th>Model</th><td>${esc(data.model)}</td></tr>
             <tr><th>Size</th><td>${esc(data.size)}</td></tr>
-            <tr><th>Sail cloth</th><td>V170 woven polyester unless noted</td></tr>
+            ${data.design ? `<tr><th>Sail design</th><td>${esc(data.design)}</td></tr>` : '<tr><th>Sail cloth</th><td>V170 woven polyester unless noted</td></tr>'}
             <tr><th>Colours shown</th><td>${esc(data.colours)}</td></tr>
           </table>
           <div class="of-plan">${data.diagram}</div>
@@ -126,7 +127,7 @@ export function openOrder(data, chosen = new Set()) {
         </section>
 
         <footer class="of-small">
-          <p>Prices from willswing.com, Falcon 4 options, November 2026; the dealer confirms all prices. Prepared with the Falcon 4 configurator; not a Wills Wing document.</p>
+          <p>${data.options ? 'Prices where Wills Wing lists them; the dealer confirms all prices. Not a Wills Wing document.' : 'Prices from willswing.com, Falcon 4 options, November 2026; the dealer confirms all prices. Prepared with the Falcon 4 configurator; not a Wills Wing document.'}</p>
           <p class="of-link">${esc(location.href)}</p>
         </footer>
       </article>`;
