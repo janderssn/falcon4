@@ -142,11 +142,17 @@
   <button type="button" data-pose="bar" aria-pressed="true" title="Standing on the control bar"><svg viewBox="0 0 24 24" class="ic"><path d="M2 9h20M12 9l-4.5 10h9z"/><path d="M2 21h20" opacity=".45"/></svg><span>Standing</span></button>
   <button type="button" data-pose="nose" aria-pressed="false" title="Resting on the keel, nose down"><svg viewBox="0 0 24 24" class="ic"><path d="M3 4l19 16.5M11.5 11.6 7.6 21h7.8z"/><path d="M2 21h20" opacity=".45"/></svg><span>Nose down</span></button>
   <label id="vgctl" hidden title="VG: pull the rope to tighten the sail (loose to tight)"><span class="sep"></span><b>VG</b><input type="range" id="vg" min="0" max="1" step="0.01" aria-label="VG, loose to tight"><em id="vg-val"></em></label>
+  <span class="sep" aria-hidden="true"></span>
+  <button type="button" id="btn-rot" aria-pressed="false" title="Show/hide 3D Move, Yaw & Pitch gizmo"><svg viewBox="0 0 24 24" class="ic"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg><span>Move</span></button>
+  <button type="button" id="btn-rot-reset" hidden title="Reset glider position, yaw, and pitch"><span>Reset</span></button>
 </div>
 
 <div id="chip" class="hud glass" hidden aria-live="polite"></div>
 
 <div id="navstack" class="hud">
+  <button type="button" id="btn-hangar-tod" class="icon" hidden title="Switch lighting: Day / Golden Hour" aria-label="Switch lighting between Day and Golden Hour" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic" id="ic-hangar-tod"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></button>
+  <button type="button" id="btn-hangar-back" class="icon" hidden title="Headlocked back view (looking out of hangar)" aria-label="Toggle headlocked back view" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+  <button type="button" id="btn-hangar-audio" class="icon" hidden title="Ambient airfield bird & meadow sounds (muted)" aria-label="Toggle ambient airfield bird and meadow sounds" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic" id="ic-hangar-audio"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></svg></button>
   <button type="button" id="btn-compare" class="icon" title="Compare two gliders (V)" aria-label="Compare two gliders side by side" aria-pressed="false"><svg viewBox="0 0 24 24" class="ic"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 2v20"/><path d="m8.5 10-2 2 2 2M15.5 10l2 2-2 2"/></svg></button>
   <button type="button" id="btn-tour" class="icon" title="Fly around (F)" aria-label="Fly around"><svg viewBox="0 0 24 24" class="ic"><path d="M8 5.5v13l10.5-6.5Z"/></svg></button>
   <div class="stack glass">

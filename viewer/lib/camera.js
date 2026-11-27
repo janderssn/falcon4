@@ -151,6 +151,8 @@ export class CameraRig extends EventTarget {
     const turn = THREE.MathUtils.euclideanModulo(b.theta - a.theta + Math.PI, 2 * Math.PI) - Math.PI;
     this.transition = { from, to, a, b, turn, fit, start: performance.now(), duration: 650 };
     this.controls.autoRotate = false;
+    this.controls._sphericalDelta?.set(0, 0, 0);
+    this.controls._panOffset?.set(0, 0, 0);
     this.dispatchEvent(new Event('change'));
   }
 
@@ -166,7 +168,13 @@ export class CameraRig extends EventTarget {
       // Zoom out to fit on the way, fading in and out so both ends stay where they are.
       if (t.fit) size = Math.max(size, size + (t.fit(dir) - size) * Math.sin(Math.PI * e));
       this.setPose({ target: t.from.target.clone().lerp(t.to.target, e), dir, size });
-      if (k === 1) { this.transition = null; this.setPose(t.to); }
+      this.controls._sphericalDelta?.set(0, 0, 0);
+      this.controls._panOffset?.set(0, 0, 0);
+      if (k === 1) {
+        this.transition = null;
+        this.setPose(t.to);
+      }
+      return true;
     }
     const m = this.morph;
     if (m) {

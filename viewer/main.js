@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
+import { GliderGizmo } from './lib/glider_gizmo.js';
 import { Outline } from './lib/outline.js';
 import { Rope, RoutedRope } from './lib/rope.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
@@ -119,6 +120,14 @@ const state = {
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   options: optionsFrom(params.get('opt')),          // option slot -> variant (a model's other uprights, basetube, ...)
+  offsetX: 0,
+  offsetZ: 0,
+  yaw: 0,
+  pitchDeg: null,
+  rotOpen: false,
+  hangarBackView: false,
+  hangarPreset: 'day',
+  hangarAudio: false,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -224,7 +233,7 @@ const gliderNow = (name = state.name) => ({ model: state.model, name, colours: {
 /** A model as it comes: the default colours, the sail as built. */
 const stockGlider = (model) => gliderFrom(new URLSearchParams({ model }));
 if (params.get('b')) { const q = new URLSearchParams(params.get('b')); state.b = { ...gliderFrom(q, q.get('name') || undefined), self: q.get('self') === '1' }; }
-let catalog, record, renderer, rig, scenes;
+let catalog, record, renderer, rig, scenes, gizmo;
 let frostActive = false;                            // film blur in use this frame (see renderFrost)
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
@@ -248,6 +257,23 @@ async function boot() {
   scenes.setSpot(state.spot);
   setLightShade(state.shade);
   scenes.setBackdrop(state.backdrop);
+  gizmo = new GliderGizmo({
+    scene,
+    domElement: canvas,
+    getCamera: () => rig?.camera,
+    controls: rig.controls,
+    onChange: ({ offsetX, offsetZ, yaw, pitchDeg }) => {
+      if (offsetX !== undefined) state.offsetX = offsetX;
+      if (offsetZ !== undefined) state.offsetZ = offsetZ;
+      if (yaw !== undefined) state.yaw = yaw;
+      if (pitchDeg !== undefined) state.pitchDeg = pitchDeg;
+      const ang = state.pitchDeg !== null ? THREE.MathUtils.degToRad(state.pitchDeg) : (record?.angle ?? 0);
+      if (record) { record.swing = null; tiltTo(record, ang); }
+      if (other) { other.swing = null; tiltTo(other, ang); }
+      syncRotUI();
+      scenes.notifyGliderMoved();
+    },
+  });
   wireUi();
   resize();
   addEventListener('resize', resize);
@@ -306,14 +332,21 @@ async function setModel(id, first = false) {
   applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
   scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
+  scenes.attachGlider(record.root);
+  if (gizmo) {
+    const fz = record.rest?.foot?.[0] ?? center.z;
+    gizmo.setBaseCenter(new THREE.Vector3(0, record.ground, fz));
+  }
   state.sel = null;
   applyLook();
   buildLabels();
   renderChip();
   if (first) {
     scenes.set(state.scene);
-    const cam = readCamera();
+    const hasUrlCam = params.has('cam');
+    const cam = hasUrlCam ? readCamera() : null;
     if (cam) { rig.setProjection(cam.projection); rig.animateTo(cam.pose, false); }
+    else if (state.scene === 'hangar') { rig.setProjection('perspective', false); rig.animateTo(hangarFrontPose(), false); }
     else frontView(false);
     $('#loader').classList.add('done');
     lastInput = performance.now();            // the slow idle turn counts from when the glider appears
@@ -677,17 +710,21 @@ function restingPose(rec) {
 /** The plan views always show the glider standing, so its axes line up with the views. */
 const restPose = () => (rig?.projection === 'orthographic' ? 'bar' : state.pose);
 function applyPose(animate = false) {
+  state.pitchDeg = null;
   if (record) poseOf(record, animate);
   if (other) {
     poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
+  syncRotUI();
+  scenes.notifyGliderMoved();
 }
 const POSE_TIME = 700;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const _qPitch = new THREE.Quaternion();
+const _qYaw = new THREE.Quaternion();
 /**
- * Places the build tilted by `angle` about X (nose down > 0, tail down < 0), with the lowest
- * point of its outline at that angle on the ground (y = 0, the same for every build). Along
- * the ground it turns about its standing contact, so the placement changes smoothly with the
- * angle even where the lowest point jumps (from the wheels to the keel tail at rest).
+ * Places the build tilted by `angle` about X (nose down > 0, tail down < 0) and rotated by
+ * `state.yaw` about Y around its basebar foot, keeping the lowest point flush on y = 0.
  */
 function tiltTo(rec, angle) {
   const c = Math.cos(angle), sn = Math.sin(angle);
@@ -695,8 +732,14 @@ function tiltTo(rec, angle) {
   // y after the turn about X: y' = y cos - z sin
   for (const p of rec.rest.hull) low = Math.min(low, p[1] * c - p[0] * sn);
   const [fz, fy] = rec.rest.foot;
-  rec.root.quaternion.setFromAxisAngle(X_AXIS, angle);
-  rec.root.position.set(0, -low, fz - (fy * sn + fz * c));   // z' = y sin + z cos
+  const pz = fz - (fy * sn + fz * c);
+  const yawRad = THREE.MathUtils.degToRad(state.yaw || 0);
+  _qPitch.setFromAxisAngle(X_AXIS, angle);
+  _qYaw.setFromAxisAngle(Y_AXIS, yawRad);
+  rec.root.quaternion.copy(_qYaw).multiply(_qPitch);
+  const cy = Math.cos(yawRad), sy = Math.sin(yawRad);
+  const dz = pz - fz;
+  rec.root.position.set(dz * sy + (state.offsetX || 0), -low, fz + dz * cy + (state.offsetZ || 0));
   rec.root.updateMatrixWorld(true);
   rec.angle = angle;
 }
@@ -1058,14 +1101,82 @@ function setPose(pose) {
 
 // ------------------------------------------------------------------ camera
 /** The start view: the default camera, or a framing of the whole glider. */
+function hangarFrontPose() {
+  const c = record ? record.box.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 1.2, -2.7);
+  const g = record ? record.ground : 0;
+  return {
+    target: new THREE.Vector3(c.x + (state.offsetX || 0), g + 1.15, c.z + (state.offsetZ || 0)),
+    dir: new THREE.Vector3(0, 0.08, 1).normalize(),
+    size: 5.15,
+  };
+}
+
+function hangarBackPose() {
+  const c = record ? record.box.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 1.2, -2.7);
+  const g = record ? record.ground : 0;
+  const pos = new THREE.Vector3(c.x, g + 1.82, c.z - 4.15);
+  const target = new THREE.Vector3(c.x, g + 1.22, c.z + 4.5);
+  const dist = pos.distanceTo(target);
+  const size = 2 * dist * Math.tan(THREE.MathUtils.degToRad(19));
+  return { target, dir: pos.sub(target).normalize(), size };
+}
+
+const backParallax = { targetX: 0, targetY: 0, curX: 0, curY: 0, appliedX: 0, appliedY: 0, maxX: 0.45, maxY: 0.20, fade: 0 };
+function clearBackParallax() {
+  if (backParallax.appliedX !== 0 || backParallax.appliedY !== 0) {
+    rig.camera.position.x -= backParallax.appliedX;
+    rig.camera.position.y -= backParallax.appliedY;
+    backParallax.appliedX = 0;
+    backParallax.appliedY = 0;
+  }
+}
+
+function setHangarBackView(on, animate = !reduced) {
+  clearBackParallax();
+  resetSpringArm();
+  rig.controls._sphericalDelta?.set(0, 0, 0);
+  rig.controls._panOffset?.set(0, 0, 0);
+  backParallax.targetX = backParallax.targetY = backParallax.curX = backParallax.curY = 0;
+  backParallax.fade = 0;
+  state.hangarBackView = Boolean(on && state.scene === 'hangar');
+  if (state.hangarBackView) {
+    stopTour();
+    rig.setProjection('perspective', false);
+    rig.animateTo(hangarBackPose(), animate);
+  } else if (state.scene === 'hangar') {
+    rig.animateTo(hangarFrontPose(), animate);
+  }
+  syncPanel();
+}
+
 function frontView(animate = !reduced) {
   if (!record) return;
+  if (state.scene === 'hangar') {
+    if (state.hangarBackView) { setHangarBackView(false, animate); return; }
+    rig.setProjection('perspective', animate);
+    rig.animateTo(hangarFrontPose(), animate);
+    syncPanel();
+    return;
+  }
   const cam = parseCamera(DEFAULTS.cam);
   rig.setProjection(cam ? cam.projection : 'perspective', animate);
   rig.animateTo(cam ? cam.pose : rig.frame(record.box, [0.42, 0.32, 1], 1.0), animate, fitSize);
   syncPanel();
 }
-function zoom(f) { const p = rig.pose(); p.size *= f; rig.animateTo(p, !reduced); userActive(); }
+function zoom(f) {
+  if (scenes.current === 'hangar' && !state.hangarBackView) restoreSpringArm();
+  const p = rig.pose();
+  p.size *= f;
+  if (scenes.current === 'hangar') {
+    const minDist = state.hangarBackView ? 2.0 : 0.9;
+    const maxDist = state.hangarBackView ? 14.0 : 10.2;
+    const tan = Math.tan(THREE.MathUtils.degToRad(19));
+    p.size = THREE.MathUtils.clamp(p.size, 2 * minDist * tan, 2 * maxDist * tan);
+  }
+  resetSpringArm();
+  rig.animateTo(p, !reduced);
+  userActive();
+}
 function toggle2d() {
   const ortho = rig.projection !== 'orthographic';
   rig.setProjection(ortho ? 'orthographic' : 'perspective', !reduced);
@@ -1338,9 +1449,122 @@ function focusPart(part) {
 // Keep the camera out of the ground and inside the hangar. The orbit's lowest angle is
 // set so the camera stays above the floor; anything that still gets out (zooming out,
 // moving the target) is pulled back along the line to the target.
-function limitCamera() {
+const HANGAR_ROOF_TAN = Math.tan(THREE.MathUtils.degToRad(12.66));
+const springArm = { active: false, desiredDist: 7.5, curDist: 7.5 };
+function resetSpringArm() { springArm.active = false; }
+function restoreSpringArm() {
+  if (!springArm.active || !rig?.controls || scenes.current !== 'hangar' || state.hangarBackView || rig.transition) {
+    springArm.active = false;
+    return;
+  }
+  const t = rig.controls.target;
+  const off = rig.camera.position.clone().sub(t);
+  const actualDist = off.length();
+  if (actualDist > 1e-5) {
+    // Capture any synchronous zoom (e.g., OrbitControls mouseWheel) that happened between frames
+    if (springArm.curDist > 1e-4 && Math.abs(actualDist - springArm.curDist) > 1e-4) {
+      const ratio = actualDist / springArm.curDist;
+      const base = ratio < 1 ? Math.min(springArm.desiredDist, springArm.curDist) : springArm.desiredDist;
+      springArm.desiredDist = THREE.MathUtils.clamp(base * ratio, 0.9, 10.2);
+    }
+    rig.camera.position.copy(t).addScaledVector(off, springArm.desiredDist / actualDist);
+  }
+}
+function hangarOrigin() {
+  if (scenes.hangar?.worldGroup) return scenes.hangar.worldGroup.position;
+  return new THREE.Vector3(record?.center?.x ?? 0, record?.ground ?? 0, record?.center?.z ?? 0);
+}
+function hangarRoofMaxY(lx, lz) {
+  return lz <= 4.4 ? (3.98 - Math.abs(lx) * HANGAR_ROOF_TAN) - 0.42 : 3.55;
+}
+/** Analytical ray-clip distance along unit dir from hangar-local target to interior + front apron walls/roof/floor. */
+function hangarRayMaxDist(tx, ty, tz, dx, dy, dz) {
+  let tMax = 10.2;
+  const eps = 1e-6;
+  // Side walls: X in [-5.70, +5.70]
+  if (dx > eps) tMax = Math.min(tMax, (5.70 - tx) / dx);
+  else if (dx < -eps) tMax = Math.min(tMax, (-5.70 - tx) / dx);
+  // Rear wall (Z >= -5.05) & Front apron (Z <= +10.0)
+  if (dz < -eps) tMax = Math.min(tMax, (-5.05 - tz) / dz);
+  else if (dz > eps) tMax = Math.min(tMax, (10.0 - tz) / dz);
+  // Floor (Y >= 0.22)
+  if (dy < -eps) tMax = Math.min(tMax, (0.22 - ty) / dy);
+  // Gabled roof slopes for Z <= 4.4: Y + k*X <= 3.56 and Y - k*X <= 3.56
+  const k = HANGAR_ROOF_TAN;
+  const dRight = dy + k * dx;
+  if (dRight > eps) {
+    const t = (3.56 - (ty + k * tx)) / dRight;
+    if (t >= 0 && tz + t * dz <= 4.4) tMax = Math.min(tMax, t);
+  }
+  const dLeft = dy - k * dx;
+  if (dLeft > eps) {
+    const t = (3.56 - (ty - k * tx)) / dLeft;
+    if (t >= 0 && tz + t * dz <= 4.4) tMax = Math.min(tMax, t);
+  }
+  // Front apron sky ceiling (Y <= 3.55 for Z > 4.4, and also acts as ridge cap)
+  if (dy > eps) {
+    const t = (3.55 - ty) / dy;
+    if (t >= 0) tMax = Math.min(tMax, t);
+  }
+  return Math.max(tMax, 0.45);
+}
+
+function hangarGliderCenter() {
+  const o = hangarOrigin();
+  return new THREE.Vector3(
+    o.x + (state.offsetX || 0),
+    o.y + 1.15,
+    o.z + (state.offsetZ || 0),
+  );
+}
+
+function limitCamera(dt = 0) {
   const lim = record && scenes.cameraLimits();
   const c = rig.controls;
+  if (scenes.current === 'hangar') {
+    if (state.hangarBackView) {
+      resetSpringArm();
+      c.enableRotate = false;
+      c.enablePan = false;
+      c.zoomToCursor = false;
+      c.minAzimuthAngle = -Infinity;
+      c.maxAzimuthAngle = Infinity;
+      c.minPolarAngle = 0;
+      c.maxPolarAngle = Math.PI;
+      c.minDistance = 2.0;
+      c.maxDistance = 14.0;
+      return;
+    }
+    // Full 360° free orbit locked onto the glider center inside the hangar bay
+    c.enableRotate = true;
+    c.enablePan = false;
+    c.zoomToCursor = false;
+    c.minAzimuthAngle = -Infinity;
+    c.maxAzimuthAngle = Infinity;
+    c.minPolarAngle = 0.08;
+    c.maxPolarAngle = 2.05;
+    c.minDistance = 0.9;
+    c.maxDistance = 10.2;
+    if (!gizmo?.dragging && !rig.transition) {
+      const gc = hangarGliderCenter();
+      if (dt > 0 && c.target.distanceTo(gc) > 0.002) {
+        c.target.lerp(gc, 1 - Math.exp(-12 * dt));
+      } else {
+        c.target.copy(gc);
+      }
+    }
+    return;
+  }
+  resetSpringArm();
+  // Unconstrained orbit for Studio and Hill scenes
+  c.enableRotate = true;
+  c.enablePan = true;
+  c.zoomToCursor = true;
+  c.minAzimuthAngle = -Infinity;
+  c.maxAzimuthAngle = Infinity;
+  c.minPolarAngle = 0;
+  c.minDistance = 0.05;
+  c.maxDistance = 60;
   if (!lim) { c.maxPolarAngle = Math.PI; return; }
   const g = record.ground, t = c.target;
   if (lim.halfX) {
@@ -1352,7 +1576,31 @@ function limitCamera() {
   const d = Math.max(rig.camera.position.distanceTo(t), 1e-3);
   c.maxPolarAngle = Math.acos(THREE.MathUtils.clamp((g + lim.minY - t.y) / d, -1, 1));
 }
-function clampCamera() {
+function clampCamera(dt = 0) {
+  if (scenes.current === 'hangar') {
+    if (state.hangarBackView) return;
+    const o = hangarOrigin();
+    const t = rig.controls.target;
+    const cam = rig.camera.position;
+    const off = cam.clone().sub(t);
+    const rawDist = off.length();
+    if (rawDist < 1e-5) return;
+    const dir = off.divideScalar(rawDist);
+    const desired = THREE.MathUtils.clamp(rawDist, 0.9, 10.2);
+    const tMax = hangarRayMaxDist(t.x - o.x, t.y - o.y, t.z - o.z, dir.x, dir.y, dir.z);
+    const targetDist = Math.min(desired, tMax);
+    if (!springArm.active || dt <= 0 || rig.transition || targetDist <= springArm.curDist) {
+      springArm.curDist = targetDist;
+    } else {
+      const alpha = 1 - Math.exp(-10 * dt);
+      springArm.curDist = Math.min(targetDist, springArm.curDist + (targetDist - springArm.curDist) * alpha);
+    }
+    springArm.desiredDist = desired;
+    springArm.active = true;
+    cam.copy(t).addScaledVector(dir, springArm.curDist);
+    rig.camera.lookAt(t);
+    return;
+  }
   const lim = record && scenes.cameraLimits();
   if (!lim) return;
   const g = record.ground, cam = rig.camera.position, t = rig.controls.target;
@@ -1386,14 +1634,51 @@ function loop(now) {
   // just outside the glider, so floors, walls and the roof stay behind it.
   // While the projection changes the camera is placed by the rig alone.
   const flat = rig.projection === 'orthographic' && !rig.morph;
+  const wasTransitioning = Boolean(rig.transition);
   rig.orthoDistance = reachOf();
-  if (flat || rig.morph) rig.controls.maxPolarAngle = Math.PI; else limitCamera();
+  clearBackParallax();
+  if (flat || rig.morph) {
+    resetSpringArm();
+    rig.controls.maxPolarAngle = Math.PI;
+  } else if (wasTransitioning) {
+    // Skip springArm restore during fly-to transition so it never fights the smooth ease
+    limitCamera(dt);
+  } else {
+    restoreSpringArm();
+    limitCamera(dt);
+  }
   rig.update(now, dt);
-  if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera();
+  const transitioning = wasTransitioning || Boolean(rig.transition);
+  if (flat) {
+    closeIn(rig.camera);
+  } else if (!rig.morph) {
+    if (transitioning) {
+      // Continuously sync springArm to the exact landing distance so transition end has zero pop/shake
+      const d = rig.camera.position.distanceTo(rig.controls.target);
+      springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+      springArm.curDist = springArm.desiredDist;
+      springArm.active = false;
+    } else {
+      clampCamera(dt);
+    }
+  }
+  if (state.hangarBackView && !flat && !rig.morph && !transitioning) {
+    backParallax.fade = Math.min(1, backParallax.fade + dt / 0.35);
+    const ease = backParallax.fade * backParallax.fade * (3 - 2 * backParallax.fade);
+    backParallax.curX += (backParallax.targetX - backParallax.curX) * 0.08;
+    backParallax.curY += (backParallax.targetY - backParallax.curY) * 0.08;
+    const ox = backParallax.curX * backParallax.maxX * ease;
+    const oy = -backParallax.curY * backParallax.maxY * ease;
+    rig.camera.position.x += ox;
+    rig.camera.position.y += oy;
+    backParallax.appliedX = ox;
+    backParallax.appliedY = oy;
+    rig.camera.lookAt(rig.controls.target);
+  }
   stepSplit(now);
   stepPoses(now);
   stepRopes(dt);
-  scenes.update(rig.camera, (now - clock0) / 1000);
+  scenes.update(rig.camera, (now - clock0) / 1000, rig.controls.target);
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
   const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
@@ -1425,6 +1710,105 @@ function loop(now) {
   }
   updateLabels();
 }
+// Deterministic single-frame step hook for automated verification
+window.__FALCON4_STEP__ = (orbitTest) => {
+  if (rig?.transition) { rig.setPose(rig.transition.to); rig.transition = null; resetSpringArm(); }
+  restoreSpringArm();
+  let reqDir = null;
+  if (orbitTest && rig?.controls) {
+    const az = THREE.MathUtils.degToRad(orbitTest.azDeg ?? 0);
+    const pol = THREE.MathUtils.degToRad(orbitTest.polarDeg ?? 85);
+    const dist = orbitTest.dist ?? (springArm.active ? springArm.desiredDist : 7.5);
+    const t = rig.controls.target;
+    const sinP = Math.sin(pol);
+    reqDir = new THREE.Vector3(sinP * Math.sin(az), Math.cos(pol), sinP * Math.cos(az)).normalize();
+    rig.camera.position.copy(t).addScaledVector(reqDir, dist);
+    rig.camera.lookAt(t);
+  }
+  limitCamera();
+  rig.controls.update();
+  clampCamera(0);
+  if (orbitTest && scenes?.hangar) scenes.hangar._lastUpdateSec = null;
+  scenes.update(rig.camera, (performance.now() - clock0) / 1000, rig.controls.target);
+  renderer.render(scene, rig.camera);
+  const o = hangarOrigin();
+  const lx = rig.camera.position.x - o.x;
+  const ly = rig.camera.position.y - o.y;
+  const lz = rig.camera.position.z - o.z;
+  const actualDir = rig.camera.position.clone().sub(rig.controls.target).normalize();
+  const dirErrDeg = reqDir ? Math.round(THREE.MathUtils.radToDeg(actualDir.angleTo(reqDir)) * 1000) / 1000 : 0;
+  return {
+    hangarLoaded: Boolean(scenes?.hangar?.loaded),
+    calls: renderer.info.render.calls,
+    tris: renderer.info.render.triangles,
+    fadedPropCount: scenes?.hangar?.fadedPropCount ?? 0,
+    rearPropsTotal: scenes?.hangar?.rearPropsTotal ?? 0,
+    rearPropsFaded: scenes?.hangar?.rearPropsFaded ?? 0,
+    catFaded: Boolean(scenes?.hangar?.catFaded),
+    dustVisible: Boolean(scenes?.hangar?.wildlife?.root?.getObjectByName('FloatingSunlitDust')?.visible),
+    dustOpacity: scenes?.hangar?.wildlife?.uniforms?.uDustOpacity?.value ?? 0,
+    occluderTracked: scenes?.hangar?._occluderProps?.length ?? 0,
+    camLocal: {
+      x: Math.round(lx * 1000) / 1000,
+      y: Math.round(ly * 1000) / 1000,
+      z: Math.round(lz * 1000) / 1000,
+      roofMaxY: Math.round(hangarRoofMaxY(lx, lz) * 1000) / 1000,
+      dist: Math.round(rig.camera.position.distanceTo(rig.controls.target) * 1000) / 1000,
+      desiredDist: Math.round(springArm.desiredDist * 1000) / 1000,
+      dirErrDeg,
+      targetLocal: [
+        Math.round((rig.controls.target.x - o.x) * 1000) / 1000,
+        Math.round((rig.controls.target.y - o.y) * 1000) / 1000,
+        Math.round((rig.controls.target.z - o.z) * 1000) / 1000,
+      ],
+      enablePan: rig.controls.enablePan,
+      zoomToCursor: rig.controls.zoomToCursor,
+    },
+  };
+};
+// Verify smooth monotonic Eye-button press/unpress transition with zero landing pop/reversal
+window.__FALCON4_TEST_EYE_TRANSITION__ = () => {
+  const sampleTransition = (toBack) => {
+    setHangarBackView(toBack, true);
+    const t0 = rig.transition ? rig.transition.start : performance.now();
+    const dists = [];
+    for (let i = 0; i <= 24; i++) {
+      const now = t0 + i * 32; // covers 0..768ms (650ms transition + 4 post-landing frames)
+      const wasT = Boolean(rig.transition);
+      clearBackParallax();
+      if (!wasT) restoreSpringArm();
+      limitCamera(0.032);
+      rig.update(now, 0.032);
+      if (wasT || rig.transition) {
+        const d = rig.camera.position.distanceTo(rig.controls.target);
+        springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+        springArm.curDist = springArm.desiredDist;
+        springArm.active = false;
+      } else {
+        clampCamera(0.032);
+      }
+      dists.push(Math.round(rig.camera.position.distanceTo(rig.controls.target) * 1000) / 1000);
+    }
+    // Check monotonic direction (zero in/out reversal) + zero post-landing jump
+    const dirSign = Math.sign(dists[dists.length - 1] - dists[0]);
+    let maxReversal = 0;
+    for (let i = 1; i < dists.length; i++) {
+      const delta = dists[i] - dists[i - 1];
+      if (dirSign !== 0 && delta * dirSign < -0.002) {
+        maxReversal = Math.max(maxReversal, Math.abs(delta));
+      }
+    }
+    const postLandingMaxDelta = Math.max(
+      Math.abs(dists[24] - dists[21]),
+      Math.abs(dists[23] - dists[21]),
+      Math.abs(dists[22] - dists[21]),
+    );
+    return { start: dists[0], end: dists[dists.length - 1], maxReversal, postLandingMaxDelta, smooth: maxReversal === 0 && postLandingMaxDelta < 0.002 };
+  };
+  const pressOn = sampleTransition(true);
+  const pressOff = sampleTransition(false);
+  return { pressOn, pressOff, ok: pressOn.smooth && pressOff.smooth };
+};
 const outline = new Outline();                      // experimental (Settings); lib/outline.js
 // ------------------------------------------------------------------ film blur
 // Laminates show the scene behind them blurred by distance (lib/frost.js).
@@ -1984,7 +2368,7 @@ function placeBars() {
   const open = Boolean(state.panel) && !narrow.matches;
   const panel = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 340;
   const gap = 12, W = innerWidth;
-  const bars = [['#posebar', W - (panel + 32) - 40], ['#chip', W - (panel + 32) - 40], ['#viewbar', W - 16 - panel]];
+  const bars = [['#posebar', W - (panel + 32) - 40], ['#rotpop', W - (panel + 32) - 40], ['#chip', W - (panel + 32) - 40], ['#viewbar', W - 16 - panel]];
   for (const [sel, edge] of bars) {
     const el = $(sel);
     if (!el) continue;
@@ -2033,9 +2417,69 @@ function optionRows() {
       `<button type="button" role="radio" aria-checked="${v === now}" class="${v === now ? 'on' : ''}" data-opt="${esc(slot)}" data-variant="${esc(v)}">${esc(names[v] || v)}</button>`).join('')}</div></div>`;
   }).join('');
 }
+function syncRotUI() {
+  const btnRot = $('#btn-rot'), btnReset = $('#btn-rot-reset');
+  if (btnRot) btnRot.setAttribute('aria-pressed', String(state.rotOpen));
+  const moved = Math.abs(state.offsetX) > 0.01 || Math.abs(state.offsetZ) > 0.01 || Math.abs(state.yaw) > 0.5 || state.pitchDeg !== null;
+  if (btnReset) btnReset.hidden = !(state.rotOpen || moved);
+  if (gizmo) {
+    const canShow = state.rotOpen && !state.compare && rig?.projection !== 'orthographic' && !(plan?.quad);
+    gizmo.setVisible(canShow);
+    const minPitch = record?.rest ? THREE.MathUtils.radToDeg(Math.min(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) : -30;
+    const maxPitch = record?.rest ? THREE.MathUtils.radToDeg(Math.max(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) : 30;
+    const curPitch = state.pitchDeg !== null ? state.pitchDeg : THREE.MathUtils.radToDeg(record?.angle ?? 0);
+    gizmo.setState({
+      offsetX: state.offsetX,
+      offsetZ: state.offsetZ,
+      yaw: state.yaw,
+      pitchDeg: curPitch,
+      minPitch,
+      maxPitch,
+    });
+  }
+}
+
+function syncHangarToolbar() {
+  const inHangar = state.scene === 'hangar';
+  const btnTod = $('#btn-hangar-tod');
+  const btnBack = $('#btn-hangar-back');
+  if (btnTod) {
+    btnTod.hidden = !inHangar;
+    const isGolden = state.hangarPreset === 'golden';
+    btnTod.setAttribute('aria-pressed', String(isGolden));
+    btnTod.title = isGolden ? 'Lighting: Golden Hour (click for Day)' : 'Lighting: Day (click for Golden Hour)';
+    const ic = $('#ic-hangar-tod');
+    if (ic) {
+      ic.innerHTML = isGolden
+        ? '<path d="M12 10V4M4.93 10.93l1.41 1.41M19.07 10.93l-1.41 1.41M2 18h20M6 18a6 6 0 0 1 12 0"/>'
+        : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>';
+    }
+  }
+  if (btnBack) {
+    btnBack.hidden = !inHangar;
+    btnBack.setAttribute('aria-pressed', String(state.hangarBackView));
+  }
+  const btnAudio = $('#btn-hangar-audio');
+  if (btnAudio) {
+    btnAudio.hidden = !inHangar;
+    btnAudio.setAttribute('aria-pressed', String(state.hangarAudio));
+    btnAudio.title = state.hangarAudio
+      ? 'Ambient airfield sounds: On (click to mute)'
+      : 'Ambient airfield sounds: Muted (click to enable)';
+    const ic = $('#ic-hangar-audio');
+    if (ic) {
+      ic.innerHTML = state.hangarAudio
+        ? '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+        : '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/>';
+    }
+  }
+}
+
 function syncPanel() {
   document.body.classList.toggle('panel-open', Boolean(state.panel));
   placeBars();
+  syncHangarToolbar();
+  syncRotUI();
   for (const id of ['custom', 'settings']) {
     $(`#${id}`).hidden = state.panel !== id;
     $(`#btn-${id}`).setAttribute('aria-expanded', String(state.panel === id));
@@ -2142,9 +2586,21 @@ function setTime(h) {
 }
 function setScene(id) {
   state.scene = id;
+  if (id !== 'hangar' && state.hangarBackView) {
+    clearBackParallax();
+    state.hangarBackView = false;
+  }
+  if (id !== 'hangar' && state.hangarAudio) {
+    state.hangarAudio = false;
+    scenes.setHangarAudio(false);
+  }
   if (id === 'hill' && !scenes.meadow) toast('Growing the meadow…', true);
   requestAnimationFrame(() => setTimeout(() => {
     scenes.set(id);
+    if (id === 'hangar' && record) {
+      rig.setProjection('perspective', false);
+      rig.animateTo(hangarFrontPose(), !reduced);
+    }
     syncPanel();
     saveUrlSoon();
   }, 30));
@@ -2168,6 +2624,50 @@ function wireUi() {
   for (const b of document.querySelectorAll('.btn-close')) b.onclick = () => togglePanel(null);
   $('#btn-tour').onclick = () => (state.tour ? stopTour() : startTour());
   $('#btn-compare').onclick = () => setCompare(!state.compare);
+  $('#btn-hangar-tod').onclick = () => {
+    state.hangarPreset = state.hangarPreset === 'day' ? 'golden' : 'day';
+    scenes.setHangarPreset(state.hangarPreset);
+    syncHangarToolbar();
+  };
+  $('#btn-hangar-back').onclick = () => setHangarBackView(!state.hangarBackView);
+  $('#btn-hangar-audio').onclick = () => {
+    state.hangarAudio = scenes.setHangarAudio(!state.hangarAudio);
+    syncHangarToolbar();
+  };
+  window.addEventListener('pointermove', (e) => {
+    if (!state.hangarBackView) return;
+    backParallax.targetX = THREE.MathUtils.clamp((e.clientX / Math.max(innerWidth, 1)) * 2 - 1, -1, 1);
+    backParallax.targetY = THREE.MathUtils.clamp((e.clientY / Math.max(innerHeight, 1)) * 2 - 1, -1, 1);
+  });
+  document.addEventListener('pointerleave', () => { backParallax.targetX = 0; backParallax.targetY = 0; });
+  $('#btn-rot').onclick = () => { state.rotOpen = !state.rotOpen; syncRotUI(); placeBars(); };
+  const applyGliderMoveRot = () => {
+    const ang = state.pitchDeg !== null ? THREE.MathUtils.degToRad(state.pitchDeg) : (record?.angle ?? 0);
+    if (record) { record.swing = null; tiltTo(record, ang); }
+    if (other) { other.swing = null; tiltTo(other, ang); }
+    syncRotUI();
+    scenes.notifyGliderMoved();
+  };
+  $('#btn-rot-reset').onclick = () => {
+    state.offsetX = 0;
+    state.offsetZ = 0;
+    state.yaw = 0;
+    state.pitchDeg = null;
+    applyPose(true);
+  };
+  // Helper for automated verification of 3D gizmo & transform
+  window.__FALCON4_MOVE_ROT__ = ({ offsetX, offsetZ, yaw, pitchDeg } = {}) => {
+    if (offsetX !== undefined) state.offsetX = THREE.MathUtils.clamp(offsetX, -2.2, 2.2);
+    if (offsetZ !== undefined) state.offsetZ = THREE.MathUtils.clamp(offsetZ, -1.6, 2.4);
+    if (yaw !== undefined) state.yaw = THREE.MathUtils.clamp(yaw, -180, 180);
+    if (pitchDeg !== undefined) state.pitchDeg = pitchDeg;
+    applyGliderMoveRot();
+    return {
+      gizmoVisible: Boolean(gizmo?.root?.visible),
+      gizmoHandles: gizmo?.hitMeshes?.map((m) => m.userData.gizmoHandle) || [],
+      gizmoPos: gizmo?.root?.position?.toArray()?.map((n) => Math.round(n * 100) / 100),
+    };
+  };
   wireSwipe();
   $('#btn-front').onclick = () => { stopTour(); frontView(); };
   $('#btn-2d').onclick = toggle2d;
