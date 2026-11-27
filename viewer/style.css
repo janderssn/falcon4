@@ -154,15 +154,7 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #vgctl input { width: 120px; accent-color: var(--accent); }
 #vgctl em { font-style: normal; min-width: 34px; font-variant-numeric: tabular-nums; }
 #posebar > .sep { width: 1px; height: 20px; align-self: center; margin: 0 4px; background: var(--line); }
-
-/* ---- compact yaw/pitch popover above the pose bar */
-#rotpop { left: 50%; bottom: 72px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-radius: 999px; transition: left .28s ease, opacity .3s ease; z-index: 6; }
-#rotpop[hidden] { display: none; }
-.rot-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.rot-row input { width: 108px; accent-color: var(--accent); cursor: pointer; }
-.rot-row em { font-style: normal; min-width: 36px; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
-.rot-reset { height: 26px; padding: 0 11px; border-radius: 999px; background: rgba(255, 255, 255, .1); border: 1px solid var(--line); color: var(--ink); font-size: 11.5px; cursor: pointer; }
-.rot-reset:hover { background: rgba(255, 255, 255, .18); }
+#posebar button[hidden] { display: none; }
 #navstack .icon[hidden] { display: none; }
 #navstack .icon.on, #navstack .icon[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 

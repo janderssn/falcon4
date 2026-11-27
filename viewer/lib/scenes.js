@@ -126,7 +126,7 @@ export class Scenes {
    */
   cameraLimits() {
     if (this.current === 'hill') return { minY: 0.5 };
-    if (this.current === 'hangar') return { minY: 0.35 };
+    if (this.current === 'hangar') return { minY: 0.22 };
     return null;
   }
 

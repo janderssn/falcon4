@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CATEGORIES, loadCatalog, loadModel, trimCache, boundsOf } from './lib/catalog.js';
 import { CameraRig } from './lib/camera.js';
 import { Scenes, SCENES, BACKDROPS, LIGHT_SHADE, setLightShade } from './lib/scenes.js';
+import { GliderGizmo } from './lib/glider_gizmo.js';
 import { Outline } from './lib/outline.js';
 import { Rope, RoutedRope } from './lib/rope.js';
 import { FALCON_FABRICS, CALIBRATED, ORDER, isUpgrade } from './lib/fabrics.js';
@@ -111,13 +112,15 @@ const state = {
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
   pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  offsetX: 0,
+  offsetZ: 0,
   yaw: 0,
   pitchDeg: null,
   rotOpen: false,
   hangarBackView: false,
   hangarPreset: 'day',
   // TEMP: live hangar camera bounds (degrees & meters)
-  hangarBounds: { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 88, minDistance: 1.2, maxDistance: 9.8 },
+  hangarBounds: { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 98, minDistance: 1.2, maxDistance: 9.8 },
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -170,7 +173,7 @@ const gliderNow = (name = state.name) => ({ model: state.model, name, colours: {
 /** A model as it comes: the default colours, the sail as built. */
 const stockGlider = (model) => gliderFrom(new URLSearchParams({ model }));
 if (params.get('b')) { const q = new URLSearchParams(params.get('b')); state.b = { ...gliderFrom(q, q.get('name') || undefined), self: q.get('self') === '1' }; }
-let catalog, record, renderer, rig, scenes;
+let catalog, record, renderer, rig, scenes, gizmo;
 let frostActive = false;                            // film blur in use this frame (see renderFrost)
 let other = null;                                   // the second build, shown right of the divider when comparing
 const scene = new THREE.Scene();
@@ -194,6 +197,23 @@ async function boot() {
   scenes.setSpot(state.spot);
   setLightShade(state.shade);
   scenes.setBackdrop(state.backdrop);
+  gizmo = new GliderGizmo({
+    scene,
+    domElement: canvas,
+    getCamera: () => rig?.camera,
+    controls: rig.controls,
+    onChange: ({ offsetX, offsetZ, yaw, pitchDeg }) => {
+      if (offsetX !== undefined) state.offsetX = offsetX;
+      if (offsetZ !== undefined) state.offsetZ = offsetZ;
+      if (yaw !== undefined) state.yaw = yaw;
+      if (pitchDeg !== undefined) state.pitchDeg = pitchDeg;
+      const ang = state.pitchDeg !== null ? THREE.MathUtils.degToRad(state.pitchDeg) : (record?.angle ?? 0);
+      if (record) { record.swing = null; tiltTo(record, ang); }
+      if (other) { other.swing = null; tiltTo(other, ang); }
+      syncRotUI();
+      scenes.notifyGliderMoved();
+    },
+  });
   wireUi();
   resize();
   addEventListener('resize', resize);
@@ -252,6 +272,10 @@ async function setModel(id, first = false) {
   const center = record.box.getCenter(new THREE.Vector3());
   scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
   scenes.attachGlider(record.root);
+  if (gizmo) {
+    const fz = record.rest?.foot?.[0] ?? center.z;
+    gizmo.setBaseCenter(new THREE.Vector3(0, record.ground, fz));
+  }
   state.sel = null;
   applyLook();
   buildLabels();
@@ -646,7 +670,7 @@ function tiltTo(rec, angle) {
   rec.root.quaternion.copy(_qYaw).multiply(_qPitch);
   const cy = Math.cos(yawRad), sy = Math.sin(yawRad);
   const dz = pz - fz;
-  rec.root.position.set(dz * sy, -low, fz + dz * cy);
+  rec.root.position.set(dz * sy + (state.offsetX || 0), -low, fz + dz * cy + (state.offsetZ || 0));
   rec.root.updateMatrixWorld(true);
   rec.angle = angle;
 }
@@ -2049,22 +2073,25 @@ function syncNames(hover = null) {
 }
 
 function syncRotUI() {
-  const rngY = $('#rng-yaw'), rngP = $('#rng-pitch'), valY = $('#val-yaw'), valP = $('#val-pitch');
-  if (!rngY || !rngP) return;
-  if (record?.rest) {
-    const minDeg = Math.floor(THREE.MathUtils.radToDeg(Math.min(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) * 2) / 2;
-    const maxDeg = Math.ceil(THREE.MathUtils.radToDeg(Math.max(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) * 2) / 2;
-    rngP.min = String(minDeg);
-    rngP.max = String(maxDeg);
-  }
-  const curPitch = state.pitchDeg !== null ? state.pitchDeg : THREE.MathUtils.radToDeg(record?.angle ?? 0);
-  rngY.value = String(Math.round(state.yaw));
-  rngP.value = String(Math.round(curPitch * 2) / 2);
-  if (valY) valY.textContent = `${Math.round(state.yaw)}°`;
-  if (valP) valP.textContent = `${Math.round(curPitch * 2) / 2}°`;
-  const btnRot = $('#btn-rot'), rotPop = $('#rotpop');
+  const btnRot = $('#btn-rot'), btnReset = $('#btn-rot-reset');
   if (btnRot) btnRot.setAttribute('aria-pressed', String(state.rotOpen));
-  if (rotPop) rotPop.hidden = !state.rotOpen;
+  const moved = Math.abs(state.offsetX) > 0.01 || Math.abs(state.offsetZ) > 0.01 || Math.abs(state.yaw) > 0.5 || state.pitchDeg !== null;
+  if (btnReset) btnReset.hidden = !(state.rotOpen || moved);
+  if (gizmo) {
+    const canShow = state.rotOpen && !state.compare && rig?.projection !== 'orthographic' && !(plan?.quad);
+    gizmo.setVisible(canShow);
+    const minPitch = record?.rest ? THREE.MathUtils.radToDeg(Math.min(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) : -30;
+    const maxPitch = record?.rest ? THREE.MathUtils.radToDeg(Math.max(record.rest.tail?.angle ?? -0.5, record.rest.nose?.angle ?? 0.5)) : 30;
+    const curPitch = state.pitchDeg !== null ? state.pitchDeg : THREE.MathUtils.radToDeg(record?.angle ?? 0);
+    gizmo.setState({
+      offsetX: state.offsetX,
+      offsetZ: state.offsetZ,
+      yaw: state.yaw,
+      pitchDeg: curPitch,
+      minPitch,
+      maxPitch,
+    });
+  }
 }
 
 function syncHangarToolbar() {
@@ -2258,29 +2285,35 @@ function wireUi() {
   });
   document.addEventListener('pointerleave', () => { backParallax.targetX = 0; backParallax.targetY = 0; });
   $('#btn-rot').onclick = () => { state.rotOpen = !state.rotOpen; syncRotUI(); placeBars(); };
-  $('#rng-yaw').addEventListener('input', (e) => {
-    state.yaw = Number(e.target.value);
+  const applyGliderMoveRot = () => {
     const ang = state.pitchDeg !== null ? THREE.MathUtils.degToRad(state.pitchDeg) : (record?.angle ?? 0);
     if (record) { record.swing = null; tiltTo(record, ang); }
     if (other) { other.swing = null; tiltTo(other, ang); }
     syncRotUI();
     scenes.notifyGliderMoved();
-  });
-  $('#rng-pitch').addEventListener('input', (e) => {
-    state.pitchDeg = Number(e.target.value);
-    const ang = THREE.MathUtils.degToRad(state.pitchDeg);
-    if (record) { record.swing = null; tiltTo(record, ang); }
-    if (other) { other.swing = null; tiltTo(other, ang); }
-    syncRotUI();
-    scenes.notifyGliderMoved();
-  });
+  };
   $('#btn-rot-reset').onclick = () => {
+    state.offsetX = 0;
+    state.offsetZ = 0;
     state.yaw = 0;
     state.pitchDeg = null;
     applyPose(true);
   };
+  // Helper for automated verification of 3D gizmo & transform
+  window.__FALCON4_MOVE_ROT__ = ({ offsetX, offsetZ, yaw, pitchDeg } = {}) => {
+    if (offsetX !== undefined) state.offsetX = THREE.MathUtils.clamp(offsetX, -2.2, 2.2);
+    if (offsetZ !== undefined) state.offsetZ = THREE.MathUtils.clamp(offsetZ, -1.6, 2.4);
+    if (yaw !== undefined) state.yaw = THREE.MathUtils.clamp(yaw, -180, 180);
+    if (pitchDeg !== undefined) state.pitchDeg = pitchDeg;
+    applyGliderMoveRot();
+    return {
+      gizmoVisible: Boolean(gizmo?.root?.visible),
+      gizmoHandles: gizmo?.hitMeshes?.map((m) => m.userData.gizmoHandle) || [],
+      gizmoPos: gizmo?.root?.position?.toArray()?.map((n) => Math.round(n * 100) / 100),
+    };
+  };
   // TEMP: wire Hangar Camera Bounds widget
-  const hbDefaults = { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 88, minDistance: 1.2, maxDistance: 9.8 };
+  const hbDefaults = { minAzimuthDeg: -39, maxAzimuthDeg: 39, minPolarDeg: 75.5, maxPolarDeg: 98, minDistance: 1.2, maxDistance: 9.8 };
   const hbFields = [
     ['hb-minAz', 'hb-v-minAz', 'minAzimuthDeg', (v) => `${Math.round(v)}°`],
     ['hb-maxAz', 'hb-v-maxAz', 'maxAzimuthDeg', (v) => `${Math.round(v)}°`],
