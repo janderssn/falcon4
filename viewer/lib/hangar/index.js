@@ -219,6 +219,7 @@ export class HangarScene {
         this.wildlife.loadCat(this.urls.cat),
         this.wildlife.loadDeer(this.urls.deer),
       ]);
+      this._registerCatOccluders(this.wildlife.catGroup);
 
       this.wildlife.setPerchTargets({
         gliderRoot: this.gliderRoot,
@@ -378,6 +379,46 @@ export class HangarScene {
         localBox: box,
         center,
         opacity: 1.0,
+        isChair: /Chairs/i.test(o.name) || (o.parent && /Chairs/i.test(o.parent.name)),
+        isCat: false,
+      });
+    });
+  }
+
+  _registerCatOccluders(catGroup) {
+    if (!catGroup) return;
+    if (!this._occluderProps) this._occluderProps = [];
+    // Remove any previous cat entries before re-registering
+    this._occluderProps = this._occluderProps.filter((p) => !p.isCat);
+    catGroup.updateMatrixWorld(true);
+    const origin = this.worldGroup.position;
+    catGroup.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const origMats = Array.isArray(o.material) ? o.material : [o.material];
+      const cloned = origMats.map((m) => {
+        const cm = m.clone();
+        cm.userData = {
+          ...m.userData,
+          _origTransparent: Boolean(cm.transparent),
+          _origOpacity: cm.opacity !== undefined ? cm.opacity : 1.0,
+          _origDepthWrite: cm.depthWrite !== undefined ? cm.depthWrite : true,
+        };
+        return cm;
+      });
+      o.material = Array.isArray(o.material) ? cloned : cloned[0];
+      const box = new THREE.Box3().setFromObject(o);
+      box.min.sub(origin);
+      box.max.sub(origin);
+      const center = box.getCenter(new THREE.Vector3());
+      this._occluderProps.push({
+        name: o.name || 'HangarCatMesh',
+        mesh: o,
+        mats: cloned,
+        localBox: box,
+        center,
+        opacity: 1.0,
+        isChair: false,
+        isCat: true,
       });
     });
   }
@@ -422,6 +463,7 @@ export class HangarScene {
     const toBox = new THREE.Vector3();
     const clampedPt = new THREE.Vector3();
     let fadedCount = 0;
+    let chairOrCatOccluded = false;
 
     for (const prop of this._occluderProps) {
       let occluded = this._segmentIntersectsBox(camL, tgtL, prop.localBox, 0.45, 0.92);
@@ -436,6 +478,13 @@ export class HangarScene {
           }
         }
       }
+      prop._occluded = occluded;
+      if (occluded && (prop.isChair || prop.isCat)) chairOrCatOccluded = true;
+    }
+
+    let catFaded = false;
+    for (const prop of this._occluderProps) {
+      const occluded = (prop.isChair || prop.isCat) ? (prop._occluded || chairOrCatOccluded) : prop._occluded;
       const targetOp = occluded ? 0.0 : 1.0;
       if (dt <= 0) {
         prop.opacity = targetOp;
@@ -448,6 +497,7 @@ export class HangarScene {
       if (prop.opacity < 0.04) {
         prop.mesh.visible = false;
         fadedCount++;
+        if (prop.isCat) catFaded = true;
       } else if (prop.opacity >= 0.995) {
         prop.mesh.visible = true;
         for (const m of prop.mats) {
@@ -461,6 +511,7 @@ export class HangarScene {
       } else {
         prop.mesh.visible = true;
         fadedCount++;
+        if (prop.isCat) catFaded = true;
         for (const m of prop.mats) {
           if (!m.transparent) {
             m.transparent = true;
@@ -472,6 +523,7 @@ export class HangarScene {
       }
     }
     this.fadedPropCount = fadedCount;
+    this.catFaded = catFaded;
   }
 
   update(a, b, targetWorld) {

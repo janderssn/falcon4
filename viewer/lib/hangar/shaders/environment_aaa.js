@@ -37,6 +37,7 @@ export class AAAEnvironment {
 
     this._buildDenseLushTurf();
     this._buildTreelineHorizon();
+    this._buildAirfieldLandmarks();
     this._buildWindsock();
     this._buildContactAOAndDecals();
   }
@@ -296,11 +297,26 @@ export class AAAEnvironment {
             float mPatch1 = trFbm(p * 0.06);
             float mPatch2 = trFbm(p * 0.24 + vec2(9.1, 3.7));
 
-            // Subtle natural macro lawn tone variation + Grass Lushness tuner
-            vec3 grassCol = gTex * mix(0.86, 1.14, mPatch1);
-            grassCol = mix(grassCol, grassCol * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.26);
+            // Rich organic macro airfield meadow variation across 20-200m
+            float mField1 = trFbm(p * 0.018);
+            float mField2 = trFbm(p * 0.046 + vec2(17.3, 6.2));
+            float mClover = trFbm(p * 0.088 - vec2(4.1, 11.8));
+            float farMeadow = smoothstep(14.0, 36.0, length(p));
+            // Classic Swedish grass-runway subtle alternating mowed strip bands (p is vec2(x, z))
+            float runwayCorridor = smoothstep(38.0, 14.0, abs(p.x - 2.0)) * smoothstep(14.0, 32.0, p.y);
+            float mowStripe = sin(p.x * 0.38 + p.y * 0.04) * 0.5 + 0.5;
+            vec3 grassCol = gTex * mix(0.84, 1.15, mPatch1);
+            grassCol *= mix(1.0, mix(0.93, 1.07, mowStripe), runwayCorridor * 0.72);
+            // Warm dry hay/straw pockets, lush deeper clover hollows, and sage-green meadow patches
+            grassCol = mix(grassCol, grassCol * vec3(1.18, 1.08, 0.78), smoothstep(0.56, 0.84, mField1) * 0.42 * farMeadow);
+            grassCol = mix(grassCol, grassCol * vec3(0.76, 0.92, 0.74), smoothstep(0.44, 0.18, mClover) * 0.36 * farMeadow);
+            grassCol = mix(grassCol, grassCol * vec3(0.88, 0.96, 0.88), smoothstep(0.58, 0.85, mField2) * 0.28 * farMeadow);
+            grassCol = mix(grassCol, grassCol * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.24);
             float gLuma = dot(grassCol, vec3(0.2126, 0.7152, 0.0722));
             grassCol = mix(vec3(gLuma), grassCol * vec3(0.96, 1.05, 0.93), uGrassLushness);
+            // Slow drifting soft Nordic cloud-shadow mottling across the airfield
+            float cloudSh = trFbm(p * 0.011 + uWindDir * uTime * 0.012);
+            grassCol *= mix(1.0, mix(0.80, 1.06, smoothstep(0.30, 0.70, cloudSh)), farMeadow * 0.82);
             // Subtle morning-dew richness on damp grass patches + gentle animated wind-wave light shimmer
             grassCol *= mix(1.0, 0.88, wetness * 0.28);
             float windWave = sin(dot(p, uWindDir) * 0.42 - uTime * 1.10 + mPatch1 * 3.8);
@@ -336,8 +352,10 @@ export class AAAEnvironment {
 
             float gMix = trGrassMix(p);
             float gR = mix(texture2D(uGrassR, trGrassUvA(p)).g, texture2D(uGrassR, trGrassUvB(p)).g, gMix);
-            // Pure 2048px grass blade roughness + subtle morning dew sheen
-            float grassRough = clamp(gR - wetness * 0.14, 0.44, 0.96);
+            // Pure 2048px grass blade roughness near hangar; matte 0.86-0.94 beyond 18m (kills grazing glare streak!)
+            float farMatte = smoothstep(14.0, 32.0, camDist);
+            float nearGrassRough = clamp(gR - wetness * 0.14, 0.48, 0.96);
+            float grassRough = mix(nearGrassRough, 0.90, farMatte);
 
             roughnessFactor = mix(dirtRough, grassRough, grassWeight);
           }`
@@ -387,7 +405,7 @@ export class AAAEnvironment {
             vec3 V = normalize(cameraPosition - vTerrainWorldPos);
             float fresnel = pow(1.0 - max(V.y, 0.0), 3.0);
             float grassApprox = smoothstep(5.0, 9.5, length(p));
-            gl_FragColor.rgb += uSunColor * fresnel * 0.045 * grassApprox * (1.0 - smoothstep(15.0, 120.0, dist));
+            gl_FragColor.rgb += uSunColor * fresnel * 0.022 * grassApprox * (1.0 - smoothstep(12.0, 44.0, dist));
 
             float horizonBlend = smoothstep(38.0, 190.0, dist);
             horizonBlend = pow(horizonBlend, 0.85);
@@ -688,6 +706,178 @@ export class AAAEnvironment {
     ring.name = 'NordicTreelineRing';
     ring.renderOrder = 1;
     this.root.add(ring);
+  }
+
+  _buildAirfieldLandmarks() {
+    // Lightweight Sala flygfält mid-distance landmarks (45-120m, <1.8k tris total):
+    // 1. Flanking Nordic pine & birch tree/bush clusters (left & right flanks, keeping central runway & deer open)
+    // 2. Crisp white/orange Swedish grass-runway edge markers
+    // 3. Distant red Swedish barn (faluröd lada) tucked near the far treeline edge
+    const group = new THREE.Group();
+    group.name = 'SalaAirfieldLandmarks';
+
+    // Deterministic LCG RNG
+    let seed = 42197;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    // --- 1. Flanking Nordic Pines (low-poly 6-sided layered cones) ---
+    const pineSpots = [
+      // Left flank (outside runway corridor X < -18)
+      [-28, 48, 1.05], [-34, 54, 1.25], [-24, 62, 0.92], [-40, 68, 1.35],
+      [-31, 78, 1.15], [-46, 84, 1.40], [-25, 92, 1.05], [-38, 98, 1.30],
+      [-52, 72, 1.25], [-22, 108, 1.15], [-44, 112, 1.45],
+      // Right flank (outside runway corridor X > +20)
+      [24, 44, 0.95], [31, 50, 1.20], [27, 58, 1.05], [38, 64, 1.35],
+      [23, 74, 0.90], [34, 80, 1.25], [44, 86, 1.40], [28, 94, 1.10],
+      [40, 102, 1.35], [50, 74, 1.20], [33, 112, 1.30],
+    ];
+    const pineTrunkGeo = new THREE.CylinderGeometry(0.14, 0.24, 2.2, 5);
+    pineTrunkGeo.translate(0, 1.1, 0);
+    const pineTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4b382a, roughness: 0.95 });
+    const pineTrunks = new THREE.InstancedMesh(pineTrunkGeo, pineTrunkMat, pineSpots.length);
+
+    const pineConeGeo = new THREE.ConeGeometry(1.85, 6.2, 7, 4);
+    const pPos = pineConeGeo.attributes.position;
+    for (let i = 0; i < pPos.count; i++) {
+      const vx = pPos.getX(i), vy = pPos.getY(i), vz = pPos.getZ(i);
+      const ang = Math.atan2(vz, vx);
+      const tier = 1.0 + 0.24 * Math.sin(vy * 2.4 + ang * 2.0) + 0.12 * Math.cos(ang * 3.0 + vy);
+      pPos.setXYZ(i, vx * tier, vy, vz * tier);
+    }
+    pineConeGeo.computeVertexNormals();
+    pineConeGeo.translate(0, 4.4, 0);
+    const pineMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.94, flatShading: true });
+    const pineCrowns = new THREE.InstancedMesh(pineConeGeo, pineMat, pineSpots.length);
+
+    pineSpots.forEach(([x, z, s], i) => {
+      const sy = s * (0.9 + rand() * 0.28);
+      const sx = s * (0.85 + rand() * 0.25);
+      dummy.position.set(x, 0, z);
+      dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+      dummy.scale.set(sx, sy, sx);
+      dummy.updateMatrix();
+      pineTrunks.setMatrixAt(i, dummy.matrix);
+      pineCrowns.setMatrixAt(i, dummy.matrix);
+      color.setHSL(0.32 + (rand() - 0.5) * 0.04, 0.30 + rand() * 0.12, 0.16 + rand() * 0.06);
+      pineCrowns.setColorAt(i, color);
+    });
+    pineTrunks.instanceMatrix.needsUpdate = true;
+    pineCrowns.instanceMatrix.needsUpdate = true;
+    pineCrowns.instanceColor.needsUpdate = true;
+    group.add(pineTrunks, pineCrowns);
+
+    // --- 2. Flanking Nordic Birch & Meadow Bushes (white trunks + soft low-poly icosahedron crowns) ---
+    const birchSpots = [
+      [-21, 38, 0.85], [-26, 56, 1.05], [-33, 66, 0.95], [-20, 76, 0.80],
+      [-37, 88, 1.15], [-29, 102, 1.00], [-48, 58, 1.10],
+      [21, 36, 0.80], [29, 46, 1.00], [22, 64, 0.88], [35, 72, 1.10],
+      [25, 86, 0.92], [38, 96, 1.15], [46, 62, 1.05],
+      // Low meadow bushes tucked near flanks
+      [-18, 46, 0.45], [-22, 68, 0.50], [19, 52, 0.48], [24, 79, 0.46],
+    ];
+    const birchTrunkGeo = new THREE.CylinderGeometry(0.08, 0.14, 2.4, 5);
+    birchTrunkGeo.translate(0, 1.2, 0);
+    const birchTrunkMat = new THREE.MeshStandardMaterial({ color: 0xd8d5cc, roughness: 0.9 });
+    const birchTrunks = new THREE.InstancedMesh(birchTrunkGeo, birchTrunkMat, birchSpots.length);
+
+    const birchCrownGeo = new THREE.IcosahedronGeometry(1.70, 2);
+    const bPos = birchCrownGeo.attributes.position;
+    for (let i = 0; i < bPos.count; i++) {
+      const vx = bPos.getX(i), vy = bPos.getY(i), vz = bPos.getZ(i);
+      const n = 1.0 + 0.22 * Math.sin(vx * 2.7 + vy * 1.9) * Math.cos(vz * 2.3 - vy * 1.4)
+        + 0.10 * Math.sin(vx * 5.1 - vz * 4.3);
+      bPos.setXYZ(i, vx * n, vy * 1.18 * n, vz * n);
+    }
+    birchCrownGeo.computeVertexNormals();
+    birchCrownGeo.translate(0, 3.35, 0);
+    const birchCrownMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.93, flatShading: true });
+    const birchCrowns = new THREE.InstancedMesh(birchCrownGeo, birchCrownMat, birchSpots.length);
+
+    birchSpots.forEach(([x, z, s], i) => {
+      const sy = s * (0.92 + rand() * 0.24);
+      const sx = s * (0.88 + rand() * 0.28);
+      dummy.position.set(x, 0, z);
+      dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+      dummy.scale.set(sx, sy, sx);
+      dummy.updateMatrix();
+      birchTrunks.setMatrixAt(i, dummy.matrix);
+      birchCrowns.setMatrixAt(i, dummy.matrix);
+      color.setHSL(0.24 + (rand() - 0.5) * 0.05, 0.34 + rand() * 0.14, 0.25 + rand() * 0.09);
+      birchCrowns.setColorAt(i, color);
+    });
+    birchTrunks.instanceMatrix.needsUpdate = true;
+    birchCrowns.instanceMatrix.needsUpdate = true;
+    birchCrowns.instanceColor.needsUpdate = true;
+    group.add(birchTrunks, birchCrowns);
+
+    // --- 3. Crisp White/Orange Grass-Runway Edge Markers (8 markers along runway flanks) ---
+    const markerSpots = [
+      [-13.5, 30], [15.5, 30],
+      [-13.5, 56], [15.5, 56],
+      [-13.5, 82], [15.5, 82],
+      [-13.5, 108], [15.5, 108],
+    ];
+    const mkBodyGeo = new THREE.ConeGeometry(0.42, 0.52, 4);
+    mkBodyGeo.rotateY(Math.PI / 4);
+    mkBodyGeo.scale(1.8, 1.0, 0.75);
+    mkBodyGeo.translate(0, 0.26, 0);
+    const mkWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf0efe9, roughness: 0.82 });
+    const mkOrangeMat = new THREE.MeshStandardMaterial({ color: 0xd94b1a, roughness: 0.80 });
+    const mkWhite = new THREE.InstancedMesh(mkBodyGeo, mkWhiteMat, markerSpots.length);
+    const mkCapGeo = new THREE.ConeGeometry(0.24, 0.26, 4);
+    mkCapGeo.rotateY(Math.PI / 4);
+    mkCapGeo.scale(1.8, 1.0, 0.75);
+    mkCapGeo.translate(0, 0.42, 0);
+    const mkOrange = new THREE.InstancedMesh(mkCapGeo, mkOrangeMat, markerSpots.length);
+
+    markerSpots.forEach(([x, z], i) => {
+      dummy.position.set(x, 0, z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      mkWhite.setMatrixAt(i, dummy.matrix);
+      mkOrange.setMatrixAt(i, dummy.matrix);
+    });
+    mkWhite.instanceMatrix.needsUpdate = true;
+    mkOrange.instanceMatrix.needsUpdate = true;
+    group.add(mkWhite, mkOrange);
+
+    // --- 4. Distant Red Swedish Barn (faluröd lada) tucked near far treeline edge ---
+    const barn = new THREE.Group();
+    barn.position.set(-29, 0, 106);
+    barn.rotation.y = 0.28;
+    const faluRedMat = new THREE.MeshStandardMaterial({ color: 0x7b251c, roughness: 0.90 });
+    const trimWhiteMat = new THREE.MeshStandardMaterial({ color: 0xeae8e0, roughness: 0.85 });
+    const roofDarkMat = new THREE.MeshStandardMaterial({ color: 0x2f3338, roughness: 0.88 });
+
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(10.5, 4.0, 6.2), faluRedMat);
+    walls.position.y = 2.0;
+    barn.add(walls);
+
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(7.9, 2.7, 4), roofDarkMat);
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.set(1.06, 1.0, 0.66);
+    roof.position.y = 5.35;
+    barn.add(roof);
+
+    // Crisp white Swedish corner boards
+    const cornerGeo = new THREE.BoxGeometry(0.24, 4.02, 0.24);
+    for (const cx of [-5.22, 5.22]) {
+      for (const cz of [-3.06, 3.06]) {
+        const trim = new THREE.Mesh(cornerGeo, trimWhiteMat);
+        trim.position.set(cx, 2.01, cz);
+        barn.add(trim);
+      }
+    }
+    group.add(barn);
+
+    this.root.add(group);
   }
 
   _buildWindsock() {

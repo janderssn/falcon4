@@ -1648,6 +1648,7 @@ window.__FALCON4_STEP__ = (orbitTest) => {
     calls: renderer.info.render.calls,
     tris: renderer.info.render.triangles,
     fadedPropCount: scenes?.hangar?.fadedPropCount ?? 0,
+    catFaded: Boolean(scenes?.hangar?.catFaded),
     occluderTracked: scenes?.hangar?._occluderProps?.length ?? 0,
     camLocal: {
       x: Math.round(lx * 1000) / 1000,
