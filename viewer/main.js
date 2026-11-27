@@ -1051,7 +1051,7 @@ function hangarBackPose() {
   return { target, dir: pos.sub(target).normalize(), size };
 }
 
-const backParallax = { targetX: 0, targetY: 0, curX: 0, curY: 0, appliedX: 0, appliedY: 0, maxX: 0.45, maxY: 0.20 };
+const backParallax = { targetX: 0, targetY: 0, curX: 0, curY: 0, appliedX: 0, appliedY: 0, maxX: 0.45, maxY: 0.20, fade: 0 };
 function clearBackParallax() {
   if (backParallax.appliedX !== 0 || backParallax.appliedY !== 0) {
     rig.camera.position.x -= backParallax.appliedX;
@@ -1063,7 +1063,11 @@ function clearBackParallax() {
 
 function setHangarBackView(on, animate = !reduced) {
   clearBackParallax();
+  resetSpringArm();
+  rig.controls._sphericalDelta?.set(0, 0, 0);
+  rig.controls._panOffset?.set(0, 0, 0);
   backParallax.targetX = backParallax.targetY = backParallax.curX = backParallax.curY = 0;
+  backParallax.fade = 0;
   state.hangarBackView = Boolean(on && state.scene === 'hangar');
   if (state.hangarBackView) {
     stopTour();
@@ -1560,22 +1564,41 @@ function loop(now) {
   // just outside the glider, so floors, walls and the roof stay behind it.
   // While the projection changes the camera is placed by the rig alone.
   const flat = rig.projection === 'orthographic' && !rig.morph;
+  const wasTransitioning = Boolean(rig.transition);
   rig.orthoDistance = reachOf();
   clearBackParallax();
   if (flat || rig.morph) {
     resetSpringArm();
     rig.controls.maxPolarAngle = Math.PI;
+  } else if (wasTransitioning) {
+    // Skip springArm restore during fly-to transition so it never fights the smooth ease
+    limitCamera(dt);
   } else {
     restoreSpringArm();
     limitCamera(dt);
   }
   rig.update(now, dt);
-  if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera(dt);
-  if (state.hangarBackView && !flat && !rig.morph && !rig.transition) {
+  const transitioning = wasTransitioning || Boolean(rig.transition);
+  if (flat) {
+    closeIn(rig.camera);
+  } else if (!rig.morph) {
+    if (transitioning) {
+      // Continuously sync springArm to the exact landing distance so transition end has zero pop/shake
+      const d = rig.camera.position.distanceTo(rig.controls.target);
+      springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+      springArm.curDist = springArm.desiredDist;
+      springArm.active = false;
+    } else {
+      clampCamera(dt);
+    }
+  }
+  if (state.hangarBackView && !flat && !rig.morph && !transitioning) {
+    backParallax.fade = Math.min(1, backParallax.fade + dt / 0.35);
+    const ease = backParallax.fade * backParallax.fade * (3 - 2 * backParallax.fade);
     backParallax.curX += (backParallax.targetX - backParallax.curX) * 0.08;
     backParallax.curY += (backParallax.targetY - backParallax.curY) * 0.08;
-    const ox = backParallax.curX * backParallax.maxX;
-    const oy = -backParallax.curY * backParallax.maxY;
+    const ox = backParallax.curX * backParallax.maxX * ease;
+    const oy = -backParallax.curY * backParallax.maxY * ease;
     rig.camera.position.x += ox;
     rig.camera.position.y += oy;
     backParallax.appliedX = ox;
@@ -1670,6 +1693,49 @@ window.__FALCON4_STEP__ = (orbitTest) => {
       zoomToCursor: rig.controls.zoomToCursor,
     },
   };
+};
+// Verify smooth monotonic Eye-button press/unpress transition with zero landing pop/reversal
+window.__FALCON4_TEST_EYE_TRANSITION__ = () => {
+  const sampleTransition = (toBack) => {
+    setHangarBackView(toBack, true);
+    const t0 = rig.transition ? rig.transition.start : performance.now();
+    const dists = [];
+    for (let i = 0; i <= 24; i++) {
+      const now = t0 + i * 32; // covers 0..768ms (650ms transition + 4 post-landing frames)
+      const wasT = Boolean(rig.transition);
+      clearBackParallax();
+      if (!wasT) restoreSpringArm();
+      limitCamera(0.032);
+      rig.update(now, 0.032);
+      if (wasT || rig.transition) {
+        const d = rig.camera.position.distanceTo(rig.controls.target);
+        springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
+        springArm.curDist = springArm.desiredDist;
+        springArm.active = false;
+      } else {
+        clampCamera(0.032);
+      }
+      dists.push(Math.round(rig.camera.position.distanceTo(rig.controls.target) * 1000) / 1000);
+    }
+    // Check monotonic direction (zero in/out reversal) + zero post-landing jump
+    const dirSign = Math.sign(dists[dists.length - 1] - dists[0]);
+    let maxReversal = 0;
+    for (let i = 1; i < dists.length; i++) {
+      const delta = dists[i] - dists[i - 1];
+      if (dirSign !== 0 && delta * dirSign < -0.002) {
+        maxReversal = Math.max(maxReversal, Math.abs(delta));
+      }
+    }
+    const postLandingMaxDelta = Math.max(
+      Math.abs(dists[24] - dists[21]),
+      Math.abs(dists[23] - dists[21]),
+      Math.abs(dists[22] - dists[21]),
+    );
+    return { start: dists[0], end: dists[dists.length - 1], maxReversal, postLandingMaxDelta, smooth: maxReversal === 0 && postLandingMaxDelta < 0.002 };
+  };
+  const pressOn = sampleTransition(true);
+  const pressOff = sampleTransition(false);
+  return { pressOn, pressOff, ok: pressOn.smooth && pressOff.smooth };
 };
 const outline = new Outline();                      // experimental (Settings); lib/outline.js
 // ------------------------------------------------------------------ film blur
