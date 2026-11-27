@@ -210,14 +210,14 @@ export class AtmosphereSystem {
           vec3 scatterM = betaM * mPhase * 0.65;
           vec3 totalBeta = max(betaR + betaM, vec3(1e-4));
 
-          vec3 sky = sunTrans * (scatterR + scatterM) / totalBeta * (1.0 - viewExt) * 6.8;
+          vec3 sky = sunTrans * (scatterR + scatterM) / totalBeta * (1.0 - viewExt) * 3.4;
 
-          // Soft Nordic cloud-deck / horizon haze blend — smooth atmospheric fade right to y=0
+          // Soft Nordic cloud-deck / horizon haze blend — converges seamlessly to exact uHorizonTint (= uFogColor)
           float overcastMix = smoothstep(3.0, 6.8, uTurbidity) * 0.58;
-          float horizonBand = exp(-max(y, 0.0) * 5.2);
-          vec3 overcastSky = mix(uHorizonTint * 0.88, uHorizonTint * 1.04, 1.0 - smoothstep(0.0, 0.75, max(y, 0.0)));
+          float horizonBand = exp(-max(y, 0.0) * 6.2);
+          vec3 overcastSky = mix(uHorizonTint * 0.88, uHorizonTint * 1.02, 1.0 - smoothstep(0.0, 0.75, max(y, 0.0)));
           sky = mix(sky, overcastSky, overcastMix);
-          sky = mix(sky, uHorizonTint, clamp(horizonBand * 0.88, 0.0, 1.0));
+          sky = mix(sky, uHorizonTint, clamp(horizonBand, 0.0, 1.0));
 
           // Crisp solar disc + warm Mie aureole
           float sunDisc = smoothstep(0.99935, 0.99985, cosTheta) * (1.0 - overcastMix * 0.85);
@@ -225,31 +225,31 @@ export class AtmosphereSystem {
           sky += sunTrans * (sunDisc * 4.5 + aureole);
 
           // Drifting multi-layer Nordic cumulus/stratus cloud deck above horizon
-          if (y > 0.015) {
+          if (y > 0.025) {
             vec2 cloudUV = dir.xz / (y + 0.14);
             vec2 drift1 = vec2(uTime * 0.0085, uTime * 0.0032);
             vec2 drift2 = vec2(uTime * 0.0042, -uTime * 0.0021);
             float c1 = skyFbm(cloudUV * 0.55 + drift1);
             float c2 = skyFbm(cloudUV * 1.15 - drift2);
             float cloudDensity = smoothstep(1.0 - uCloudCover, 1.0 - uCloudCover + 0.42, c1 * 0.72 + c2 * 0.38);
-            float horizonFade = smoothstep(0.015, 0.22, y);
-            cloudDensity *= horizonFade * 0.82;
+            float horizonFade = smoothstep(0.025, 0.24, y);
+            cloudDensity *= horizonFade * 0.78;
 
             // Sunlit cloud top & silver-lining forward scattering vs soft shadowed base
             float silverLining = pow(max(cosTheta, 0.0), 6.0) * 0.45;
-            vec3 cloudLit = mix(uHorizonTint * 1.06, sunTrans * 1.25 + vec3(0.32), 0.45 + silverLining);
+            vec3 cloudLit = mix(uHorizonTint * 1.06, sunTrans * 1.15 + vec3(0.24), 0.45 + silverLining);
             vec3 cloudBase = uHorizonTint * 0.72;
             vec3 cloudCol = mix(cloudBase, cloudLit, clamp(0.45 + c2 * 0.55, 0.0, 1.0));
             sky = mix(sky, cloudCol, cloudDensity);
           }
 
-          // Below-horizon ground hemisphere smoothly matches horizon tint (no dark seam)
-          if (y < 0.0) {
-            float gFade = smoothstep(0.0, -0.35, y);
-            sky = mix(uHorizonTint, uGroundColor, gFade);
-          }
+          // Exact horizon lock (y <= 0.02) + below-horizon hemisphere match uHorizonTint (= scene.fog.color) identically
+          float exactHorizon = 1.0 - smoothstep(0.012, 0.06, y);
+          sky = mix(sky, uHorizonTint, exactHorizon);
 
           gl_FragColor = vec4(max(sky, vec3(0.0)), 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
           #include <logdepthbuf_fragment>
         }
       `,

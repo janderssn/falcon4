@@ -171,9 +171,9 @@ export class Scenes {
     }
   }
 
-  update(camera, seconds) {
+  update(camera, seconds, target) {
     if (this.current === 'hill') this.meadow?.update(camera, seconds);
-    if (this.current === 'hangar') this.hangar?.update(camera, seconds);
+    if (this.current === 'hangar') this.hangar?.update(camera, seconds, target);
     const look = camera.getWorldDirection(new THREE.Vector3());
     const up = camera.isOrthographicCamera ? Math.max(0, look.y) : 0;   // 1 looking straight up
     this.viewLight.intensity = VIEW_LIGHT * up;

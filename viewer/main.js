@@ -1034,7 +1034,7 @@ function hangarFrontPose() {
   const c = record ? record.box.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 1.2, -2.7);
   const g = record ? record.ground : 0;
   return {
-    target: new THREE.Vector3(c.x, g + 1.15, c.z),
+    target: new THREE.Vector3(c.x + (state.offsetX || 0), g + 1.15, c.z + (state.offsetZ || 0)),
     dir: new THREE.Vector3(0, 0.08, 1).normalize(),
     size: 5.15,
   };
@@ -1384,9 +1384,15 @@ function restoreSpringArm() {
   }
   const t = rig.controls.target;
   const off = rig.camera.position.clone().sub(t);
-  const len = off.length();
-  if (len > 1e-5) {
-    rig.camera.position.copy(t).addScaledVector(off, springArm.desiredDist / len);
+  const actualDist = off.length();
+  if (actualDist > 1e-5) {
+    // Capture any synchronous zoom (e.g., OrbitControls mouseWheel) that happened between frames
+    if (springArm.curDist > 1e-4 && Math.abs(actualDist - springArm.curDist) > 1e-4) {
+      const ratio = actualDist / springArm.curDist;
+      const base = ratio < 1 ? Math.min(springArm.desiredDist, springArm.curDist) : springArm.desiredDist;
+      springArm.desiredDist = THREE.MathUtils.clamp(base * ratio, 0.9, 10.2);
+    }
+    rig.camera.position.copy(t).addScaledVector(off, springArm.desiredDist / actualDist);
   }
 }
 function hangarOrigin() {
@@ -1428,7 +1434,16 @@ function hangarRayMaxDist(tx, ty, tz, dx, dy, dz) {
   return Math.max(tMax, 0.45);
 }
 
-function limitCamera() {
+function hangarGliderCenter() {
+  const o = hangarOrigin();
+  return new THREE.Vector3(
+    o.x + (state.offsetX || 0),
+    o.y + 1.15,
+    o.z + (state.offsetZ || 0),
+  );
+}
+
+function limitCamera(dt = 0) {
   const lim = record && scenes.cameraLimits();
   const c = rig.controls;
   if (scenes.current === 'hangar') {
@@ -1436,6 +1451,7 @@ function limitCamera() {
       resetSpringArm();
       c.enableRotate = false;
       c.enablePan = false;
+      c.zoomToCursor = false;
       c.minAzimuthAngle = -Infinity;
       c.maxAzimuthAngle = Infinity;
       c.minPolarAngle = 0;
@@ -1444,25 +1460,31 @@ function limitCamera() {
       c.maxDistance = 14.0;
       return;
     }
-    // Full 360° free orbit inside the hangar bay & front apron
+    // Full 360° free orbit locked onto the glider center inside the hangar bay
     c.enableRotate = true;
-    c.enablePan = true;
+    c.enablePan = false;
+    c.zoomToCursor = false;
     c.minAzimuthAngle = -Infinity;
     c.maxAzimuthAngle = Infinity;
     c.minPolarAngle = 0.08;
     c.maxPolarAngle = 2.05;
     c.minDistance = 0.9;
     c.maxDistance = 10.2;
-    const o = hangarOrigin();
-    c.target.x = THREE.MathUtils.clamp(c.target.x, o.x - 4.5, o.x + 4.5);
-    c.target.z = THREE.MathUtils.clamp(c.target.z, o.z - 4.0, o.z + 3.5);
-    c.target.y = THREE.MathUtils.clamp(c.target.y, o.y + 0.15, o.y + 2.6);
+    if (!gizmo?.dragging && !rig.transition) {
+      const gc = hangarGliderCenter();
+      if (dt > 0 && c.target.distanceTo(gc) > 0.002) {
+        c.target.lerp(gc, 1 - Math.exp(-12 * dt));
+      } else {
+        c.target.copy(gc);
+      }
+    }
     return;
   }
   resetSpringArm();
   // Unconstrained orbit for Studio and Hill scenes
   c.enableRotate = true;
   c.enablePan = true;
+  c.zoomToCursor = true;
   c.minAzimuthAngle = -Infinity;
   c.maxAzimuthAngle = Infinity;
   c.minPolarAngle = 0;
@@ -1538,9 +1560,14 @@ function loop(now) {
   // While the projection changes the camera is placed by the rig alone.
   const flat = rig.projection === 'orthographic' && !rig.morph;
   rig.orthoDistance = reachOf();
-  if (flat || rig.morph) { resetSpringArm(); rig.controls.maxPolarAngle = Math.PI; } else limitCamera();
   clearBackParallax();
-  if (!flat && !rig.morph) restoreSpringArm();
+  if (flat || rig.morph) {
+    resetSpringArm();
+    rig.controls.maxPolarAngle = Math.PI;
+  } else {
+    restoreSpringArm();
+    limitCamera(dt);
+  }
   rig.update(now, dt);
   if (flat) closeIn(rig.camera); else if (!rig.morph) clampCamera(dt);
   if (state.hangarBackView && !flat && !rig.morph && !rig.transition) {
@@ -1557,7 +1584,7 @@ function loop(now) {
   stepSplit(now);
   stepPoses(now);
   stepRopes(dt);
-  scenes.update(rig.camera, (now - clock0) / 1000);
+  scenes.update(rig.camera, (now - clock0) / 1000, rig.controls.target);
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
   const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
@@ -1607,7 +1634,8 @@ window.__FALCON4_STEP__ = (orbitTest) => {
   limitCamera();
   rig.controls.update();
   clampCamera(0);
-  scenes.update(rig.camera, (performance.now() - clock0) / 1000);
+  if (orbitTest && scenes?.hangar) scenes.hangar._lastUpdateSec = null;
+  scenes.update(rig.camera, (performance.now() - clock0) / 1000, rig.controls.target);
   renderer.render(scene, rig.camera);
   const o = hangarOrigin();
   const lx = rig.camera.position.x - o.x;
@@ -1619,6 +1647,8 @@ window.__FALCON4_STEP__ = (orbitTest) => {
     hangarLoaded: Boolean(scenes?.hangar?.loaded),
     calls: renderer.info.render.calls,
     tris: renderer.info.render.triangles,
+    fadedPropCount: scenes?.hangar?.fadedPropCount ?? 0,
+    occluderTracked: scenes?.hangar?._occluderProps?.length ?? 0,
     camLocal: {
       x: Math.round(lx * 1000) / 1000,
       y: Math.round(ly * 1000) / 1000,
@@ -1627,6 +1657,13 @@ window.__FALCON4_STEP__ = (orbitTest) => {
       dist: Math.round(rig.camera.position.distanceTo(rig.controls.target) * 1000) / 1000,
       desiredDist: Math.round(springArm.desiredDist * 1000) / 1000,
       dirErrDeg,
+      targetLocal: [
+        Math.round((rig.controls.target.x - o.x) * 1000) / 1000,
+        Math.round((rig.controls.target.y - o.y) * 1000) / 1000,
+        Math.round((rig.controls.target.z - o.z) * 1000) / 1000,
+      ],
+      enablePan: rig.controls.enablePan,
+      zoomToCursor: rig.controls.zoomToCursor,
     },
   };
 };

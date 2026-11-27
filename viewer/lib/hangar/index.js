@@ -207,6 +207,7 @@ export class HangarScene {
       });
 
       this.hangarRoot.add(model);
+      this._initOccluderProps(model);
       this.hangarTriangles = countGeometryTriangles(model);
       const b = new THREE.Box3().setFromObject(this.hangarRoot);
       console.info(
@@ -337,16 +338,155 @@ export class HangarScene {
     }
   }
 
-  update(a, b) {
+  _initOccluderProps(model) {
+    this._occluderProps = [];
+    this._lastUpdateSec = null;
+    const FADE_RE = /^Hangar_Props_(GliderRack|PackedGliders|Ladder|SwingStand|AluTubes|LeftRack|Chairs|RightDolly)/i;
+    model.updateMatrixWorld(true);
+    const origin = this.worldGroup.position;
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      // Check mesh name or parent name
+      let matched = FADE_RE.test(o.name);
+      let p = o.parent;
+      while (!matched && p && p !== model) {
+        if (FADE_RE.test(p.name)) matched = true;
+        p = p.parent;
+      }
+      if (!matched || !o.material) return;
+      // Clone materials per fadeable prop once so fading one prop never affects shared materials elsewhere
+      const origMats = Array.isArray(o.material) ? o.material : [o.material];
+      const cloned = origMats.map((m) => {
+        const cm = m.clone();
+        cm.userData = {
+          ...m.userData,
+          _origTransparent: Boolean(cm.transparent),
+          _origOpacity: cm.opacity !== undefined ? cm.opacity : 1.0,
+          _origDepthWrite: cm.depthWrite !== undefined ? cm.depthWrite : true,
+        };
+        return cm;
+      });
+      o.material = Array.isArray(o.material) ? cloned : cloned[0];
+      const box = new THREE.Box3().setFromObject(o);
+      box.min.sub(origin);
+      box.max.sub(origin);
+      const center = box.getCenter(new THREE.Vector3());
+      this._occluderProps.push({
+        name: o.name,
+        mesh: o,
+        mats: cloned,
+        localBox: box,
+        center,
+        opacity: 1.0,
+      });
+    });
+  }
+
+  _segmentIntersectsBox(p0, p1, box, inflate = 0.45, maxT = 0.92) {
+    let tMin = 0.0;
+    let tMax = maxT;
+    const axes = ['x', 'y', 'z'];
+    for (let i = 0; i < 3; i++) {
+      const k = axes[i];
+      const d = p1[k] - p0[k];
+      const bMin = box.min[k] - inflate;
+      const bMax = box.max[k] + inflate;
+      if (Math.abs(d) < 1e-6) {
+        if (p0[k] < bMin || p0[k] > bMax) return false;
+      } else {
+        const inv = 1.0 / d;
+        let t1 = (bMin - p0[k]) * inv;
+        let t2 = (bMax - p0[k]) * inv;
+        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+        if (tMin > tMax) return false;
+      }
+    }
+    return tMax >= 0.0 && tMin <= maxT;
+  }
+
+  _updateOccluderFade(camera, dt, targetWorld) {
+    if (!this._occluderProps?.length || !camera) return;
+    const origin = this.worldGroup.position;
+    const camL = new THREE.Vector3().copy(camera.position).sub(origin);
+    const tgtL = targetWorld
+      ? new THREE.Vector3().copy(targetWorld).sub(origin)
+      : (this.controls?.target
+        ? new THREE.Vector3().copy(this.controls.target).sub(origin)
+        : new THREE.Vector3(0, 1.15, 0));
+    const sightDir = new THREE.Vector3().subVectors(tgtL, camL);
+    const sightLen = sightDir.length();
+    if (sightLen > 1e-5) sightDir.divideScalar(sightLen);
+
+    const toBox = new THREE.Vector3();
+    const clampedPt = new THREE.Vector3();
+    let fadedCount = 0;
+
+    for (const prop of this._occluderProps) {
+      let occluded = this._segmentIntersectsBox(camL, tgtL, prop.localBox, 0.45, 0.92);
+      if (!occluded) {
+        prop.localBox.clampPoint(camL, clampedPt);
+        const distToCam = clampedPt.distanceTo(camL);
+        if (distToCam < 1.45) {
+          toBox.subVectors(prop.center, camL);
+          const len = toBox.length();
+          if (len < 1e-4 || toBox.dot(sightDir) / len > -0.35) {
+            occluded = true;
+          }
+        }
+      }
+      const targetOp = occluded ? 0.0 : 1.0;
+      if (dt <= 0) {
+        prop.opacity = targetOp;
+      } else {
+        const rate = occluded ? 14.0 : 9.0;
+        prop.opacity += (targetOp - prop.opacity) * (1 - Math.exp(-rate * dt));
+        if (Math.abs(prop.opacity - targetOp) < 0.005) prop.opacity = targetOp;
+      }
+
+      if (prop.opacity < 0.04) {
+        prop.mesh.visible = false;
+        fadedCount++;
+      } else if (prop.opacity >= 0.995) {
+        prop.mesh.visible = true;
+        for (const m of prop.mats) {
+          if (m.transparent !== m.userData._origTransparent || m.opacity !== m.userData._origOpacity) {
+            m.transparent = m.userData._origTransparent;
+            m.opacity = m.userData._origOpacity;
+            m.depthWrite = m.userData._origDepthWrite;
+            m.needsUpdate = true;
+          }
+        }
+      } else {
+        prop.mesh.visible = true;
+        fadedCount++;
+        for (const m of prop.mats) {
+          if (!m.transparent) {
+            m.transparent = true;
+            m.depthWrite = false;
+            m.needsUpdate = true;
+          }
+          m.opacity = prop.opacity * m.userData._origOpacity;
+        }
+      }
+    }
+    this.fadedPropCount = fadedCount;
+  }
+
+  update(a, b, targetWorld) {
     if (!this.state.active) return;
     if (a && a.isCamera) this.camera = a;
-    // Accept either update(dt, elapsedSeconds) OR update(camera, elapsedSeconds)
+    // Accept either update(dt, elapsedSeconds) OR update(camera, elapsedSeconds, targetWorld)
     const sec = typeof b === 'number' ? b : (typeof a === 'number' ? a : 0);
+    const dt = this._lastUpdateSec === null ? 0 : Math.min(Math.max(sec - this._lastUpdateSec, 0), 0.1);
+    this._lastUpdateSec = sec;
     const windSec = sec * Math.max(0.25, this.state.wind);
     this.atmosphere.update(sec);
     this.volumetrics.update(sec);
     this.aaaEnv.update(windSec);
     this.wildlife.update(sec);
+    this._updateOccluderFade(this.camera, dt, targetWorld);
     if (this.postFx && this.camera && this.controls) {
       this.postFx.updateFocus(this.camera.position.distanceTo(this.controls.target));
     }

@@ -389,9 +389,9 @@ export class AAAEnvironment {
             float grassApprox = smoothstep(5.0, 9.5, length(p));
             gl_FragColor.rgb += uSunColor * fresnel * 0.045 * grassApprox * (1.0 - smoothstep(15.0, 120.0, dist));
 
-            float horizonBlend = smoothstep(42.0, 260.0, dist);
-            horizonBlend = pow(horizonBlend, 0.78);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor * 0.96, clamp(horizonBlend, 0.0, 1.0));
+            float horizonBlend = smoothstep(38.0, 190.0, dist);
+            horizonBlend = pow(horizonBlend, 0.85);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));
           }
           #include <tonemapping_fragment>`
         );
@@ -600,7 +600,7 @@ export class AAAEnvironment {
       const approachDip = Math.exp(-Math.pow(Math.sin(ang - 1.35), 2) * 5.0) * 0.32;
       const h = (12.5 - approachDip * 4.0) + Math.sin(ang * 7.0) * 1.2 + Math.cos(ang * 17.0) * 0.7;
 
-      positions.push(x, -0.5, z);
+      positions.push(x, -2.5, z);
       positions.push(x, h, z);
       uvs.push(t * 140.0, 0.0);
       uvs.push(t * 140.0, 1.0);
@@ -669,14 +669,16 @@ export class AAAEnvironment {
 
           vec3 dir = normalize(vWorldPos);
           float sunSide = 0.5 + 0.5 * dot(dir.xz, normalize(uSunDir.xz));
-          vec3 deepPine = vec3(0.06, 0.10, 0.065);
-          vec3 litCrown = vec3(0.14, 0.20, 0.11) + uSunColor * 0.05 * sunSide;
-          vec3 treeCol = mix(deepPine, litCrown, smoothstep(0.12, 0.88, vUv.y));
+          vec3 deepPine = vec3(0.035, 0.065, 0.04);
+          vec3 litCrown = vec3(0.08, 0.13, 0.068) + uSunColor * 0.04 * sunSide;
+          vec3 treeCol = mix(deepPine, litCrown, smoothstep(0.18, 0.88, vUv.y));
 
-          // Soft atmospheric mist blending into sky horizon
-          float mistBase = 1.0 - smoothstep(0.0, 0.28, vUv.y);
-          vec3 finalCol = mix(treeCol, uFogColor * 0.94, clamp(0.62 + mistBase * 0.26, 0.0, 0.90));
-          gl_FragColor = vec4(finalCol, alpha * 0.92);
+          // Soft atmospheric mist blending seamlessly into exact uFogColor (identical to ground & sky horizon)
+          float mistBase = 1.0 - smoothstep(0.08, 0.42, vUv.y);
+          vec3 finalCol = mix(treeCol, uFogColor, clamp(0.64 + mistBase * 0.36, 0.0, 1.0));
+          gl_FragColor = vec4(finalCol, alpha * 0.94);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
           #include <logdepthbuf_fragment>
         }
       `,
