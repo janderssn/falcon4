@@ -87,13 +87,14 @@ export class HangarScene {
 
     this.worldGroup = new THREE.Group();
     this.worldGroup.name = 'NordicHangarWorld';
+    this.worldGroup.visible = Boolean(active);
     scene.add(this.worldGroup);
 
     this.hangarRoot = new THREE.Group();
     this.hangarRoot.name = 'HangarRoot';
     this.worldGroup.add(this.hangarRoot);
 
-    this.atmosphere = new AtmosphereSystem(renderer, scene);
+    this.atmosphere = new AtmosphereSystem(renderer, scene, { active });
     this.volumetrics = new VolumetricSystem(this.worldGroup);
     this.materialSys = new CustomMaterialSystem(renderer);
     this.aaaEnv = new AAAEnvironment(this.worldGroup, renderer);

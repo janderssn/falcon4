@@ -53,6 +53,31 @@ export class Scenes {
     scene.add(this.viewLight, this.viewLight.target);
   }
 
+  /**
+   * Lazily prepares a heavy scene (e.g. 'hangar') in the background without disturbing
+   * the currently visible scene, so the transition only starts once assets are ready.
+   */
+  async preload(name) {
+    if (name !== 'hangar') return;
+    if (!this.hangar) {
+      this.hangar = createHangarScene({
+        renderer: this.renderer,
+        scene: this.scene,
+        assetBaseUrl: './hangar/',
+        usePostFX: false,
+        shadows: this.shadows,
+        active: false,
+      });
+      this.hangar.setWind(this.wind);
+      if (this.ground) this.hangar.place(...this.ground);
+      if (this.gliderRoot) this.hangar.attachGlider(this.gliderRoot);
+      this.hangar.setPreset(this.hangarPreset);
+    }
+    if (!this.hangar.loaded) {
+      await this.hangar.load();
+    }
+  }
+
   set(name) {
     if (!SCENES[name]) name = 'studio';
     this.current = name;
@@ -86,7 +111,10 @@ export class Scenes {
       }
       this.hangar.setActive(true);
       this.hangar.setShadows(this.shadows);
-      this.hangar.setPreset(this.hangarPreset);
+      const wantPreset = this.hangarPreset === 'golden' ? 'golden_hour' : 'nordic_day';
+      if (this.hangar.state.preset !== wantPreset) {
+        this.hangar.setPreset(this.hangarPreset);
+      }
     } else {
       this.meadow?.setActive(false);
       this.hangar?.setActive(false);

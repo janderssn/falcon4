@@ -16,6 +16,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0c130d; col
   font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; touch-action: none; cursor: grab; }
 #scene:active { cursor: grabbing; }
+#scene-veil { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: #0c130d; opacity: 0; transition: opacity 210ms cubic-bezier(.4, 0, .2, 1); }
+#scene-veil.on { opacity: 1; }
 .hud { position: fixed; z-index: 5; transition: opacity .45s ease; }
 body.nohud .hud, body.nohud #labels { opacity: 0; pointer-events: none; }
 .glass { background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); }
@@ -138,6 +140,10 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 .tile .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 4px; font-size: 11px; letter-spacing: .04em; text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .78)); white-space: nowrap; }
 #scene-pick { left: 22px; bottom: 22px; z-index: 7; }
 #scene-btn { width: 76px; height: 76px; display: block; }
+#scene-btn.loading { border-color: var(--accent); }
+#scene-btn.loading .art { filter: brightness(.72); transition: filter .2s ease; }
+#scene-btn.loading::after { content: ""; position: absolute; left: 50%; top: 44%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); border-top-color: var(--accent); animation: scene-spin .75s linear infinite; pointer-events: none; }
+@keyframes scene-spin { to { transform: rotate(360deg); } }
 #scene-fly { position: absolute; left: 0; bottom: 88px; display: flex; gap: 8px; padding: 10px; border-radius: 14px; }
 #scene-fly .tile { width: 112px; height: 80px; }
 
@@ -234,7 +240,7 @@ body.bg-light .leaders polyline { stroke: rgba(20, 28, 36, .6); }
   body.panel-open #chip { left: 10px; }
   .chip-btn { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .hud, #loader, .tile, .sheet, #chip { transition: none; animation: none; } }
+@media (prefers-reduced-motion: reduce) { .hud, #loader, #scene-veil, .tile, .sheet, #chip { transition: none; animation: none; } }
 
 /* ---- compare: a divider between the two builds */
 #swipe { top: 0; bottom: 0; width: 44px; transform: translateX(-50%); cursor: ew-resize; touch-action: none; z-index: 4; }

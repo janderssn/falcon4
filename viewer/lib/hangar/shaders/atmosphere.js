@@ -90,12 +90,12 @@ function sunDirFromAngles(elevDeg, azimDeg) {
 }
 
 export class AtmosphereSystem {
-  constructor(renderer, scene) {
+  constructor(renderer, scene, { active = true } = {}) {
     this.renderer = renderer;
     this.scene = scene;
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.envRT = null;
-    this.active = true;
+    this.active = Boolean(active);
     this.centerOffset = new THREE.Vector3();
     this._fog = null;
     this._envIntensity = 0.98;
@@ -304,6 +304,12 @@ export class AtmosphereSystem {
       this.interiorFill,
       this.interiorFill.target
     );
+    this.skyMesh.visible = this.active;
+    this.sunLight.visible = this.active;
+    this.hemiLight.visible = this.active;
+    this.fillLight.visible = this.active;
+    this.bounceLight.visible = this.active;
+    this.interiorFill.visible = this.active;
   }
 
   applyPreset(id) {
