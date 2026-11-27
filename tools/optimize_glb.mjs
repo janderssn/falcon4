@@ -18,6 +18,29 @@ await Promise.all([MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 const doc = await io.read(input);
 
+// Weight 3: the map stays within 0.07 in of its place beside the Sport 3's centre line (1.0 in without it, 0.16 at weight 1).
+const UVW = Number(process.env.UV_WEIGHT || 3);
+/** The detail map's coordinates per vertex in the mesh's own units, or null without a second UV set.
+ *  (edge length in space)^2 = (sx du)^2 + (sy dv)^2, least squares over the triangles' edges. */
+function flatCloth(prim, idx, pos) {
+  const uv = prim.getAttribute('TEXCOORD_1');
+  if (!uv) return null;
+  const u = uv.getArray(), n = uv.getNormalized(), div = n ? (u instanceof Uint16Array ? 65535 : u instanceof Uint8Array ? 255 : 1) : 1;
+  const I = idx.getArray();
+  let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0;
+  for (let t = 0; t + 2 < I.length; t += 3) for (const [p, q] of [[I[t], I[t + 1]], [I[t + 1], I[t + 2]]]) {
+    const du = ((u[p * 2] - u[q * 2]) / div) ** 2, dv = ((u[p * 2 + 1] - u[q * 2 + 1]) / div) ** 2;
+    const d = (pos[p * 3] - pos[q * 3]) ** 2 + (pos[p * 3 + 1] - pos[q * 3 + 1]) ** 2 + (pos[p * 3 + 2] - pos[q * 3 + 2]) ** 2;
+    a11 += du * du; a12 += du * dv; a22 += dv * dv; b1 += du * d; b2 += dv * d;
+  }
+  const det = a11 * a22 - a12 * a12;
+  if (!(det > 0)) return null;
+  const sx = Math.sqrt(Math.max(0, (b1 * a22 - b2 * a12) / det)), sy = Math.sqrt(Math.max(0, (b2 * a11 - b1 * a12) / det));
+  if (!(sx > 0 && sy > 0)) return null;
+  const out = new Float32Array(u.length);
+  for (let v = 0; v < u.length; v += 2) { out[v] = u[v] / div * sx; out[v + 1] = u[v + 1] / div * sy; }
+  return out;
+}
 const scaleOf = (m) => Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
 const done = new Map(), report = [];
 let before = 0, after = 0;
@@ -38,12 +61,19 @@ for (const node of doc.getRoot().listNodes()) {
       // Shape targets (morphs) count too: the simplified mesh must hold every shape, not only the
       // base one, so each target's offsets go in as attributes (in metres, weight 1).
       const targets = prim.listTargets().map((t) => t.getAttribute('POSITION')?.getArray()).filter(Boolean).slice(0, 10);
+      // A detail map (TEXCOORD_1: a sail's seams and stitching, painted on the cloth laid flat) counts too.
+      // The flat cloth is not a straight copy of the cloth in space (the centre line of the Sport 3's upper
+      // skin is straight in space and curved on the map), so a long triangle that is flat enough in space can
+      // still carry the map inches off its place: the centre seam then left the centre line. The map's two
+      // coordinates go in as attributes, in metres of cloth (scale fitted to the mesh's own edges).
+      const detail = flatCloth(prim, idx, pos);
       let res;
-      if (targets.length) {
-        const k = targets.length * 3, nv = pos.length / 3, attr = new Float32Array(nv * k);
+      if (targets.length || detail) {
+        const kt = targets.length * 3, k = kt + (detail ? 2 : 0), nv = pos.length / 3, attr = new Float32Array(nv * k);
         targets.forEach((d, j) => { for (let v = 0; v < nv; v++) for (let c = 0; c < 3; c++) attr[v * k + j * 3 + c] = d[v * 3 + c]; });
+        if (detail) for (let v = 0; v < nv; v++) { attr[v * k + kt] = detail[v * 2]; attr[v * k + kt + 1] = detail[v * 2 + 1]; }
         [res] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(idx.getArray()), pos, 3, attr, k,
-          new Array(k).fill(1), null, 0, ERR / s, ['ErrorAbsolute']);
+          [...new Array(kt).fill(1), ...(detail ? [UVW, UVW] : [])], null, 0, ERR / s, ['ErrorAbsolute']);
       } else {
         [res] = MeshoptSimplifier.simplify(Uint32Array.from(idx.getArray()), pos, 3, 0, ERR / s, ['ErrorAbsolute']);
       }

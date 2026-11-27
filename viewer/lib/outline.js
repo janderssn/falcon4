@@ -239,6 +239,9 @@ export class Outline {
     const layers = camera.layers.mask, bg = scene.background, ov = scene.overrideMaterial, fog = scene.fog;
     const autoShadow = renderer.shadowMap.autoUpdate, clear = renderer.getClearColor(new THREE.Color()), alpha = renderer.getClearAlpha();
     const autoClear = renderer.autoClear;
+    // The lights stay in sight of this pass, though nothing in it is lit: a render with other lights than
+    // the last makes the renderer look up every lit material's shader again in the next (3 ms a frame here).
+    scene.traverse((o) => { if (o.isLight) { o.layers.enable(OUTLINE_LAYER); o.layers.enable(WIRE_LAYER); } });
     camera.layers.set(OUTLINE_LAYER);
     scene.background = null; scene.overrideMaterial = this.flat; scene.fog = null;
     renderer.shadowMap.autoUpdate = false;
