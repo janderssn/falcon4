@@ -163,7 +163,9 @@ export class VolumetricSystem {
   }
 
   _buildDustMotes() {
-    const count = 420;
+    // 320 backlit dust motes concentrated directly inside the volumetric god-ray shafts
+    // (left & right fiberglass side-panel shafts + open front sunbeam)
+    const count = 320;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 1337;
@@ -173,13 +175,28 @@ export class VolumetricSystem {
     };
 
     for (let i = 0; i < count; i++) {
-      // Concentrate more motes in the sunlit front half of the bay
-      positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.6;
-      positions[i * 3 + 1] = 0.28 + rnd() * 2.9;
-      positions[i * 3 + 2] = -4.6 + Math.pow(rnd(), 0.72) * 8.6;
+      if (i < 130) {
+        // Directly inside left & right fiberglass side-panel diagonal god-ray shafts (z ~ -1.95)
+        const side = i % 2 === 0 ? 1 : -1;
+        const along = rnd(); // 0 at fiberglass panel, 1 deeper inside bay
+        positions[i * 3 + 0] = side * (5.65 - along * 3.55 + (rnd() - 0.5) * 0.65);
+        positions[i * 3 + 1] = 2.65 - along * 2.10 + (rnd() - 0.5) * 0.55;
+        positions[i * 3 + 2] = -1.95 + (rnd() - 0.5) * 1.45;
+      } else if (i < 250) {
+        // Directly inside open front hangar diagonal sunbeam shafts
+        const along = rnd();
+        positions[i * 3 + 0] = (rnd() * 2 - 1) * 4.8;
+        positions[i * 3 + 1] = 0.45 + (1.0 - along * 0.65) * 2.55 + (rnd() - 0.5) * 0.4;
+        positions[i * 3 + 2] = 0.1 + along * 4.1;
+      } else {
+        // Ambient bay motes drifting through shaded rafters & interior
+        positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.6;
+        positions[i * 3 + 1] = 0.35 + rnd() * 2.9;
+        positions[i * 3 + 2] = -4.6 + Math.pow(rnd(), 0.72) * 8.6;
+      }
       seeds[i * 3 + 0] = rnd() * 6.283;
-      seeds[i * 3 + 1] = 0.6 + rnd() * 1.1;
-      seeds[i * 3 + 2] = 0.5 + rnd() * 0.9;
+      seeds[i * 3 + 1] = 0.55 + rnd() * 0.85;
+      seeds[i * 3 + 2] = 0.65 + rnd() * 0.85;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -197,43 +214,57 @@ export class VolumetricSystem {
         uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
       },
       vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
         attribute vec3 aSeed;
         uniform float uTime;
         uniform float uPixelRatio;
         varying float vAlpha;
         void main() {
           vec3 p = position;
-          float t = uTime * 0.22 * aSeed.y + aSeed.x;
-          p.x += sin(t) * 0.14;
-          p.y += cos(t * 0.73 + aSeed.z) * 0.08;
-          p.z += sin(t * 0.55 + aSeed.x) * 0.12;
+          // Slow dreamy drift inside the volumetric shafts
+          float t = uTime * 0.085 * aSeed.y + aSeed.x;
+          p.x += sin(t * 0.9) * 0.16;
+          p.y += cos(t * 0.65 + aSeed.z) * 0.09;
+          p.z += sin(t * 0.50 + aSeed.x) * 0.14;
 
-          // Brighter in the sunlit front threshold and near the two side daylight panels
-          float frontLit = smoothstep(-2.0, 3.6, p.z);
-          float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.9) * smoothstep(2.5, 5.5, abs(p.x));
-          vAlpha = (0.18 + 0.65 * max(frontLit, sideLit)) * (0.6 + 0.4 * sin(t * 1.9));
+          // Brightest inside the sunlit front opening and diagonal side-panel god rays
+          float frontLit = smoothstep(-1.2, 3.2, p.z);
+          float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.75) * smoothstep(1.8, 5.4, abs(p.x));
+          float inShaft = max(frontLit, sideLit);
+          float twinkle = 0.62 + 0.38 * sin(t * 2.2 + aSeed.z * 4.0);
+          vAlpha = (0.28 + 0.72 * inShaft) * twinkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp((22.0 * aSeed.z * uPixelRatio) / max(-mv.z, 1.0), 2.0, 8.0);
+          #include <logdepthbuf_vertex>
+          gl_PointSize = clamp((30.0 * aSeed.z * uPixelRatio) / max(-mv.z, 1.0), 4.0 * uPixelRatio, 8.5 * uPixelRatio);
         }
       `,
       fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
         uniform vec3 uColor;
         uniform float uStrength;
         varying float vAlpha;
         void main() {
           float r = length(gl_PointCoord - vec2(0.5));
-          float soft = smoothstep(0.5, 0.05, r);
-          float a = soft * soft * vAlpha * 0.62 * uStrength;
-          if (a < 0.002) discard;
-          gl_FragColor = vec4(uColor * a, a);
+          // Crisp bright radial core + soft glowing backlit halo (readable without bloom)
+          float core = smoothstep(0.24, 0.02, r);
+          float halo = smoothstep(0.50, 0.08, r) * 0.48;
+          float shape = clamp(core + halo, 0.0, 1.0);
+          float a = shape * vAlpha * 0.88 * clamp(uStrength, 0.75, 1.45);
+          if (a < 0.005) discard;
+          vec3 col = mix(uColor, vec3(1.0, 0.98, 0.92), core * 0.55);
+          gl_FragColor = vec4(col * a * 1.45, clamp(a, 0.0, 1.0));
+          #include <logdepthbuf_fragment>
         }
       `,
     });
 
     this.motes = new THREE.Points(geo, mat);
     this.motes.name = 'SunlitDustMotes';
+    this.motes.frustumCulled = false;
     this.motes.renderOrder = 7;
     this.root.add(this.motes);
   }

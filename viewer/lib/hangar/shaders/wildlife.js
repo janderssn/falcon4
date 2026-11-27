@@ -62,21 +62,31 @@ export class WildlifeSystem {
   }
 
   _buildSunlitDust() {
-    // 240 fine sunlit dust motes drifting slowly through the hangar interior & sunlit front bay,
+    // 320 sunlit dust motes drifting slowly through the hangar bay & volumetric god-ray shafts,
     // softly sparkling against the dark timber with smooth show-and-fade lifecycles
-    const count = 240;
+    const count = 320;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 9001;
     const rnd = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
 
     for (let i = 0; i < count; i++) {
-      positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.7;
-      positions[i * 3 + 1] = 0.30 + rnd() * 3.0;
-      positions[i * 3 + 2] = -4.2 + Math.pow(rnd(), 0.78) * 8.8;
+      if (i < 110) {
+        // Concentrated inside both left & right milky fiberglass side-panel god-ray shafts
+        const side = i % 2 === 0 ? 1 : -1;
+        const along = rnd();
+        positions[i * 3 + 0] = side * (5.6 - along * 3.4 + (rnd() - 0.5) * 0.7);
+        positions[i * 3 + 1] = 2.6 - along * 2.0 + (rnd() - 0.5) * 0.55;
+        positions[i * 3 + 2] = -1.95 + (rnd() - 0.5) * 1.4;
+      } else {
+        // Ambient hangar bay & open front sunbeam cloud
+        positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.7;
+        positions[i * 3 + 1] = 0.30 + rnd() * 3.0;
+        positions[i * 3 + 2] = -4.2 + Math.pow(rnd(), 0.72) * 8.8;
+      }
       seeds[i * 3 + 0] = rnd() * 6.283;       // phase offset
-      seeds[i * 3 + 1] = 0.55 + rnd() * 0.9;  // drift & lifecycle speed
-      seeds[i * 3 + 2] = 0.70 + rnd() * 0.65; // fine size variance
+      seeds[i * 3 + 1] = 0.55 + rnd() * 0.85; // slow drift & lifecycle speed
+      seeds[i * 3 + 2] = 0.75 + rnd() * 0.75; // size variance
     }
 
     const geo = new THREE.BufferGeometry();
@@ -113,15 +123,17 @@ export class WildlifeSystem {
           float life = fract(uTime * (0.024 + 0.018 * aSeed.y) + aSeed.x * 0.15915);
           float showFade = smoothstep(0.04, 0.22, life) * smoothstep(0.84, 0.52, life);
 
-          float sunZone = smoothstep(-2.6, 3.4, p.z);
+          float frontZone = smoothstep(-2.2, 3.2, p.z);
+          float sideShaft = exp(-pow(p.z + 1.95, 2.0) * 0.75) * smoothstep(1.8, 5.4, abs(p.x));
+          float sunZone = max(frontZone, sideShaft);
           float sparkle = 0.68 + 0.32 * sin(t * 2.4 + aSeed.z * 5.0);
-          vGlow = (0.45 + 0.55 * sunZone) * showFade * sparkle;
+          vGlow = (0.42 + 0.58 * sunZone) * showFade * sparkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           #include <logdepthbuf_vertex>
-          // Crisp clearly-visible sunlit floating motes (~3.0 - 6.5 px at 1x DPR)
-          gl_PointSize = clamp((20.0 * aSeed.z * uPixelRatio) / max(-mv.z, 0.9), 3.0 * uPixelRatio, 6.5 * uPixelRatio);
+          // Crisp clearly-visible sunlit floating motes (~4.0 - 8.5 px at 1x DPR)
+          gl_PointSize = clamp((28.0 * aSeed.z * uPixelRatio) / max(-mv.z, 0.9), 4.0 * uPixelRatio, 8.5 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -134,10 +146,13 @@ export class WildlifeSystem {
         void main() {
           if (vGlow < 0.01) discard;
           float r = length(gl_PointCoord - vec2(0.5));
-          float core = smoothstep(0.5, 0.04, r);
-          float a = core * core * vGlow * 0.88 * uSunGain * uDustOpacity;
+          float core = smoothstep(0.24, 0.02, r);
+          float halo = smoothstep(0.50, 0.08, r) * 0.48;
+          float shape = clamp(core + halo, 0.0, 1.0);
+          float a = shape * vGlow * 0.92 * uSunGain * uDustOpacity;
           if (a < 0.005) discard;
-          gl_FragColor = vec4(uSunColor * a * 1.65, clamp(a, 0.0, 1.0));
+          vec3 col = mix(uSunColor, vec3(1.0, 0.98, 0.92), core * 0.55);
+          gl_FragColor = vec4(col * a * 1.55, clamp(a, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
       `,
