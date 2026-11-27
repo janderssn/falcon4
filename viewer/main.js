@@ -121,7 +121,7 @@ const state = {
   hangarPreset: 'day',
   hangarAudio: false,
   // TEMP: live hangar dust tuner defaults
-  dustParams: { size: 0.72, brightness: 0.55, godRayBoost: 1.25, shadowVis: 0.75, softness: 1.8, speed: 1.0, density: 0.75, skyCutoffZ: 3.2 },
+  dustParams: { size: 1.25, brightness: 1.35, godRayBoost: 2.2, shadowVis: 1.4, softness: 1.1, speed: 1.2, density: 0.75, skyCutoffZ: 3.2 },
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -2547,7 +2547,7 @@ function wireUi() {
     };
   };
   // TEMP: wire Hangar Dust Tuner widget
-  const dustDefaults = { size: 0.72, brightness: 0.55, godRayBoost: 1.25, shadowVis: 0.75, softness: 1.8, speed: 1.0, density: 0.75, skyCutoffZ: 3.2 };
+  const dustDefaults = { size: 1.25, brightness: 1.35, godRayBoost: 2.2, shadowVis: 1.4, softness: 1.1, speed: 1.2, density: 0.75, skyCutoffZ: 3.2 };
   const dustFields = [
     ['dt-size', 'dt-v-size', 'size', (v) => v.toFixed(2)],
     ['dt-brightness', 'dt-v-brightness', 'brightness', (v) => v.toFixed(2)],

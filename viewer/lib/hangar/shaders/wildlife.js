@@ -23,12 +23,12 @@ export class WildlifeSystem {
       uSunColor: { value: new THREE.Color(0xfff5e4) },
       uSunGain: { value: 1.0 },
       uDustOpacity: { value: 1.0 },
-      uDustSize: { value: 0.72 },
-      uDustBrightness: { value: 0.55 },
-      uDustGodRayBoost: { value: 1.25 },
-      uDustShadowVis: { value: 0.75 },
-      uDustSoftness: { value: 1.8 },
-      uDustSpeed: { value: 1.0 },
+      uDustSize: { value: 1.25 },
+      uDustBrightness: { value: 1.35 },
+      uDustGodRayBoost: { value: 2.20 },
+      uDustShadowVis: { value: 1.40 },
+      uDustSoftness: { value: 1.10 },
+      uDustSpeed: { value: 1.20 },
       uDustDensity: { value: 0.75 },
       uDustSkyCutoffZ: { value: 3.2 },
       uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
@@ -70,8 +70,8 @@ export class WildlifeSystem {
   }
 
   _buildSunlitDust() {
-    // 220 photorealistic ambient interior dust motes (strictly Z in [-5.1, +3.4]; 640 total with volumetric shaft motes)
-    const count = 220;
+    // 600 ambient interior dust motes (strictly Z in [-5.1, +3.4]; 1,600 total pool with volumetric shaft motes)
+    const count = 600;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 9001;
@@ -172,7 +172,7 @@ export class WildlifeSystem {
           #include <logdepthbuf_vertex>
           float depthScale = clamp(5.5 / max(-mv.z, 1.5), 0.75, 1.20);
           float sz = mix(1.8 + (aSeed.z / 0.75) * 1.4, 3.5 + ((aSeed.z - 0.75) / 0.25) * 1.7, isBokeh) * uDustSize;
-          gl_PointSize = clamp(sz * uPixelRatio * depthScale, 1.2 * uPixelRatio, 8.5 * uPixelRatio);
+          gl_PointSize = clamp(sz * uPixelRatio * depthScale, 1.2 * uPixelRatio, 16.0 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -186,15 +186,15 @@ export class WildlifeSystem {
         varying float vGlow;
         varying float vBokeh;
         void main() {
-          if (vGlow < 0.008) discard;
+          if (vGlow < 0.006) discard;
           float r = length(gl_PointCoord - vec2(0.5));
           if (r >= 0.5) discard;
-          float falloff = pow(clamp(1.0 - r * 2.0, 0.0, 1.0), uDustSoftness + vBokeh * 0.55);
-          float a = falloff * vGlow * uDustBrightness * clamp(uSunGain, 0.85, 1.20) * uDustOpacity;
-          if (a < 0.006) discard;
-          // Warm cream/amber sunlit tint (never harsh pure white)
-          vec3 col = mix(uSunColor, vec3(1.0, 0.90, 0.74), 0.35);
-          gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+          float falloff = pow(clamp(1.0 - r * 2.0, 0.0, 1.0), max(uDustSoftness + vBokeh * 0.45, 0.2));
+          float gain = falloff * vGlow * clamp(uSunGain, 0.85, 1.25) * uDustOpacity;
+          if (gain < 0.005) discard;
+          // Keep HDR brightness headroom (no early clamp before uDustBrightness scales up!)
+          vec3 col = mix(uSunColor, vec3(1.0, 0.90, 0.74), 0.35) * uDustBrightness;
+          gl_FragColor = vec4(col, clamp(gain, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
       `,
