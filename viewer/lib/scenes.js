@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Meadow } from './meadow.js';
+import { createHangarScene } from './hangar/index.js';
 
 /** Backgrounds for the studio, chosen in Settings. */
 export const BACKDROPS = {
@@ -34,6 +35,8 @@ export class Scenes {
     this.grass = grass;
     this.indoor = new Environments(renderer, scene);
     this.meadow = null;
+    this.hangar = null;
+    this.gliderRoot = null;
     this.current = null;
     this.hours = 9.5;
     this.wind = 1;
@@ -59,11 +62,33 @@ export class Scenes {
         if (this.ground) this.meadow.place(...this.ground);
       }
       this.indoor.setActive(false);
+      this.hangar?.setActive(false);
       this.meadow.setActive(true);
       this.meadow.setShadows(this.shadows);
       this.meadow.setTime(this.hours);
+    } else if (name === 'hangar') {
+      this.indoor.setActive(false);
+      this.meadow?.setActive(false);
+      if (!this.hangar) {
+        this.hangar = createHangarScene({
+          renderer: this.renderer,
+          scene: this.scene,
+          assetBaseUrl: './hangar/',
+          usePostFX: false,
+          shadows: this.shadows,
+          active: true,
+        });
+        this.hangar.setWind(this.wind);
+        if (this.ground) this.hangar.place(...this.ground);
+        if (this.gliderRoot) this.hangar.attachGlider(this.gliderRoot);
+        this.hangar.load().catch((e) => console.warn('[hangar] failed to load:', e));
+      }
+      this.hangar.setActive(true);
+      this.hangar.setShadows(this.shadows);
+      this.hangar.setTime(this.hours);
     } else {
       this.meadow?.setActive(false);
+      this.hangar?.setActive(false);
       this.indoor.setActive(true);
       this.indoor.backdrop = this.backdrop;
       this.indoor.set(name, this.shadows);
@@ -76,22 +101,36 @@ export class Scenes {
     this.ground = [groundY, center.clone()];
     this.indoor.place(groundY, center);
     this.meadow?.place(groundY, center);
+    this.hangar?.place(groundY, center);
+  }
+
+  attachGlider(gliderRoot) {
+    this.gliderRoot = gliderRoot || null;
+    this.hangar?.attachGlider(this.gliderRoot);
+  }
+
+  notifyGliderMoved() {
+    this.hangar?.notifyGliderMoved();
   }
 
   /**
    * Where the camera may go, relative to the glider's ground and the scene centre:
-   * above the grass on the hill, inside the walls and under the roof in the hangar,
+   * above the grass on the hill, above the floor & apron in the open-front hangar,
    * anywhere in the studio (looking up from under the floor shows the underside).
    */
   cameraLimits() {
     if (this.current === 'hill') return { minY: 0.5 };
-    if (this.current === 'hangar') return { minY: 0.3, maxY: 11.3, halfX: 21.5, halfZ: 18.5 };
+    if (this.current === 'hangar') return { minY: 0.35 };
     return null;
   }
 
-  setTime(h) { this.hours = h; if (this.current === 'hill') this.meadow.setTime(h); }
-  setWind(w) { this.wind = w; this.meadow?.setWind(w); }
-  setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); }
+  setTime(h) {
+    this.hours = h;
+    if (this.current === 'hill') this.meadow?.setTime(h);
+    if (this.current === 'hangar') this.hangar?.setTime(h);
+  }
+  setWind(w) { this.wind = w; this.meadow?.setWind(w); this.hangar?.setWind(w); }
+  setShadows(on) { this.shadows = on; this.indoor.setShadows(on); this.meadow?.setShadows(on); this.hangar?.setShadows(on); }
   /** A metre grid on the studio floor. */
   setGrid(on) { this.grid = on; this.indoor.setGrid(on); }
   /** The soft pool of light under the glider in the studio. */
@@ -127,7 +166,8 @@ export class Scenes {
   }
 
   update(camera, seconds) {
-    if (this.current === 'hill') this.meadow.update(camera, seconds);
+    if (this.current === 'hill') this.meadow?.update(camera, seconds);
+    if (this.current === 'hangar') this.hangar?.update(camera, seconds);
     const look = camera.getWorldDirection(new THREE.Vector3());
     const up = camera.isOrthographicCamera ? Math.max(0, look.y) : 0;   // 1 looking straight up
     this.viewLight.intensity = VIEW_LIGHT * up;

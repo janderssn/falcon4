@@ -244,6 +244,7 @@ async function setModel(id, first = false) {
   applyPose();
   const center = record.box.getCenter(new THREE.Vector3());
   scenes.place(record.ground, new THREE.Vector3(center.x, record.ground, center.z));
+  scenes.attachGlider(record.root);
   state.sel = null;
   applyLook();
   buildLabels();
@@ -611,6 +612,7 @@ function applyPose(animate = false) {
   if (other) {
     poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
+  scenes.notifyGliderMoved();
 }
 const POSE_TIME = 700;
 /**
