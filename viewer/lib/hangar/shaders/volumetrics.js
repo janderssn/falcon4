@@ -163,9 +163,9 @@ export class VolumetricSystem {
   }
 
   _buildDustMotes() {
-    // 320 backlit dust motes concentrated directly inside the volumetric god-ray shafts
-    // (left & right fiberglass side-panel shafts + open front sunbeam)
-    const count = 320;
+    // 280 fine sunlit dust motes (with 140 in wildlife.js = 420 total -> ~160-180 lit at any instant with 44% duty cycle):
+    // 110 dedicated to the two side-window milky fiberglass god-ray shafts + 170 evenly across the full hangar volume
+    const count = 280;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 1337;
@@ -175,28 +175,24 @@ export class VolumetricSystem {
     };
 
     for (let i = 0; i < count; i++) {
-      if (i < 130) {
-        // Directly inside left & right fiberglass side-panel diagonal god-ray shafts (z ~ -1.95)
+      if (i < 110) {
+        // Dedicated ribbon directly inside both side-window god-ray shafts (X in [+-1.8, +-6.0], Z in [-3.4, -0.3])
         const side = i % 2 === 0 ? 1 : -1;
-        const along = rnd(); // 0 at fiberglass panel, 1 deeper inside bay
-        positions[i * 3 + 0] = side * (5.65 - along * 3.55 + (rnd() - 0.5) * 0.65);
-        positions[i * 3 + 1] = 2.65 - along * 2.10 + (rnd() - 0.5) * 0.55;
-        positions[i * 3 + 2] = -1.95 + (rnd() - 0.5) * 1.45;
-      } else if (i < 250) {
-        // Directly inside open front hangar diagonal sunbeam shafts
         const along = rnd();
-        positions[i * 3 + 0] = (rnd() * 2 - 1) * 4.8;
-        positions[i * 3 + 1] = 0.45 + (1.0 - along * 0.65) * 2.55 + (rnd() - 0.5) * 0.4;
-        positions[i * 3 + 2] = 0.1 + along * 4.1;
+        positions[i * 3 + 0] = side * (6.0 - along * 4.2);
+        positions[i * 3 + 1] = 2.65 - along * 2.15 + (rnd() - 0.5) * 0.45;
+        positions[i * 3 + 2] = -3.4 + rnd() * 3.1;
       } else {
-        // Ambient bay motes drifting through shaded rafters & interior
-        positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.6;
-        positions[i * 3 + 1] = 0.35 + rnd() * 2.9;
-        positions[i * 3 + 2] = -4.6 + Math.pow(rnd(), 0.72) * 8.6;
+        // Spread evenly across the entire 3D hangar interior volume (rear, around/above glider, sides, front)
+        const x = (rnd() * 2 - 1) * 5.6;
+        const maxY = Math.min(3.55, 3.65 - Math.abs(x) * Math.tan(THREE.MathUtils.degToRad(12.66)));
+        positions[i * 3 + 0] = x;
+        positions[i * 3 + 1] = 0.25 + rnd() * (maxY - 0.25);
+        positions[i * 3 + 2] = -5.2 + rnd() * 9.4;
       }
       seeds[i * 3 + 0] = rnd() * 6.283;
       seeds[i * 3 + 1] = 0.55 + rnd() * 0.85;
-      seeds[i * 3 + 2] = 0.65 + rnd() * 0.85;
+      seeds[i * 3 + 2] = 0.65 + rnd() * 0.75;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -222,23 +218,36 @@ export class VolumetricSystem {
         varying float vAlpha;
         void main() {
           vec3 p = position;
-          // Slow dreamy drift inside the volumetric shafts
-          float t = uTime * 0.085 * aSeed.y + aSeed.x;
-          p.x += sin(t * 0.9) * 0.16;
-          p.y += cos(t * 0.65 + aSeed.z) * 0.09;
-          p.z += sin(t * 0.50 + aSeed.x) * 0.14;
+          // Short staggered random lifespan (~2.6-4.9s visible bell-curve, ~3.4-6.1s quiet off-interval)
+          float cycleDur = 6.0 + aSeed.y * 5.0;
+          float rawCycle = (uTime + aSeed.x * 2.1) / cycleDur;
+          float cycleIdx = floor(rawCycle);
+          float phase = fract(rawCycle);
+          float visFrac = 0.44;
+          float lifeFade = smoothstep(0.0, visFrac * 0.35, phase) * (1.0 - smoothstep(visFrac * 0.62, visFrac, phase));
+
+          // Fresh pseudo-random spawn jitter each cycle + gentle lazy drift & curl
+          p += vec3(
+            sin(cycleIdx * 12.9898 + aSeed.x * 7.1) * 0.45,
+            cos(cycleIdx * 78.233 + aSeed.z * 5.3) * 0.25,
+            sin(cycleIdx * 37.719 + aSeed.y * 9.7) * 0.45
+          );
+          float t = uTime * 0.15 * aSeed.y + aSeed.x;
+          p.x += sin(t * 0.9 + p.z * 0.35) * 0.24;
+          p.y += cos(t * 0.68 + aSeed.z + p.x * 0.25) * 0.14;
+          p.z += sin(t * 0.54 + aSeed.x + p.y * 0.4) * 0.20;
 
           // Brightest inside the sunlit front opening and diagonal side-panel god rays
           float frontLit = smoothstep(-1.2, 3.2, p.z);
           float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.75) * smoothstep(1.8, 5.4, abs(p.x));
           float inShaft = max(frontLit, sideLit);
-          float twinkle = 0.62 + 0.38 * sin(t * 2.2 + aSeed.z * 4.0);
-          vAlpha = (0.28 + 0.72 * inShaft) * twinkle;
+          float twinkle = 0.72 + 0.28 * sin(t * 2.2 + aSeed.z * 4.0);
+          vAlpha = (0.30 + 0.70 * inShaft) * lifeFade * twinkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           #include <logdepthbuf_vertex>
-          gl_PointSize = clamp((30.0 * aSeed.z * uPixelRatio) / max(-mv.z, 1.0), 4.0 * uPixelRatio, 8.5 * uPixelRatio);
+          gl_PointSize = clamp((19.5 * aSeed.z * uPixelRatio) / max(-mv.z, 1.0), 2.8 * uPixelRatio, 5.5 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -249,14 +258,13 @@ export class VolumetricSystem {
         varying float vAlpha;
         void main() {
           float r = length(gl_PointCoord - vec2(0.5));
-          // Crisp bright radial core + soft glowing backlit halo (readable without bloom)
-          float core = smoothstep(0.24, 0.02, r);
-          float halo = smoothstep(0.50, 0.08, r) * 0.48;
+          float core = smoothstep(0.30, 0.03, r);
+          float halo = smoothstep(0.50, 0.10, r) * 0.36;
           float shape = clamp(core + halo, 0.0, 1.0);
-          float a = shape * vAlpha * 0.88 * clamp(uStrength, 0.75, 1.45);
+          float a = shape * vAlpha * 0.78 * clamp(uStrength, 0.85, 1.35);
           if (a < 0.005) discard;
-          vec3 col = mix(uColor, vec3(1.0, 0.98, 0.92), core * 0.55);
-          gl_FragColor = vec4(col * a * 1.45, clamp(a, 0.0, 1.0));
+          vec3 col = mix(uColor, vec3(1.0, 0.98, 0.92), core * 0.48);
+          gl_FragColor = vec4(col * a * 1.35, clamp(a, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
       `,
