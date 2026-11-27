@@ -153,6 +153,10 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #vgctl b { font-weight: 600; color: var(--ink); letter-spacing: .04em; }
 #vgctl input { width: 120px; accent-color: var(--accent); }
 #vgctl em { font-style: normal; min-width: 34px; font-variant-numeric: tabular-nums; }
+#posebar > .sep { width: 1px; height: 20px; align-self: center; margin: 0 4px; background: var(--line); }
+#posebar button[hidden] { display: none; }
+#navstack .icon[hidden] { display: none; }
+#navstack .icon.on, #navstack .icon[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 
 /* ---- part chip, bottom centre (above the pose bar) */
 #chip { left: 50%; bottom: 76px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; transition: left .28s ease, opacity .45s ease; }
