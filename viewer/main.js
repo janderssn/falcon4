@@ -1675,6 +1675,8 @@ window.__FALCON4_STEP__ = (orbitTest) => {
     rearPropsTotal: scenes?.hangar?.rearPropsTotal ?? 0,
     rearPropsFaded: scenes?.hangar?.rearPropsFaded ?? 0,
     catFaded: Boolean(scenes?.hangar?.catFaded),
+    dustVisible: Boolean(scenes?.hangar?.wildlife?.root?.getObjectByName('FloatingSunlitDust')?.visible),
+    dustOpacity: scenes?.hangar?.wildlife?.uniforms?.uDustOpacity?.value ?? 0,
     occluderTracked: scenes?.hangar?._occluderProps?.length ?? 0,
     camLocal: {
       x: Math.round(lx * 1000) / 1000,

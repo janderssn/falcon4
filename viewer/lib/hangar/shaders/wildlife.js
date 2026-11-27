@@ -95,6 +95,8 @@ export class WildlifeSystem {
         uPixelRatio: this.uniforms.uPixelRatio,
       },
       vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
         attribute vec3 aSeed;
         uniform float uTime;
         uniform float uPixelRatio;
@@ -109,19 +111,22 @@ export class WildlifeSystem {
 
           // Smooth per-particle show-and-fade lifecycle (warm gentle shimmer)
           float life = fract(uTime * (0.024 + 0.018 * aSeed.y) + aSeed.x * 0.15915);
-          float showFade = smoothstep(0.04, 0.22, life) * smoothstep(0.82, 0.52, life);
+          float showFade = smoothstep(0.04, 0.22, life) * smoothstep(0.84, 0.52, life);
 
           float sunZone = smoothstep(-2.6, 3.4, p.z);
-          float sparkle = 0.65 + 0.35 * sin(t * 2.4 + aSeed.z * 5.0);
-          vGlow = (0.38 + 0.62 * sunZone) * showFade * sparkle;
+          float sparkle = 0.68 + 0.32 * sin(t * 2.4 + aSeed.z * 5.0);
+          vGlow = (0.45 + 0.55 * sunZone) * showFade * sparkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          // Crisp clearly-visible fine floating motes (2.2 - 4.8 px)
-          gl_PointSize = clamp((13.5 * aSeed.z * uPixelRatio) / max(-mv.z, 0.9), 2.2, 4.8);
+          #include <logdepthbuf_vertex>
+          // Crisp clearly-visible sunlit floating motes (~3.0 - 6.5 px at 1x DPR)
+          gl_PointSize = clamp((20.0 * aSeed.z * uPixelRatio) / max(-mv.z, 0.9), 3.0 * uPixelRatio, 6.5 * uPixelRatio);
         }
       `,
       fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
         uniform vec3 uSunColor;
         uniform float uSunGain;
         uniform float uDustOpacity;
@@ -130,15 +135,17 @@ export class WildlifeSystem {
           if (vGlow < 0.01) discard;
           float r = length(gl_PointCoord - vec2(0.5));
           float core = smoothstep(0.5, 0.04, r);
-          float a = core * core * vGlow * 0.72 * uSunGain * uDustOpacity;
+          float a = core * core * vGlow * 0.88 * uSunGain * uDustOpacity;
           if (a < 0.005) discard;
-          gl_FragColor = vec4(uSunColor * a * 1.35, clamp(a, 0.0, 1.0));
+          gl_FragColor = vec4(uSunColor * a * 1.65, clamp(a, 0.0, 1.0));
+          #include <logdepthbuf_fragment>
         }
       `,
     });
 
     const pts = new THREE.Points(geo, mat);
     pts.name = 'FloatingSunlitDust';
+    pts.frustumCulled = false;
     pts.renderOrder = 8;
     this.root.add(pts);
   }
@@ -174,6 +181,8 @@ export class WildlifeSystem {
         uWindDir: { value: this.windDir },
       },
       vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
         attribute vec3 aSeed;
         uniform float uTime;
         uniform float uPixelRatio;
@@ -193,14 +202,17 @@ export class WildlifeSystem {
           float life = fract(uTime * 0.016 * aSeed.y + aSeed.x * 0.15915);
           float showFade = smoothstep(0.06, 0.26, life) * smoothstep(0.92, 0.68, life);
           float edgeFade = smoothstep(9.5, 7.2, abs(p.x)) * smoothstep(1.5, 3.0, p.z) * smoothstep(12.0, 9.8, p.z);
-          vAlpha = 0.65 * edgeFade * showFade;
+          vAlpha = 0.78 * edgeFade * showFade;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp((32.0 * aSeed.z * uPixelRatio) / max(-mv.z, 1.2), 2.4, 6.8);
+          #include <logdepthbuf_vertex>
+          gl_PointSize = clamp((40.0 * aSeed.z * uPixelRatio) / max(-mv.z, 1.2), 3.2 * uPixelRatio, 8.0 * uPixelRatio);
         }
       `,
       fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
         uniform vec3 uSunColor;
         varying float vAlpha;
         varying float vRot;
@@ -222,12 +234,14 @@ export class WildlifeSystem {
           if (a < 0.02) discard;
           vec3 col = mix(vec3(0.95, 0.96, 0.92), uSunColor * 1.08, 0.28);
           gl_FragColor = vec4(col, a);
+          #include <logdepthbuf_fragment>
         }
       `,
     });
 
     const pts = new THREE.Points(geo, mat);
     pts.name = 'DandelionSpores';
+    pts.frustumCulled = false;
     pts.renderOrder = 9;
     this.root.add(pts);
   }
