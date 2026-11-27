@@ -7,10 +7,16 @@
 //    come across it, and every line below is placed from that, to a fraction of a pixel.
 // 2. Along each row, the nearest covered pixel (lib "rows").
 // 3. A full-screen pass finds, down each column of those, the distance from the pixel to the
-//    silhouette, and paints the pixels within the thickness of it, with a one pixel ramp at
-//    both sides of the line. For the inner lines it fits two parallel planes (near and far)
-//    to the depths around the pixel: their distance apart is the step, and the share of the
-//    near one in each pixel gives the edge of the nearer part, drawn the same way.
+//    silhouette, and paints the pixels outside it within the thickness, with a one pixel ramp
+//    at the line's outer side. A pixel the silhouette crosses holds the glider and the
+//    background mixed: the background's share is taken out of it (the picture as drawn, less
+//    that share of the colour of the clear pixels beside it) and the line's colour put in its
+//    place, so the line starts at the edge itself and the glider's share stays as it was. A
+//    part a pixel or two wide (a batten far off) so keeps all of its own colour wherever it
+//    lies on the pixels: nothing of it is painted over, and it does not come and go along
+//    its length. For the inner lines it fits two parallel planes (near and far) to the depths
+//    around the pixel: their distance apart is the step, and the share of the near one in each
+//    pixel gives the edge of the nearer part.
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
@@ -24,6 +30,7 @@ export class Outline {
   constructor() {
     this.target = new THREE.WebGLRenderTarget(1, 1, { samples: 4, stencilBuffer: true, format: THREE.RGFormat, type: THREE.HalfFloatType, colorSpace: THREE.NoColorSpace });
     this.rows = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, colorSpace: THREE.NoColorSpace });
+    this.frame = null;   // the picture as drawn, for the pixels the silhouette crosses (made at the drawing buffer's size)
     // Depth of each part, the same shape as it is drawn (morphs, skinning).
     this.flat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
@@ -80,14 +87,14 @@ export class Outline {
     this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
       transparent: true, depthTest: false, depthWrite: false,
       uniforms: {
-        uMap: { value: this.target.texture }, uRows: { value: this.rows.texture }, uTexel: { value: new THREE.Vector2() },
+        uMap: { value: this.target.texture }, uRows: { value: this.rows.texture }, uFrame: { value: null }, uTexel: { value: new THREE.Vector2() },
         uWidth: { value: 2 }, uReach: { value: 3 }, uColor: { value: new THREE.Color(0) },
         uInner: { value: 0 }, uInnerWidth: { value: 1 }, uThreshold: { value: 0.03 },
         uPersp: { value: 1 }, uRef: { value: 0 },
       },
       vertexShader: QUAD_VERTEX,
       fragmentShader: /* glsl */ `
-        uniform sampler2D uMap; uniform sampler2D uRows; uniform vec2 uTexel; uniform float uWidth; uniform float uReach; uniform vec3 uColor;
+        uniform sampler2D uMap; uniform sampler2D uRows; uniform sampler2D uFrame; uniform vec2 uTexel; uniform float uWidth; uniform float uReach; uniform vec3 uColor;
         uniform float uInner; uniform float uInnerWidth; uniform float uThreshold; uniform float uPersp; uniform float uRef;
         varying vec2 vUv;
 
@@ -99,8 +106,7 @@ export class Outline {
           float s = t < lo / (2.0 * hi) ? (a + b) * 0.5 - sqrt(2.0 * a * b * t) : (0.5 - t) * hi;
           return c > 0.5 ? -s : s;
         }
-        // The line: from half a pixel inside the edge (so nothing of the background shows between the
-        // part and its line) to w outside it, with a one pixel ramp at both sides.
+        // The line: from the edge to w outside it, with a one pixel ramp at its outer side (inner lines: at both).
         float lineAt(float d, float w) { return clamp(w + 0.5 - d, 0.0, 1.0) * clamp(d + 1.0, 0.0, 1.0); }
 
         // How far the pixel at offset q (pixels) lies outside the silhouette: every pixel around it that the edge
@@ -128,10 +134,24 @@ export class Outline {
         void main() {
           vec2 centre = texture2D(uMap, vUv).rg;
           float here = centre.g;
+          vec3 line = linearToOutputTexel(vec4(uColor, 1.0)).rgb;   // (the picture's own values are written as they are)
           // ---- the silhouette
-          float d = 1e3;
-          if (here >= 0.99) d = edgeAt(vec2(0.0));
-          else {
+          float d = 1e3, a = 0.0;
+          bool crossed = here >= 0.02 && here < 0.99;
+          vec3 own = vec3(0.0);
+          if (crossed) {
+            // The glider's share of this pixel: the picture less the background's share, which is as the clear
+            // pixels beside it; the line takes the background's place.
+            vec3 drawn = texture2D(uFrame, vUv).rgb; vec4 back = vec4(0.0);
+            for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+              vec2 o = vec2(float(i), float(j)) * uTexel;
+              float clear = 1.0 - texture2D(uMap, vUv + o).g;
+              clear *= clear; clear *= clear;
+              back += vec4(texture2D(uFrame, vUv + o).rgb, 1.0) * clear;
+            }
+            vec3 behind = back.a > 0.05 ? back.rgb / back.a : drawn;
+            own = max(drawn - (1.0 - here) * behind, 0.0) + (1.0 - here) * line * clamp(uWidth + 0.5, 0.0, 1.0);
+          } else if (here < 0.02) {
             vec2 q = vec2(0.0);
             int reach = int(uReach);
             for (int j = -reach; j <= reach; j++) {
@@ -142,8 +162,8 @@ export class Outline {
               if (e < d) { d = e; q = vec2(r.b > 0.5 ? n : -n, float(j)); }
             }
             if (d < 1e2) d = length(q) + edgeAt(q);
+            a = lineAt(max(d, 0.0), uWidth);
           }
-          float a = lineAt(d, uWidth);
 
           // ---- inner lines: the edge of the nearer of two parts, on the one behind it
           if (uInner > 0.5 && here >= 0.5) {
@@ -211,9 +231,9 @@ export class Outline {
               }
             }
           }
+          if (crossed) { gl_FragColor = vec4(mix(own, line, a), 1.0); return; }
           if (a < 0.002) discard;
-          gl_FragColor = vec4(uColor, a);
-          #include <colorspace_fragment>
+          gl_FragColor = vec4(line, a);
         }`,
     }));
   }
@@ -232,6 +252,13 @@ export class Outline {
   render(renderer, scene, camera, width, color, inner = 0) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     if (this.target.width !== size.x || this.target.height !== size.y) { this.target.setSize(size.x, size.y); this.rows.setSize(size.x, size.y); }
+    if (!this.frame || this.frame.image.width !== size.x || this.frame.image.height !== size.y) {
+      this.frame?.dispose();
+      this.frame = new THREE.FramebufferTexture(size.x, size.y);
+      this.frame.minFilter = this.frame.magFilter = THREE.NearestFilter; this.frame.colorSpace = THREE.NoColorSpace;
+      this.quad.material.uniforms.uFrame.value = this.frame;
+    }
+    renderer.copyFramebufferToTexture(this.frame);   // the picture the renderer has just drawn
     const persp = camera.isPerspectiveCamera ? 1 : 0;
     // Plan views: depth is measured from the plane through the world's origin, where the glider stands.
     const ref = -new THREE.Vector3(0, 1, 0).applyMatrix4(camera.matrixWorldInverse).z;
