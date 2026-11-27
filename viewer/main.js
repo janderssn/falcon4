@@ -360,12 +360,10 @@ function applyDesign() {
   }
 }
 function designSwatch(zone, f) {
-  const [id, name, hex, opacity, extra] = f, kind = clothKind(id);
+  const [id, name, hex, opacity] = f, kind = clothKind(id);
   const cls = ['sw', opacity < 1 && 'clear', kind === 1 && 'cloth-mt', kind >= 2 && 'cloth-lam',
     /^uvpxb|^uvp2lxb|odl/.test(id) && 'fib-dark', kind >= 2 && opacity >= 1 && 'fib-grey', luma(hex) < 0.02 && 'dark'].filter(Boolean).join(' ');
-  // "extra": a cloth the Wills Wing picker does not list for this panel of the Sport 3.
-  const label = extra ? `${name} (not in the Wills Wing picker)` : name;
-  return `<button type="button" class="${cls}" data-dzone="${zone}" data-dfab="${id}" title="${esc(label)}" aria-label="${esc(label)}" style="--c:${hexOf(f)};--o:${opacity}"><i></i></button>`;
+  return `<button type="button" class="${cls}" data-dzone="${zone}" data-dfab="${id}" title="${esc(name)}" aria-label="${esc(name)}" style="--c:${hexOf(f)};--o:${opacity}"><i></i></button>`;
 }
 function designSwatches(z) {
   const colours = z.fabrics.filter((f) => clothKind(f[0]) === 0), cloths = z.fabrics.filter((f) => clothKind(f[0]) > 0);

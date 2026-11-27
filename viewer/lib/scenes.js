@@ -119,7 +119,9 @@ export class Scenes {
       m.depthTest = !below;
       if (m.userData.depthWrite === undefined) m.userData.depthWrite = m.depthWrite;
       m.depthWrite = below ? false : m.userData.depthWrite;   // or the glider would fail against it
-      o.renderOrder = below ? -10 : 0;
+      // The floor's pool of light always draws before the shadow that falls on it. With the same order the
+      // two were sorted by distance, which changes as the view turns: the pool then covered the shadow.
+      o.renderOrder = (below ? -10 : 0) + (o === studio.floor ? -1 : 0);
       m.needsUpdate = true;
     }
   }
