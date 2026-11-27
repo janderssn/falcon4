@@ -16,14 +16,14 @@ export class VolumetricSystem {
       uColor: { value: new THREE.Color(0xfff1d6) },
       uStrength: { value: 0.85 },
       uSunDir: { value: new THREE.Vector3(0.4, 0.45, 0.78).normalize() },
-      uDustSize: { value: 1.25 },
-      uDustBrightness: { value: 1.35 },
+      uDustSize: { value: 1.65 },
+      uDustBrightness: { value: 1.10 },
       uDustGodRayBoost: { value: 2.20 },
-      uDustShadowVis: { value: 1.40 },
-      uDustSoftness: { value: 1.10 },
+      uDustShadowVis: { value: 1.95 },
+      uDustSoftness: { value: 2.35 },
       uDustSpeed: { value: 1.20 },
-      uDustDensity: { value: 0.75 },
-      uDustSkyCutoffZ: { value: 3.2 },
+      uDustDensity: { value: 0.52 },
+      uDustSkyCutoffZ: { value: 1.0 },
     };
 
     this.frontShaftGroup = new THREE.Group();

@@ -158,21 +158,6 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 
 #navstack .icon[hidden] { display: none; }
 #navstack .icon.on, #navstack .icon[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 
-/* TEMP: hangar dust tuner widget (top-left below title) */
-#hangar-dust { left: 22px; top: 86px; width: 248px; padding: 8px 10px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 6; font-size: 11px; }
-#hangar-dust[hidden] { display: none; }
-.dt-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.dt-title { background: none; border: 0; color: var(--ink); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 0; cursor: pointer; }
-.dt-acts { display: flex; gap: 4px; }
-.dt-btn { height: 22px; padding: 0 7px; border-radius: 6px; background: rgba(255, 255, 255, .1); border: 1px solid var(--line); color: var(--ink); font-size: 10px; cursor: pointer; white-space: nowrap; }
-.dt-btn:hover { background: rgba(255, 255, 255, .2); }
-.dt-btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
-#dt-body { display: flex; flex-direction: column; gap: 4px; }
-#dt-body[hidden] { display: none; }
-.dt-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; color: var(--muted); }
-.dt-row em { font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--ink); }
-.dt-row input { grid-column: 1 / -1; width: 100%; height: 14px; accent-color: var(--accent); cursor: pointer; margin: 0; }
-
 /* ---- part chip, bottom centre (above the pose bar) */
 #chip { left: 50%; bottom: 76px; transform: translateX(-50%); width: min(560px, calc(100vw - 260px)); display: flex; align-items: center; gap: 12px; padding: 12px 10px 12px 18px; border-radius: 16px; animation: rise .2s ease; transition: left .28s ease, opacity .45s ease; }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
