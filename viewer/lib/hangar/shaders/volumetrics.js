@@ -163,9 +163,9 @@ export class VolumetricSystem {
   }
 
   _buildDustMotes() {
-    // 280 fine sunlit dust motes (with 140 in wildlife.js = 420 total -> ~160-180 lit at any instant with 44% duty cycle):
-    // 110 dedicated to the two side-window milky fiberglass god-ray shafts + 170 evenly across the full hangar volume
-    const count = 280;
+    // 550 fine sunlit dust motes (with 350 in wildlife.js = 900 total across full hangar volume):
+    // 170 inside both side-window god-ray shafts, 80 in front sunbeam, 300 evenly across full 3D hangar volume
+    const count = 550;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 1337;
@@ -175,13 +175,19 @@ export class VolumetricSystem {
     };
 
     for (let i = 0; i < count; i++) {
-      if (i < 110) {
+      if (i < 170) {
         // Dedicated ribbon directly inside both side-window god-ray shafts (X in [+-1.8, +-6.0], Z in [-3.4, -0.3])
         const side = i % 2 === 0 ? 1 : -1;
         const along = rnd();
         positions[i * 3 + 0] = side * (6.0 - along * 4.2);
-        positions[i * 3 + 1] = 2.65 - along * 2.15 + (rnd() - 0.5) * 0.45;
+        positions[i * 3 + 1] = 2.65 - along * 2.15 + (rnd() - 0.5) * 0.48;
         positions[i * 3 + 2] = -3.4 + rnd() * 3.1;
+      } else if (i < 250) {
+        // Open front hangar sunbeam corridor
+        const along = rnd();
+        positions[i * 3 + 0] = (rnd() * 2 - 1) * 5.0;
+        positions[i * 3 + 1] = 0.4 + (1.0 - along * 0.65) * 2.6 + (rnd() - 0.5) * 0.4;
+        positions[i * 3 + 2] = 0.2 + along * 4.0;
       } else {
         // Spread evenly across the entire 3D hangar interior volume (rear, around/above glider, sides, front)
         const x = (rnd() * 2 - 1) * 5.6;
@@ -191,8 +197,8 @@ export class VolumetricSystem {
         positions[i * 3 + 2] = -5.2 + rnd() * 9.4;
       }
       seeds[i * 3 + 0] = rnd() * 6.283;
-      seeds[i * 3 + 1] = 0.55 + rnd() * 0.85;
-      seeds[i * 3 + 2] = 0.65 + rnd() * 0.75;
+      seeds[i * 3 + 1] = 0.45 + rnd() * 0.85;
+      seeds[i * 3 + 2] = rnd(); // normalized size 0..1
     }
 
     const geo = new THREE.BufferGeometry();
@@ -218,13 +224,13 @@ export class VolumetricSystem {
         varying float vAlpha;
         void main() {
           vec3 p = position;
-          // Short staggered random lifespan (~2.6-4.9s visible bell-curve, ~3.4-6.1s quiet off-interval)
-          float cycleDur = 6.0 + aSeed.y * 5.0;
+          // Short staggered random lifespan (~3.0-5.5s visible, ~2.5-4.5s quiet off-interval -> ~55% duty cycle)
+          float cycleDur = 5.5 + aSeed.y * 4.5;
           float rawCycle = (uTime + aSeed.x * 2.1) / cycleDur;
           float cycleIdx = floor(rawCycle);
           float phase = fract(rawCycle);
-          float visFrac = 0.44;
-          float lifeFade = smoothstep(0.0, visFrac * 0.35, phase) * (1.0 - smoothstep(visFrac * 0.62, visFrac, phase));
+          float visFrac = 0.55;
+          float lifeFade = smoothstep(0.0, visFrac * 0.24, phase) * (1.0 - smoothstep(visFrac * 0.72, visFrac, phase));
 
           // Fresh pseudo-random spawn jitter each cycle + gentle lazy drift & curl
           p += vec3(
@@ -239,15 +245,16 @@ export class VolumetricSystem {
 
           // Brightest inside the sunlit front opening and diagonal side-panel god rays
           float frontLit = smoothstep(-1.2, 3.2, p.z);
-          float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.75) * smoothstep(1.8, 5.4, abs(p.x));
+          float sideLit = exp(-pow(p.z + 1.95, 2.0) * 0.65) * smoothstep(1.6, 5.4, abs(p.x));
           float inShaft = max(frontLit, sideLit);
-          float twinkle = 0.72 + 0.28 * sin(t * 2.2 + aSeed.z * 4.0);
-          vAlpha = (0.30 + 0.70 * inShaft) * lifeFade * twinkle;
+          float twinkle = 0.78 + 0.22 * sin(t * 2.2 + aSeed.z * 5.0);
+          vAlpha = mix(0.62, 0.96, inShaft) * lifeFade * twinkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           #include <logdepthbuf_vertex>
-          gl_PointSize = clamp((19.5 * aSeed.z * uPixelRatio) / max(-mv.z, 1.0), 2.8 * uPixelRatio, 5.5 * uPixelRatio);
+          float depthScale = clamp(5.5 / max(-mv.z, 1.5), 0.72, 1.30);
+          gl_PointSize = clamp((3.4 + aSeed.z * 2.8) * uPixelRatio * depthScale, 3.0 * uPixelRatio, 8.0 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -257,14 +264,14 @@ export class VolumetricSystem {
         uniform float uStrength;
         varying float vAlpha;
         void main() {
+          if (vAlpha < 0.01) discard;
           float r = length(gl_PointCoord - vec2(0.5));
-          float core = smoothstep(0.30, 0.03, r);
-          float halo = smoothstep(0.50, 0.10, r) * 0.36;
-          float shape = clamp(core + halo, 0.0, 1.0);
-          float a = shape * vAlpha * 0.78 * clamp(uStrength, 0.85, 1.35);
-          if (a < 0.005) discard;
-          vec3 col = mix(uColor, vec3(1.0, 0.98, 0.92), core * 0.48);
-          gl_FragColor = vec4(col * a * 1.35, clamp(a, 0.0, 1.0));
+          float disc = smoothstep(0.5, 0.12, r);
+          float a = disc * vAlpha * clamp(uStrength, 0.85, 1.25);
+          if (a < 0.01) discard;
+          // Note: AdditiveBlending multiplies rgb by a; do NOT pre-multiply rgb by a!
+          vec3 col = mix(uColor, vec3(1.0, 0.97, 0.90), 0.35) * 1.45;
+          gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
       `,

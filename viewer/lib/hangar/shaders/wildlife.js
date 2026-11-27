@@ -62,8 +62,8 @@ export class WildlifeSystem {
   }
 
   _buildSunlitDust() {
-    // 140 delicate ambient dust motes evenly across the whole hangar volume (420 total with volumetric shaft motes)
-    const count = 140;
+    // 350 fine ambient dust motes evenly across the whole hangar volume (900 total with volumetric shaft motes)
+    const count = 350;
     const positions = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 3);
     let s = 9001;
@@ -77,8 +77,8 @@ export class WildlifeSystem {
       positions[i * 3 + 1] = 0.25 + rnd() * (maxY - 0.25);
       positions[i * 3 + 2] = -5.2 + rnd() * 9.4;
       seeds[i * 3 + 0] = rnd() * 6.283;
-      seeds[i * 3 + 1] = 0.55 + rnd() * 0.85;
-      seeds[i * 3 + 2] = 0.65 + rnd() * 0.65;
+      seeds[i * 3 + 1] = 0.45 + rnd() * 0.85;
+      seeds[i * 3 + 2] = rnd();
     }
 
     const geo = new THREE.BufferGeometry();
@@ -105,13 +105,13 @@ export class WildlifeSystem {
         varying float vGlow;
         void main() {
           vec3 p = position;
-          // Short staggered random lifespan (~2.6-5.2s visible bell-curve, ~3.4-6.5s quiet off-interval)
-          float cycleDur = 6.2 + aSeed.y * 5.2;
+          // Short staggered random lifespan (~3.0-5.5s visible, ~2.5-4.5s quiet off-interval -> ~55% duty cycle)
+          float cycleDur = 5.6 + aSeed.y * 4.4;
           float rawCycle = (uTime + aSeed.x * 2.3) / cycleDur;
           float cycleIdx = floor(rawCycle);
           float phase = fract(rawCycle);
-          float visFrac = 0.45;
-          float showFade = smoothstep(0.0, visFrac * 0.35, phase) * (1.0 - smoothstep(visFrac * 0.62, visFrac, phase));
+          float visFrac = 0.55;
+          float showFade = smoothstep(0.0, visFrac * 0.24, phase) * (1.0 - smoothstep(visFrac * 0.72, visFrac, phase));
 
           // Fresh pseudo-random spawn jitter each cycle + gentle dreamy summer drift & curl
           p += vec3(
@@ -125,16 +125,16 @@ export class WildlifeSystem {
           p.z += sin(t * 0.48 + p.y * 0.65) * 0.28;
 
           float frontZone = smoothstep(-2.2, 3.2, p.z);
-          float sideShaft = exp(-pow(p.z + 1.95, 2.0) * 0.75) * smoothstep(1.8, 5.4, abs(p.x));
+          float sideShaft = exp(-pow(p.z + 1.95, 2.0) * 0.65) * smoothstep(1.6, 5.4, abs(p.x));
           float sunZone = max(frontZone, sideShaft);
-          float sparkle = 0.68 + 0.32 * sin(t * 2.4 + aSeed.z * 5.0);
-          vGlow = (0.30 + 0.70 * sunZone) * showFade * sparkle;
+          float sparkle = 0.78 + 0.22 * sin(t * 2.4 + aSeed.z * 5.0);
+          vGlow = mix(0.58, 0.92, sunZone) * showFade * sparkle;
 
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           #include <logdepthbuf_vertex>
-          // Fine, delicate sunlit floating motes (2.8 - 5.5 px at 1x DPR)
-          gl_PointSize = clamp((18.5 * aSeed.z * uPixelRatio) / max(-mv.z, 0.9), 2.8 * uPixelRatio, 5.5 * uPixelRatio);
+          float depthScale = clamp(5.5 / max(-mv.z, 1.5), 0.72, 1.30);
+          gl_PointSize = clamp((3.2 + aSeed.z * 2.8) * uPixelRatio * depthScale, 3.0 * uPixelRatio, 8.0 * uPixelRatio);
         }
       `,
       fragmentShader: `
@@ -147,13 +147,12 @@ export class WildlifeSystem {
         void main() {
           if (vGlow < 0.01) discard;
           float r = length(gl_PointCoord - vec2(0.5));
-          float core = smoothstep(0.30, 0.03, r);
-          float halo = smoothstep(0.50, 0.10, r) * 0.34;
-          float shape = clamp(core + halo, 0.0, 1.0);
-          float a = shape * vGlow * 0.68 * uSunGain * uDustOpacity;
-          if (a < 0.005) discard;
-          vec3 col = mix(uSunColor, vec3(1.0, 0.98, 0.92), core * 0.45);
-          gl_FragColor = vec4(col * a * 1.30, clamp(a, 0.0, 1.0));
+          float disc = smoothstep(0.5, 0.12, r);
+          float a = disc * vGlow * clamp(uSunGain, 0.85, 1.25) * uDustOpacity;
+          if (a < 0.01) discard;
+          // AdditiveBlending multiplies rgb by a; do NOT pre-multiply rgb by a!
+          vec3 col = mix(uSunColor, vec3(1.0, 0.97, 0.90), 0.35) * 1.40;
+          gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
           #include <logdepthbuf_fragment>
         }
       `,
