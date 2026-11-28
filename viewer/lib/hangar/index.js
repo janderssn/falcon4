@@ -51,6 +51,7 @@ export class HangarScene {
     hangarUrl = null,
     catUrl = null,
     deerUrl = null,
+    cranesUrl = null,
     texturesBaseUrl = null,
     preset = 'nordic_day',
     usePostFX = false,
@@ -79,6 +80,7 @@ export class HangarScene {
       hangar: hangarUrl || `${base}hangar.glb`,
       cat: catUrl || `${base}cat.glb`,
       deer: deerUrl || `${base}deer.glb`,
+      cranes: cranesUrl || `${base}cranes.glb`,
       textures: ensureTrailingSlash(texturesBaseUrl || base),
     };
 
@@ -216,10 +218,11 @@ export class HangarScene {
         `[hangar] loaded ${(this.hangarBytes / 1048576).toFixed(2)} MB, ${this.hangarTriangles} tris, worldPos=${this.worldGroup.position.toArray().map(n => n.toFixed(2))}, boundsY=[${b.min.y.toFixed(2)},${b.max.y.toFixed(2)}]`
       );
 
-      // Load hangar wildlife GLBs (cat & deer)
+      // Load hangar wildlife GLBs (cat, deer & cranes)
       await Promise.all([
         this.wildlife.loadCat(this.urls.cat),
         this.wildlife.loadDeer(this.urls.deer),
+        this.wildlife.loadCranes(this.urls.cranes),
       ]);
       this._registerCatOccluders(this.wildlife.catGroup);
 
@@ -386,21 +389,93 @@ export class HangarScene {
     return cm;
   }
 
+  _attachStructuralProximityDither(mat, targetUniform) {
+    const cm = mat.clone();
+    const prevCompile = cm.onBeforeCompile;
+    const prevKey = cm.customProgramCacheKey ? cm.customProgramCacheKey.bind(cm) : null;
+    cm.customProgramCacheKey = () => `${prevKey ? prevKey() : cm.type}+struct-cam-dither-v1`;
+    cm.onBeforeCompile = (shader, renderer) => {
+      if (prevCompile) prevCompile.call(cm, shader, renderer);
+      shader.uniforms.uCamTarget = targetUniform;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>\nvarying highp vec3 vStructWPos;`
+        )
+        .replace(
+          '#include <worldpos_vertex>',
+          `#include <worldpos_vertex>\nvStructWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>\nuniform vec3 uCamTarget;\nvarying highp vec3 vStructWPos;`
+        )
+        .replace(
+          '#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+          {
+            float dCam = distance(vStructWPos, cameraPosition);
+            float proxFade = smoothstep(0.65, 1.85, dCam);
+
+            vec3 seg = uCamTarget - cameraPosition;
+            float segLen = max(length(seg), 0.001);
+            vec3 segDir = seg / segLen;
+            float along = dot(vStructWPos - cameraPosition, segDir);
+            float t = along / segLen;
+            float sightFade = 1.0;
+            if (t > 0.0 && t < 0.88) {
+              float perpDist = length((vStructWPos - cameraPosition) - segDir * along);
+              float corrInner = 0.55 + 0.16 * along;
+              float corrOuter = 1.25 + 0.24 * along;
+              float corrFade = smoothstep(corrInner, corrOuter, perpDist);
+              float tMask = smoothstep(0.0, 0.06, t) * (1.0 - smoothstep(0.76, 0.88, t));
+              sightFade = mix(1.0, corrFade, tMask);
+            }
+
+            float structFade = min(proxFade, sightFade);
+            if (structFade < 0.999) {
+              int bx = int(mod(floor(gl_FragCoord.x), 4.0));
+              int by = int(mod(floor(gl_FragCoord.y), 4.0));
+              int bIdx = by * 4 + bx;
+              float bayer = (
+                bIdx == 0 ? 0.0 : bIdx == 1 ? 8.0 : bIdx == 2 ? 2.0 : bIdx == 3 ? 10.0 :
+                bIdx == 4 ? 12.0 : bIdx == 5 ? 4.0 : bIdx == 6 ? 14.0 : bIdx == 7 ? 6.0 :
+                bIdx == 8 ? 3.0 : bIdx == 9 ? 11.0 : bIdx == 10 ? 1.0 : bIdx == 11 ? 9.0 :
+                bIdx == 12 ? 15.0 : bIdx == 13 ? 7.0 : bIdx == 14 ? 13.0 : 5.0
+              ) / 16.0;
+              if (structFade <= bayer) discard;
+            }
+          }`
+        );
+    };
+    cm.needsUpdate = true;
+    return cm;
+  }
+
   _initOccluderProps(model) {
     this._occluderProps = [];
     this._lastUpdateSec = null;
+    if (!this._camTargetUniform) this._camTargetUniform = { value: new THREE.Vector3(0, 1.15, 0) };
     const FADE_RE = /^Hangar_Props_(GliderRack|PackedGliders|Ladder|SwingStand|AluTubes|LeftRack|Chairs|RightDolly)/i;
+    const STRUCT_RE = /^Hangar_(Steel_Portal|Steel_Haunches|Framing)/i;
     model.updateMatrixWorld(true);
     const origin = this.worldGroup.position;
     model.traverse((o) => {
-      if (!o.isMesh) return;
+      if (!o.isMesh || !o.material) return;
+      if (STRUCT_RE.test(o.name)) {
+        const origMats = Array.isArray(o.material) ? o.material : [o.material];
+        const cloned = origMats.map((m) => this._attachStructuralProximityDither(m, this._camTargetUniform));
+        o.material = Array.isArray(o.material) ? cloned : cloned[0];
+        return;
+      }
       let matched = FADE_RE.test(o.name);
       let p = o.parent;
       while (!matched && p && p !== model) {
         if (FADE_RE.test(p.name)) matched = true;
         p = p.parent;
       }
-      if (!matched || !o.material) return;
+      if (!matched) return;
       // Clone materials with 4x4 Bayer screen-door dither fade (keeps transparent=false, depthWrite=true ALWAYS!)
       const fadeUniform = { value: 1.0 };
       const origMats = Array.isArray(o.material) ? o.material : [o.material];
@@ -490,6 +565,9 @@ export class HangarScene {
       : (this.controls?.target
         ? new THREE.Vector3().copy(this.controls.target).sub(origin)
         : new THREE.Vector3(0, 1.15, 0));
+    if (this._camTargetUniform) {
+      this._camTargetUniform.value.copy(tgtL).add(origin);
+    }
     const sightDir = new THREE.Vector3().subVectors(tgtL, camL);
     const sightLen = sightDir.length();
     if (sightLen > 1e-5) sightDir.divideScalar(sightLen);
