@@ -57,6 +57,101 @@ function createTuftAtlas(seed = 1337) {
   return tex;
 }
 
+/**
+ * Procedural 512x128 4-species Swedish summer wildflower atlas:
+ * 0: Oxeye daisy (prästkrage — warm white petals, soft yellow center)
+ * 1: Buttercup (smörblomma — gentle golden yellow)
+ * 2: Red clover (rödklöver — muted soft pink-magenta floret head)
+ * 3: Harebell (blåklocka — delicate pale periwinkle blue)
+ */
+function createWildflowerAtlas(seed = 7711) {
+  const W = 512;
+  const H = 128;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const c = cv.getContext('2d');
+  const r = mulberry32(seed);
+
+  const drawBlossom = (cx, cy, rad, kind) => {
+    c.save();
+    c.translate(cx, cy);
+    if (kind === 0) {
+      // Oxeye daisy: 11 warm white petals + soft yellow disc
+      c.fillStyle = '#f2f0e6';
+      for (let p = 0; p < 11; p++) {
+        c.save();
+        c.rotate((p / 11) * Math.PI * 2 + r() * 0.12);
+        c.beginPath();
+        c.ellipse(0, -rad * 0.56, rad * 0.19, rad * 0.44, 0, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
+      c.fillStyle = '#dfb434';
+      c.beginPath();
+      c.arc(0, 0, rad * 0.30, 0, Math.PI * 2);
+      c.fill();
+    } else if (kind === 1) {
+      // Buttercup: 5 rounded golden-yellow petals
+      c.fillStyle = '#e6bb32';
+      for (let p = 0; p < 5; p++) {
+        c.save();
+        c.rotate((p / 5) * Math.PI * 2 + r() * 0.2);
+        c.beginPath();
+        c.arc(0, -rad * 0.42, rad * 0.40, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
+      c.fillStyle = '#b98b18';
+      c.beginPath();
+      c.arc(0, 0, rad * 0.22, 0, Math.PI * 2);
+      c.fill();
+    } else if (kind === 2) {
+      // Red clover: clustered soft pink-magenta florets
+      for (let p = 0; p < 14; p++) {
+        const a = r() * Math.PI * 2;
+        const d = Math.sqrt(r()) * rad * 0.58;
+        c.fillStyle = p % 3 === 0 ? '#d88aa4' : p % 2 === 0 ? '#be607f' : '#a14665';
+        c.beginPath();
+        c.ellipse(Math.cos(a) * d, Math.sin(a) * d, rad * 0.24, rad * 0.16, a, 0, Math.PI * 2);
+        c.fill();
+      }
+    } else {
+      // Harebell: delicate 5-lobe periwinkle blue bell
+      c.fillStyle = '#7e9fd6';
+      for (let p = 0; p < 5; p++) {
+        c.save();
+        c.rotate((p / 5) * Math.PI * 2 + r() * 0.2);
+        c.beginPath();
+        c.ellipse(0, -rad * 0.44, rad * 0.26, rad * 0.42, 0, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
+      c.fillStyle = '#b9cef0';
+      c.beginPath();
+      c.arc(0, 0, rad * 0.22, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  };
+
+  for (let k = 0; k < 4; k++) {
+    const x0 = k * 128;
+    // Draw a small natural cluster of 3 blossoms per card so each instance reads softly in the turf
+    drawBlossom(x0 + 64, 52, 26, k);
+    drawBlossom(x0 + 36, 82, 19, k);
+    drawBlossom(x0 + 92, 78, 20, k);
+  }
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 // Shared GLSL: noise, UV rotation, and organic hangar-apron splat mask (used identically by ground + both grass tiers)
 const GLSL_NOISE_AND_SPLAT = /* glsl */ `
 float trHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
@@ -114,14 +209,14 @@ vec3 trComputeSplat(vec2 p, float dirtHeight) {
   baseGrass -= thinBareSpots * 0.48 * apronBareMask;
   baseGrass -= rutMask * 0.32 * apronBareMask;
 
-  float panelLight = exp(-pow(p.y + 1.95, 2.0) * 0.9) * smoothstep(4.8, 6.2, abs(p.x)) * smoothstep(0.45, 0.78, fieldPatchMed) * 0.45;
-  baseGrass = clamp(baseGrass + panelLight, 0.0, 1.0);
+  baseGrass = clamp(baseGrass, 0.0, 1.0);
 
   float grassHeight = 0.42 + 0.36 * fieldPatchFine;
   float hDiff = (baseGrass + grassHeight * 0.34) - ((1.0 - baseGrass) + dirtHeight * 0.34);
   float splat = smoothstep(-0.24, 0.24, hDiff);
 
-  float deepInterior = (1.0 - smoothstep(4.8, 5.8, abs(p.x))) * smoothstep(-5.5, -4.6, p.y) * (1.0 - smoothstep(0.35, 1.65, p.y));
+  // Strict interior wall-base exclusion (+0.25 m outside side & rear walls) so zero grass blades ever poke inside
+  float deepInterior = (1.0 - smoothstep(6.35, 6.80, abs(p.x))) * smoothstep(-6.05, -5.65, p.y) * (1.0 - smoothstep(0.65, 2.05, p.y));
   splat *= (1.0 - deepInterior);
 
   float inHangar = step(abs(p.x), 6.32) * step(-5.65, p.y) * step(p.y, 4.15);
@@ -233,6 +328,7 @@ export class AAAEnvironment {
     this.terrainMat = null;
     this.terrainShader = null;
     this._tuftAtlas = null;
+    this._flowerAtlas = null;
 
     this._buildTreelineHorizon();
     this._buildWindsock();
@@ -933,6 +1029,183 @@ export class AAAEnvironment {
     farMesh.castShadow = false;
     farMesh.frustumCulled = false;
     this.root.add(farMesh);
+
+    this._buildMeadowWildflowers();
+  }
+
+  _buildMeadowWildflowers() {
+    const old = this.root.getObjectByName('MeadowWildflowers');
+    if (old) this.root.remove(old);
+
+    if (!this._flowerAtlas) {
+      this._flowerAtlas = createWildflowerAtlas(7711);
+    }
+
+    const GOLDEN_ANGLE = 2.399963229728653;
+    const FLOWER_COUNT = 4400;
+    const MIN_R = 7.5;
+    const MAX_R = 72.0;
+
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, -0.5, 0,
+       0.5, -0.5, 0,
+       0.5,  0.5, 0,
+      -0.5,  0.5, 0,
+    ], 3));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+
+    const r = mulberry32(55123);
+    const fOff = new Float32Array(FLOWER_COUNT * 4);
+    const fRnd = new Float32Array(FLOWER_COUNT * 4);
+    for (let i = 0; i < FLOWER_COUNT; i++) {
+      const u = (i + 0.5 + (r() - 0.5) * 0.9) / FLOWER_COUNT;
+      const rad = MIN_R + (MAX_R - MIN_R) * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.68);
+      const ang = i * GOLDEN_ANGLE + (r() - 0.5) * 0.4;
+      fOff[i * 4] = Math.cos(ang) * rad;
+      fOff[i * 4 + 1] = Math.sin(ang) * rad;
+      fOff[i * 4 + 2] = r(); // drift density roll
+      fOff[i * 4 + 3] = r(); // species roll
+      fRnd[i * 4] = r();     // size
+      fRnd[i * 4 + 1] = r(); // stem height
+      fRnd[i * 4 + 2] = r(); // phase / rotation
+      fRnd[i * 4 + 3] = r(); // brightness variation
+    }
+    geo.setAttribute('aOff', new THREE.InstancedBufferAttribute(fOff, 4));
+    geo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(fRnd, 4));
+    geo.instanceCount = FLOWER_COUNT;
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.25, 0), MAX_R + 2);
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.85,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+      alphaTest: 0.30,
+      alphaToCoverage: true,
+    });
+    mat.customProgramCacheKey = () => 'hangar-meadow-wildflowers-pbr-v1';
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.sharedUniforms.uTime;
+      shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
+      shader.uniforms.uSunColor = this.sharedUniforms.uSunColor;
+      shader.uniforms.uFogColor = this.sharedUniforms.uFogColor;
+      shader.uniforms.uGroundFogColor = this.sharedUniforms.uGroundFogColor;
+      shader.uniforms.uGroundFogDensity = this.sharedUniforms.uGroundFogDensity;
+      shader.uniforms.uDewStrength = this.sharedUniforms.uDewStrength;
+      shader.uniforms.uWindDir = this.sharedUniforms.uWindDir;
+      shader.uniforms.uFlowerAtlas = { value: this._flowerAtlas };
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute vec4 aOff;
+          attribute vec4 aRnd;
+          uniform float uTime;
+          uniform vec2 uWindDir;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying vec2 vQ;
+          varying float vFade;
+          varying float vTone;
+          ${GLSL_NOISE_AND_SPLAT}`
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec3 objectNormal = vec3(0.0, 1.0, 0.0);`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `vec2 rootXZ = aOff.xy;
+          vec3 camLocal = cameraPosition - modelMatrix[3].xyz;
+          float gDist = distance(vec3(rootXZ.x, 0.14, rootXZ.y), camLocal);
+
+          float grassWeight = trComputeSplat(rootXZ, 0.42).x;
+          float meadowOnly = smoothstep(0.84, 0.96, grassWeight);
+
+          // Organic wildflower drifts (not uniform confetti!)
+          float drift = smoothstep(0.44, 0.78, trFbm(rootXZ * 0.095 + vec2(11.3, 4.7)));
+          float show = step(aOff.z, 0.08 + 0.88 * drift) * meadowOnly;
+          float distFade = 1.0 - smoothstep(35.0, 72.0, gDist);
+
+          // Species: 0=Oxeye daisy (34%), 1=Buttercup (32%), 2=Red clover (22%), 3=Harebell (12%)
+          float sp = aOff.w < 0.34 ? 0.0 : (aOff.w < 0.66 ? 1.0 : (aOff.w < 0.88 ? 2.0 : 3.0));
+          float stemH = 0.095 + 0.085 * aRnd.y;
+          float sz = (0.095 + 0.065 * aRnd.x) * (1.0 + gDist * 0.008) * show * distFade;
+
+          float along = dot(rootXZ, uWindDir);
+          float gust = trNoise(rootXZ * 0.06 - uWindDir * uTime * 0.25);
+          float wave = sin(along * 0.55 - uTime * 2.1 + aRnd.z * 6.283) * 0.5;
+          vec2 lean = uWindDir * (0.12 + gust * 0.60 + wave * 0.25) * 0.28 * stemH;
+
+          vec3 center = vec3(rootXZ.x + lean.x, stemH, rootXZ.y + lean.y);
+          vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+          vec3 camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+          vec3 upv = normalize(mix(camU, vec3(0.0, 1.0, 0.0), 0.45));
+
+          vec3 transformed = center + (camR * position.x + upv * position.y) * sz;
+          vQ = vec2((position.x + 0.5 + sp) * 0.25, position.y + 0.5);
+          vFade = distFade;
+          vTone = mix(0.88, 1.08, aRnd.w);
+          vLPos = transformed;
+          vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uTime;
+          uniform vec3 uSunDir;
+          uniform vec3 uSunColor;
+          uniform vec3 uFogColor;
+          uniform vec3 uGroundFogColor;
+          uniform float uGroundFogDensity;
+          uniform float uDewStrength;
+          uniform vec2 uWindDir;
+          uniform sampler2D uFlowerAtlas;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying vec2 vQ;
+          varying float vFade;
+          varying float vTone;
+          ${GLSL_NOISE_AND_SPLAT}
+          ${GLSL_GROUND_FOG}`
+        )
+        .replace(
+          '#include <normal_fragment_begin>',
+          '#include <normal_fragment_begin>\n normal = normalize(vNormal);'
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          {
+            vec4 fl = texture2D(uFlowerAtlas, vQ);
+            float cloudSh = trFbm(vLPos.xz * 0.013 + uWindDir * uTime * 0.012);
+            float cloudMul = mix(0.80, 1.06, smoothstep(0.28, 0.72, cloudSh));
+            diffuseColor.rgb = fl.rgb * vTone * cloudMul * 0.92;
+            diffuseColor.a = fl.a * vFade;
+          }`
+        )
+        .replace(
+          '#include <tonemapping_fragment>',
+          `{
+            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vWPos, vLPos);
+            float dist = length(cameraPosition.xz - vWPos.xz);
+            float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));
+          }
+          #include <tonemapping_fragment>`
+        );
+    };
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'MeadowWildflowers';
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    mesh.frustumCulled = false;
+    this.root.add(mesh);
   }
 
   _buildTreelineHorizon() {

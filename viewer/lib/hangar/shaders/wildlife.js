@@ -60,6 +60,20 @@ export class WildlifeSystem {
     this.deerNodes = { doeNeck: null, doeEarL: null, doeEarR: null, doeTail: null, fawnNeck: null, fawnTail: null };
     this.deerBaseRot = {};
 
+    // Common Cranes (Grus grus / "tranor") mated pair further back on the misty right-center meadow
+    this.cranesGroup = new THREE.Group();
+    this.cranesGroup.name = 'AirfieldCranesAnchor';
+    this.cranesGroup.position.set(-20.0, 0.0, 56.0);
+    this.cranesGroup.rotation.y = THREE.MathUtils.degToRad(150);
+    this.root.add(this.cranesGroup);
+
+    this.craneNodes = {
+      sentinelNeck: null, sentinelHead: null,
+      foragerNeck: null, foragerHead: null,
+      companionNeck: null, companionHead: null,
+    };
+    this.craneBaseRot = {};
+
     this._lastSec = 0;
 
     this._buildSunlitDust();
@@ -810,7 +824,8 @@ export class WildlifeSystem {
       deerModel = gltf.scene;
       deerModel.traverse((o) => {
         if (o.isMesh) {
-          o.castShadow = true;
+          // Disable directional shadow-map casting at 21 m (thin legs vanish in shadow texels, leaving a detached torso blob)
+          o.castShadow = false;
           o.receiveShadow = true;
         }
       });
@@ -837,6 +852,46 @@ export class WildlifeSystem {
     this.deerBaseRot = {};
     for (const [k, node] of Object.entries(this.deerNodes)) {
       if (node) this.deerBaseRot[k] = node.rotation.clone();
+    }
+  }
+
+  async loadCranes(url = '../dist/cranes.glb') {
+    this.cranesGroup.clear();
+    let cranesModel = null;
+    try {
+      const gltf = await this.loader.loadAsync(url);
+      cranesModel = gltf.scene;
+      cranesModel.traverse((o) => {
+        if (o.isMesh) {
+          o.castShadow = false;
+          o.receiveShadow = true;
+        }
+      });
+      cranesModel.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(cranesModel);
+      if (Number.isFinite(box.min.y)) {
+        cranesModel.position.y -= box.min.y + 0.01;
+      }
+      const companion = cranesModel.getObjectByName('Crane_Companion');
+      if (companion) companion.visible = false;
+      console.info('[wildlife] Loaded Common Cranes (tranor) pair from', url);
+    } catch (err) {
+      console.warn('[wildlife] cranes.glb unavailable:', err?.message || err);
+      return;
+    }
+
+    this.cranesGroup.add(cranesModel);
+    this.craneNodes = {
+      sentinelNeck: cranesModel.getObjectByName('Crane_Sentinel_NeckPivot'),
+      sentinelHead: cranesModel.getObjectByName('Crane_Sentinel_HeadPivot'),
+      foragerNeck: cranesModel.getObjectByName('Crane_Forager_NeckPivot'),
+      foragerHead: cranesModel.getObjectByName('Crane_Forager_HeadPivot'),
+      companionNeck: cranesModel.getObjectByName('Crane_Companion_NeckPivot'),
+      companionHead: cranesModel.getObjectByName('Crane_Companion_HeadPivot'),
+    };
+    this.craneBaseRot = {};
+    for (const [k, node] of Object.entries(this.craneNodes)) {
+      if (node) this.craneBaseRot[k] = node.rotation.clone();
     }
   }
 
@@ -993,6 +1048,38 @@ export class WildlifeSystem {
     }
     if (fawnTail && this.deerBaseRot.fawnTail) {
       fawnTail.rotation.z = this.deerBaseRot.fawnTail.z + Math.sin(sec * 3.1 + 0.7) * 0.18;
+    }
+
+    // 5. Common Cranes (Grus grus / "tranor") — alert scanning & gentle meadow foraging
+    const {
+      sentinelNeck, sentinelHead,
+      foragerNeck, foragerHead,
+      companionNeck, companionHead,
+    } = this.craneNodes;
+    if (sentinelNeck && this.craneBaseRot.sentinelNeck) {
+      sentinelNeck.rotation.y = this.craneBaseRot.sentinelNeck.y + Math.sin(sec * 0.32) * 0.24;
+      sentinelNeck.rotation.x = this.craneBaseRot.sentinelNeck.x + Math.sin(sec * 0.48 + 0.6) * 0.06;
+    }
+    if (sentinelHead && this.craneBaseRot.sentinelHead) {
+      sentinelHead.rotation.y = this.craneBaseRot.sentinelHead.y + Math.sin(sec * 0.55 + 1.2) * 0.42;
+      sentinelHead.rotation.x = this.craneBaseRot.sentinelHead.x + Math.sin(sec * 0.41) * 0.08;
+    }
+    if (foragerNeck && this.craneBaseRot.foragerNeck) {
+      const dip = smoothstep01(Math.sin(sec * 0.24 + 0.8) * 1.35 + 0.20);
+      const peck = Math.sin(sec * 3.6) * 0.05 * dip;
+      foragerNeck.rotation.x = this.craneBaseRot.foragerNeck.x + dip * 0.62 + peck;
+      foragerNeck.rotation.y = this.craneBaseRot.foragerNeck.y + (1.0 - dip) * Math.sin(sec * 0.44) * 0.25;
+    }
+    if (foragerHead && this.craneBaseRot.foragerHead) {
+      foragerHead.rotation.x = this.craneBaseRot.foragerHead.x + Math.sin(sec * 0.48 + 0.8) * 0.12;
+    }
+    if (companionNeck && this.craneBaseRot.companionNeck) {
+      const preen = smoothstep01(Math.sin(sec * 0.20 + 2.6) * 1.2 - 0.15);
+      companionNeck.rotation.x = this.craneBaseRot.companionNeck.x + preen * 0.34;
+      companionNeck.rotation.y = this.craneBaseRot.companionNeck.y + Math.sin(sec * 0.28 + 1.9) * 0.30;
+    }
+    if (companionHead && this.craneBaseRot.companionHead) {
+      companionHead.rotation.y = this.craneBaseRot.companionHead.y + Math.sin(sec * 0.62 + 2.4) * 0.28;
     }
   }
 }
