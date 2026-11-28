@@ -225,6 +225,8 @@ export class HangarScene {
         this.wildlife.loadCranes(this.urls.cranes),
       ]);
       this._registerCatOccluders(this.wildlife.catGroup);
+      this.aaaEnv.attachGroundFog(this.wildlife.deerGroup, 0.75);
+      this.aaaEnv.attachGroundFog(this.wildlife.cranesGroup, 1.25);
 
       this.wildlife.setPerchTargets({
         gliderRoot: this.gliderRoot,
@@ -242,6 +244,7 @@ export class HangarScene {
     const c = center ? new THREE.Vector3(center.x, groundY, center.z) : new THREE.Vector3(0, groundY, 0);
     this.worldGroup.position.copy(c);
     this.atmosphere.setCenter(c);
+    this.aaaEnv.setOrigin(c);
   }
 
   setActive(on) {
