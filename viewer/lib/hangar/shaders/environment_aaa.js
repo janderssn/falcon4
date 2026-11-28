@@ -319,6 +319,7 @@ export class AAAEnvironment {
       uGroundFogColor: { value: new THREE.Color(0xdce8f0) },
       uGroundFogDensity: { value: 0.009 },
       uDewStrength: { value: 0.55 },
+      uHangarOrigin: { value: new THREE.Vector3(0, 0, 0) },
       uWindDir: { value: this.windDir },
       uDetailEnabled: { value: 1.0 },
       uWetnessGain: { value: 1.0 },
@@ -1463,6 +1464,97 @@ export class AAAEnvironment {
     this.gliderAO = addSpot(0.0, 0.006, 0.05, 5.2, 2.8, 0.50);
 
     this.root.add(aoGroup);
+  }
+
+  setOrigin(center) {
+    if (center) this.sharedUniforms.uHangarOrigin.value.copy(center);
+  }
+
+  /**
+   * Patches every MeshStandardMaterial under `object3D` with the exact same analytical
+   * low-lying ground mist + horizon fog as the meadow, so distant wildlife (cranes, deer)
+   * sit softly veiled in the morning/golden-hour mist instead of harsh dark silhouettes.
+   */
+  attachGroundFog(object3D, boost = 1.0) {
+    if (!object3D) return;
+    const boostUniform = { value: boost };
+    const cacheTag = `hangar-wildlife-ground-fog-v1-${boost.toFixed(2)}`;
+    object3D.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const patchMat = (m) => {
+        const cm = m.clone();
+        const prevCompile = cm.onBeforeCompile;
+        const prevKey = cm.customProgramCacheKey ? cm.customProgramCacheKey.bind(cm) : null;
+        cm.customProgramCacheKey = () => `${prevKey ? prevKey() : cm.type}+${cacheTag}`;
+        cm.onBeforeCompile = (shader, renderer) => {
+          if (prevCompile) prevCompile.call(cm, shader, renderer);
+          shader.uniforms.uTime = this.sharedUniforms.uTime;
+          shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
+          shader.uniforms.uSunColor = this.sharedUniforms.uSunColor;
+          shader.uniforms.uFogColor = this.sharedUniforms.uFogColor;
+          shader.uniforms.uGroundFogColor = this.sharedUniforms.uGroundFogColor;
+          shader.uniforms.uGroundFogDensity = this.sharedUniforms.uGroundFogDensity;
+          shader.uniforms.uDewStrength = this.sharedUniforms.uDewStrength;
+          shader.uniforms.uWindDir = this.sharedUniforms.uWindDir;
+          shader.uniforms.uHangarOrigin = this.sharedUniforms.uHangarOrigin;
+          shader.uniforms.uGroundFogBoost = boostUniform;
+
+          shader.vertexShader = shader.vertexShader
+            .replace(
+              '#include <common>',
+              `#include <common>
+              uniform vec3 uHangarOrigin;
+              varying highp vec3 vGFWorldPos;
+              varying highp vec3 vGFLocalPos;`
+            )
+            .replace(
+              '#include <worldpos_vertex>',
+              `#include <worldpos_vertex>
+              vec4 gfWp = modelMatrix * vec4(transformed, 1.0);
+              vGFWorldPos = gfWp.xyz;
+              vGFLocalPos = gfWp.xyz - uHangarOrigin;`
+            );
+
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              '#include <common>',
+              `#include <common>
+              uniform float uTime;
+              uniform vec3 uSunDir;
+              uniform vec3 uSunColor;
+              uniform vec3 uFogColor;
+              uniform vec3 uGroundFogColor;
+              uniform float uGroundFogDensity;
+              uniform float uDewStrength;
+              uniform vec2 uWindDir;
+              uniform float uGroundFogBoost;
+              varying highp vec3 vGFWorldPos;
+              varying highp vec3 vGFLocalPos;
+              ${GLSL_NOISE_AND_SPLAT}
+              ${GLSL_GROUND_FOG}`
+            )
+            .replace(
+              '#include <tonemapping_fragment>',
+              `{
+                vec3 misted = trApplyGroundFog(gl_FragColor.rgb, vGFWorldPos, vGFLocalPos);
+                // Optional boost for distant cranes so they nestle softly into the golden/morning mist
+                vec3 boosted = mix(gl_FragColor.rgb, misted, clamp(uGroundFogBoost, 0.0, 1.0));
+                if (uGroundFogBoost > 1.0) {
+                  float extra = clamp((uGroundFogBoost - 1.0) * 0.55 * smoothstep(22.0, 62.0, length(vGFLocalPos.xz)), 0.0, 0.35);
+                  boosted = mix(misted, uGroundFogColor, extra);
+                }
+                float dist = length(cameraPosition.xz - vGFWorldPos.xz);
+                float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
+                gl_FragColor.rgb = mix(boosted, uFogColor, clamp(horizonBlend, 0.0, 1.0));
+              }
+              #include <tonemapping_fragment>`
+            );
+        };
+        cm.needsUpdate = true;
+        return cm;
+      };
+      o.material = Array.isArray(o.material) ? o.material.map(patchMat) : patchMat(o.material);
+    });
   }
 
   setGliderAOVisible(visible) {
