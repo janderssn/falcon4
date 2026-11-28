@@ -1486,7 +1486,11 @@ function restoreSpringArm() {
 }
 function hangarOrigin() {
   if (scenes.hangar?.worldGroup) return scenes.hangar.worldGroup.position;
-  return new THREE.Vector3(record?.center?.x ?? 0, record?.ground ?? 0, record?.center?.z ?? 0);
+  if (record?.box) {
+    const c = record.box.getCenter(new THREE.Vector3());
+    return new THREE.Vector3(c.x, record.ground ?? 0, c.z);
+  }
+  return new THREE.Vector3(0, 0, 0);
 }
 function hangarRoofMaxY(lx, lz) {
   return lz <= 4.4 ? (3.98 - Math.abs(lx) * HANGAR_ROOF_TAN) - 0.42 : 3.55;
@@ -2625,6 +2629,25 @@ const nextFrames = (n = 2) => Promise.race([
   waitMs(250),
 ]);
 
+function isCameraCompatibleWithHangar() {
+  if (!rig || !record) return false;
+  if (rig.projection !== 'perspective' || rig.morph || plan.quad || state.compare) return false;
+  const o = hangarOrigin();
+  const gc = hangarGliderCenter();
+  const cam = rig.camera.position;
+  const lx = cam.x - o.x;
+  const ly = cam.y - o.y;
+  const lz = cam.z - o.z;
+  if (Math.abs(lx) > 5.70 || lz < -5.05 || lz > 10.0) return false;
+  if (ly < 0.22 || ly > hangarRoofMaxY(lx, lz)) return false;
+  const dist = cam.distanceTo(gc);
+  if (dist < 0.9 || dist > 10.2) return false;
+  const polar = Math.acos(THREE.MathUtils.clamp((cam.y - gc.y) / Math.max(dist, 1e-5), -1, 1));
+  if (polar < 0.08 || polar > 2.05) return false;
+  if (rig.controls.target.distanceTo(gc) > 2.0) return false;
+  return true;
+}
+
 async function setScene(id) {
   if (!SCENES[id]) id = 'studio';
   const veil = $('#scene-veil');
@@ -2653,19 +2676,28 @@ async function setScene(id) {
 
   if (id === 'hill' && !scenes.meadow) toast('Growing the meadow…', true);
 
-  // 2. Smooth cinematic fade-out veil (~210 ms) before swapping scene/lights/env/exposure/camera
-  const doFade = Boolean(veil) && !reduced && !THUMB;
+  // Decide whether current camera framing can be preserved or must reset with a crossfade veil
+  const preserveCam = id === 'hangar'
+    ? isCameraCompatibleWithHangar()
+    : true;
+
+  // 2. Smooth cinematic fade-out veil (~210 ms) when camera view must reset due to constraints
+  const doFade = !preserveCam && Boolean(veil) && !reduced && !THUMB;
   if (doFade) {
     veil.classList.add('on');
     await waitMs(210);
     if (req !== sceneReqId) return;
   }
 
-  // 3. Atomic state, gizmo, audio, scene & camera swap while veiled (zero 1-frame pop)
+  // 3. Atomic state, gizmo, audio, scene & camera swap
   state.scene = id;
   if (fromScene === 'hangar' && id !== 'hangar') {
     if (state.hangarBackView) {
-      clearBackParallax();
+      // Preserve current screen angle (including any applied parallax) as normal orbit pose
+      backParallax.targetX = backParallax.targetY = 0;
+      backParallax.curX = backParallax.curY = 0;
+      backParallax.appliedX = backParallax.appliedY = 0;
+      backParallax.fade = 0;
       state.hangarBackView = false;
     }
     if (state.hangarAudio) {
@@ -2674,9 +2706,16 @@ async function setScene(id) {
     }
     if (state.rotOpen) state.rotOpen = false;
     if (Math.abs(state.offsetX) > 1e-4 || Math.abs(state.offsetZ) > 1e-4) {
+      const ox = state.offsetX;
+      const oz = state.offsetZ;
       state.offsetX = 0;
       state.offsetZ = 0;
       applyPose(false);
+      // Shift camera + target by the same delta so the glider stays in the exact same screen position
+      rig.camera.position.x -= ox;
+      rig.camera.position.z -= oz;
+      rig.controls.target.x -= ox;
+      rig.controls.target.z -= oz;
     }
     resetSpringArm();
   } else if (id !== 'hangar') {
@@ -2695,7 +2734,13 @@ async function setScene(id) {
     if (state.compare) setCompare(false);
     if (plan.quad) { setQuad(false); plan.split = 0; }
     rig.setProjection('perspective', false);
-    rig.setPose(hangarFrontPose());
+    if (preserveCam) {
+      // Keep exact camera position & angle; sync target + springArm with zero jump
+      rig.controls.target.copy(hangarGliderCenter());
+      rig.camera.lookAt(rig.controls.target);
+    } else {
+      rig.setPose(hangarFrontPose());
+    }
     limitCamera(0);
     const d = rig.camera.position.distanceTo(rig.controls.target);
     springArm.desiredDist = THREE.MathUtils.clamp(d, 0.9, 10.2);
@@ -2703,15 +2748,16 @@ async function setScene(id) {
     springArm.active = true;
     rig.controls.update();
   } else if (fromScene === 'hangar' && record) {
-    frontView(false);
+    // Preserve exact framing when leaving Hangar; unlock unconstrained OrbitControls
     limitCamera(0);
+    rig.camera.lookAt(rig.controls.target);
     rig.controls.update();
   }
 
   syncPanel();
   saveUrlSoon();
 
-  // 4. Render 2 clean frames behind the veil so lights/env/shadows settle, then fade in
+  // 4. Render 2 clean frames behind the veil when resetting view, then fade in
   if (doFade) {
     await nextFrames(2);
     if (req === sceneReqId) veil.classList.remove('on');
