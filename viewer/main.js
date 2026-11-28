@@ -1638,9 +1638,66 @@ function clampCamera(dt = 0) {
 
 // Fly-around on request; a slow turn on its own after a while without input.
 let lastInput = performance.now();
-function userActive() { lastInput = performance.now(); if (!state.tour) rig.controls.autoRotate = false; }
-function startTour() { state.tour = true; rig.setProjection('perspective', !reduced); rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 1.6; syncPanel(); }
-function stopTour() { state.tour = false; rig.controls.autoRotate = false; rig.controls.autoRotateSpeed = 0.35; syncPanel(); }
+let lastMoveX = null, lastMoveY = null;
+let idleOrbitActive = false;
+let hudHoverTimer = null;
+let pointerOverHud = false;
+const HUD_HOVER_FADE_MS = 3500;
+function setHudIdle(on) { document.body.classList.toggle('hud-idle', Boolean(on)); }
+function hudBlockedByUI() {
+  return Boolean(state.panel || state.rotOpen || ui.picker || !$('#scene-fly')?.hidden || !$('#order')?.hidden);
+}
+function clearHudHoverTimer() {
+  if (hudHoverTimer) { clearTimeout(hudHoverTimer); hudHoverTimer = null; }
+}
+function userActive() {
+  lastInput = performance.now();
+  idleOrbitActive = false;
+  clearHudHoverTimer();
+  setHudIdle(false);
+  if (!state.tour) rig.controls.autoRotate = false;
+}
+function onPointerMove(e) {
+  if (lastMoveX !== null && Math.hypot(e.clientX - lastMoveX, e.clientY - lastMoveY) <= 4) return;
+  lastMoveX = e.clientX;
+  lastMoveY = e.clientY;
+  pointerOverHud = Boolean(e.target?.closest?.('.hud'));
+  if (!idleOrbitActive) return;
+  // Mouse hover wakes the HUD without stopping idle orbit; re-fade slowly after stillness
+  setHudIdle(false);
+  clearHudHoverTimer();
+  hudHoverTimer = setTimeout(() => {
+    hudHoverTimer = null;
+    if (idleOrbitActive && !hudBlockedByUI() && !pointerOverHud) setHudIdle(true);
+  }, HUD_HOVER_FADE_MS);
+}
+function startTour() { state.tour = true; idleOrbitActive = false; clearHudHoverTimer(); setHudIdle(false); rig.setProjection('perspective', !reduced); rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 1.6; syncPanel(); }
+function stopTour() { state.tour = false; idleOrbitActive = false; clearHudHoverTimer(); rig.controls.autoRotate = false; rig.controls.autoRotateSpeed = 0.35; syncPanel(); }
+function updateIdleState(now) {
+  if (!THUMB && !state.tour && !rig.transition && now - lastInput > 30000 && rig.projection === 'perspective') {
+    const wasIdle = idleOrbitActive;
+    idleOrbitActive = true;
+    rig.controls.autoRotate = true;
+    rig.controls.autoRotateSpeed = 0.35;
+    if (hudBlockedByUI()) {
+      setHudIdle(false);
+    } else if (!wasIdle && !hudHoverTimer) {
+      setHudIdle(true);
+    }
+  } else if (document.body.classList.contains('hud-idle') && hudBlockedByUI()) {
+    setHudIdle(false);
+  }
+}
+window.__FALCON4_TRIGGER_IDLE__ = () => {
+  lastInput = performance.now() - 31000;
+  updateIdleState(performance.now());
+  return { autoRotate: rig.controls.autoRotate, hudIdle: document.body.classList.contains('hud-idle'), idleOrbitActive };
+};
+window.__FALCON4_IDLE_STATE__ = () => ({
+  autoRotate: rig.controls.autoRotate,
+  hudIdle: document.body.classList.contains('hud-idle'),
+  idleOrbitActive,
+});
 
 // ------------------------------------------------------------------ render loop
 let last = performance.now();
@@ -1650,7 +1707,7 @@ function loop(now) {
   if (document.hidden) return;
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  if (!THUMB && !state.tour && !rig.transition && now - lastInput > 30000 && rig.projection === 'perspective') { rig.controls.autoRotate = true; rig.controls.autoRotateSpeed = 0.35; }
+  updateIdleState(now);
   // Plan views may look from any side, even up from under the ground: the camera sits
   // just outside the glider, so floors, walls and the roof stay behind it.
   // While the projection changes the camera is placed by the rig alone.
@@ -2974,6 +3031,14 @@ function wireUi() {
     loaderText('The graphics stopped', 'Reload the page to bring the glider back.', 0, true);
     $('#ld-retry').onclick = () => location.reload();
   });
+  window.addEventListener('pointermove', onPointerMove, { passive: true });
+  window.addEventListener('pointerdown', (e) => {
+    lastMoveX = e.clientX;
+    lastMoveY = e.clientY;
+    userActive();
+  }, { passive: true, capture: true });
+  window.addEventListener('wheel', userActive, { passive: true });
+  window.addEventListener('touchstart', userActive, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'checkbox' && e.target.type !== 'range') return;
     if (numpadKey(e)) { e.preventDefault(); return; }
