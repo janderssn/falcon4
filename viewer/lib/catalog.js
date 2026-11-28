@@ -25,6 +25,8 @@ export async function loadCatalog() {
       rotateY: m.rotateY || 0, offset: m.offset || [0, 0, 0],
       glider: m.glider || 'Falcon 4', subtitle: m.subtitle || `Wills Wing · 170 · ${m.label} build`,
       poseShapes: m.poseShapes || null,
+      flightPitchDeg: m.flightPitchDeg ?? null,
+      flightLift: m.flightLift || 0,
       optionSplit: m.optionSplit || null,
       ropes: m.ropes || null,
       designs: m.designs ? `./${m.designs}` : null,   // sail designs (lib/designs.js, tools/sail_designs.py)             // soft rope ends drawn by lib/rope.js (see main.js, ropesOf)   // shape-key weights per resting pose (see main.js, poseOf)

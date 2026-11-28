@@ -33,16 +33,25 @@ const ZONES = {
   p1: { name: 'P1 · Leading edge', panel: 'P1', mats: ['Royal blue Dacron', 'Sail P1 LE panel (blue)', 'Sail P1 under the LE (blue)', 'Nosecone (blue)'] },
   p2: { name: 'P2 · Forward', panel: 'P2', mats: ['Signal red Dacron', 'Red inner cloth - underside only', 'Sail P2 (white)'] },
   p5: { name: 'P5 · Undersurface', panel: 'P5', mats: ['Sail P5 undersurface (colour)'] },
+  // Skyhook Mk3: single-surface Rogallo panels, sleeves and overlap seams.
+  sk_sleeves: { name: 'Sleeves · LE & keel', panel: 'P1', mats: ['Sail sleeves'] },
+  sk_p6: { name: 'Panel 6 · Nose', panel: 'P1', mats: ['Sail panel 6'] },
+  sk_p5: { name: 'Panel 5 · Stripe', panel: 'P3', mats: ['Sail panel 5'] },
+  sk_p4: { name: 'Panel 4', panel: 'P3', mats: ['Sail panel 4'] },
+  sk_p3: { name: 'Panel 3 · Stripe', panel: 'P3', mats: ['Sail panel 3'] },
+  sk_p2: { name: 'Panel 2', panel: 'P3', mats: ['Sail panel 2'] },
+  sk_p1: { name: 'Panel 1 · Trailing edge', panel: 'P4', mats: ['Sail panel 1'] },
+  sk_seams: { name: 'Seams', panel: 'P3', mats: ['Sail seams'] },
   // The Sport 3's nose cone: its own cloth, in any solid colour of the leading edge's list.
   nose: { name: 'Nose cone', parts: /^Sail nose cone$/, mats: ['U2 160 Nosecone'] },   // (the Falcon's "Nosecone" is leading-edge cloth: p1)
   // The Sport 3's kingpost and control frame are black anodised as built (`black`: those parts in that
   // material); its battens share a material with small frame parts and keep their own finish (`not`).
   frame: { name: 'Frame', mats: ['Satin 7075 aluminium', 'Aluminium (anodised clear)', 'Control bar aluminium', 'Aluminium 7075-T6 tube', 'Aluminium sleeve',
-      'Tube aluminium (anodised)', 'Sleeve aluminium (anodised)'],
+      'Tube aluminium (anodised)', 'Sleeve aluminium (anodised)', 'Tube aluminium HT30'],
     black: [/^(Kingpost|Downtube( Litestream| round)? [LR]|Basetube \(speedbar\)|Basetube streamline( \(wheel kit\))?|Speedbar round)$/,
       ['Black anodised aluminium', 'Control bar black anodise']], not: /^Sail .*batten/ },
 };
-const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets'];
+const SAIL_ZONES = ['p1', 'p2', 'p3', 'p4', 'p5', 'pockets', 'sk_sleeves', 'sk_p6', 'sk_p5', 'sk_p4', 'sk_p3', 'sk_p2', 'sk_p1', 'sk_seams'];
 const zoneOf = (mesh) => {
   const part = mesh.userData.part.name, mat = mesh.userData.materials.base.name;
   const { black } = ZONES.frame;
@@ -118,7 +127,7 @@ const state = {
   seeThrough: params.has('xray') ? Math.min(1, Math.max(0, Number(params.get('xray')) || 0)) : DEFAULTS.seeThrough,
   wires: params.get('wires') !== '0',
   battens: params.get('battens') !== '0',
-  pose: ['bar', 'nose', 'tail'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
+  pose: ['bar', 'nose', 'tail', 'flight'].includes(params.get('pose')) ? params.get('pose') : DEFAULTS.pose,
   options: optionsFrom(params.get('opt')),          // option slot -> variant (a model's other uprights, basetube, ...)
   offsetX: 0,
   offsetZ: 0,
@@ -166,6 +175,7 @@ function optionsFrom(text) { return Object.fromEntries((text || '').split(',').f
 const OPTION_NAMES = {
   uprights: ['Uprights', { litestream: 'Litestream', round: 'Round' }],
   basebar: ['Basetube', { streamline: 'Streamlined', streamline_wheels: 'With wheels', round_speedbar: 'Round', carbon_speedbar: 'Carbon' }],
+  control_bar: ['Control bar', { straight: 'Straight', curved_forward: 'Curved forward' }],
 };
 // The order form's line for a variant that Wills Wing sells as an option: [name, part number, note].
 const ORDER_OPTIONS = {
@@ -409,12 +419,13 @@ function prepareTints(rec) {
       // As the sail's skins (lib/designs.js, toPhysical): no sheen, which turns a colour milky, and a faint gloss.
       if (zone === 'nose') { if (m.sheen !== undefined) m.sheen = 0; m.specularIntensity = 0.2; }
       if (!m.map && !cloth) continue;
-      // (The nose cone's map holds its seams only, over the material's own colour: the tint takes that colour's place.)
-      const baked = zone === 'nose' ? m.color.toArray() : /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
+      // (The nose cone's map and colour-free detail maps carry their base colour in m.color: the tint replaces it.)
+      const hasFactor = m.color.r < 0.99 || m.color.g < 0.99 || m.color.b < 0.99;
+      const baked = (zone === 'nose' || hasFactor) ? m.color.toArray() : /\(blue\)/.test(name) ? BAKED.blue : /\(colour\)/.test(name) ? BAKED.red : BAKED.white;
       const tinted = Boolean(m.map);
       m.onBeforeCompile = (s) => {
         // Only the sail panels take the panel's cloth; pockets coloured with it stay woven.
-        const panel = /^Sail P/.test(name);
+        const panel = /^Sail (P|panel|sleeves|seams)/.test(name);
         if (cloth) patchCloth(s, panel ? t.cloth : t.plain, m, panel && key !== 'ghost');
         if (!tinted) return;
         s.uniforms.uTint = t.uTint; s.uniforms.uTintOn = t.uTintOn; s.uniforms.uBaked = { value: new THREE.Color(...baked) };
@@ -565,6 +576,7 @@ function applyLook() {
   applyDesign();   // first: whether the design has a see-through laminate
   if (record) lookOf(record, 'A');
   if (other) lookOf(other, 'B');
+  if (renderer) renderer.shadowMap.needsUpdate = true;
 }
 function lookOf(rec, side) {
   const clear = {};
@@ -579,7 +591,7 @@ function lookOf(rec, side) {
     const id = colours[zone] || null;
     if (sail && id !== t.fabric) {
       t.fabric = id;
-      const panel = (mesh) => /^Sail P/.test(mesh.userData.materials.base.name);
+      const panel = (mesh) => /^Sail (P|panel|sleeves|seams)/.test(mesh.userData.materials.base.name);
       const mats = (list) => list.flatMap((mesh) => Object.values(mesh.userData.materials));
       setCloth(t.cloth, mats(t.meshes.filter(panel)), id, fabric?.opacity ?? 1);
       setCloth(t.plain, mats(t.meshes.filter((mesh) => !panel(mesh))), null);
@@ -616,7 +628,7 @@ function lookOf(rec, side) {
     // See-through sail, or a clear laminate panel.
     // In a sail zone only the panels are laminate; pockets coloured with them stay woven.
     const inSail = SAIL_ZONES.includes(mesh.userData.zone);
-    let laminate = !inSail || /^Sail P/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
+    let laminate = !inSail || /^Sail (P|panel|sleeves|seams)/.test(M.base.name) ? clear[mesh.userData.zone] : undefined;
     // A design with a clear laminate: the skins blend, with the film's alpha from the design's shader.
     const designFilm = rec.sailDesigns?.seeThrough(mesh);
     if (designFilm) laminate = 1;
@@ -720,6 +732,7 @@ function restingPose(rec) {
     hull, foot: hull[bottom],   // the standing contact: the fixed point along the ground
     nose: { angle: nose },      // nose down: +rotation about X
     tail: { angle: -tail },     // tail down: the other way
+    flight: rec.source.flightPitchDeg != null ? { angle: THREE.MathUtils.degToRad(rec.source.flightPitchDeg), lift: rec.source.flightLift || 0 } : null,
   };
 }
 /** The plan views always show the glider standing, so its axes line up with the views. */
@@ -730,6 +743,7 @@ function applyPose(animate = false) {
   if (other) {
     poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
+  if (renderer) renderer.shadowMap.needsUpdate = true;
   syncRotUI();
   scenes.notifyGliderMoved();
 }
@@ -741,7 +755,7 @@ const _qYaw = new THREE.Quaternion();
  * Places the build tilted by `angle` about X (nose down > 0, tail down < 0) and rotated by
  * `state.yaw` about Y around its basebar foot, keeping the lowest point flush on y = 0.
  */
-function tiltTo(rec, angle) {
+function tiltTo(rec, angle, lift = rec.lift ?? 0) {
   const c = Math.cos(angle), sn = Math.sin(angle);
   let low = Infinity;
   // y after the turn about X: y' = y cos - z sin
@@ -754,9 +768,10 @@ function tiltTo(rec, angle) {
   rec.root.quaternion.copy(_qYaw).multiply(_qPitch);
   const cy = Math.cos(yawRad), sy = Math.sin(yawRad);
   const dz = pz - fz;
-  rec.root.position.set(dz * sy + (state.offsetX || 0), -low, fz + dz * cy + (state.offsetZ || 0));
+  rec.root.position.set(dz * sy + (state.offsetX || 0), -low + lift, fz + dz * cy + (state.offsetZ || 0));
   rec.root.updateMatrixWorld(true);
   rec.angle = angle;
+  rec.lift = lift;
 }
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 /** Swings the builds from their last pose to the new one; true while they move. */
@@ -767,7 +782,7 @@ function stepPoses(now) {
     if (!m) continue;
     const k = Math.min((now - m.start) / POSE_TIME, 1), e = k * k * (3 - 2 * k);
     setShapes(rec, Object.fromEntries(Object.keys(m.s1).map((n) => [n, m.s0[n] + (m.s1[n] - m.s0[n]) * e])));
-    tiltTo(rec, m.a0 + (m.a1 - m.a0) * e);
+    tiltTo(rec, m.a0 + (m.a1 - m.a0) * e, m.l0 + (m.l1 - m.l0) * e);
     if (k === 1) rec.swing = null; else moving = true;
   }
   return moving;
@@ -776,21 +791,22 @@ function poseOf(rec, animate = false) {
   const fresh = !rec.ropes;
   if (fresh) { vgOf(rec); setVG(rec, 1); }           // evaluate at VG tight before measuring the resting hull
   if (!rec.rest) rec.rest = restingPose(rec);
-  const a0 = rec.angle ?? 0;
-  const a1 = rec.rest[restPose()]?.angle ?? 0;   // standing: no tilt
-  const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, restPose());
+  const pose = restPose() === 'flight' && !rec.rest.flight ? 'tail' : restPose();
+  const a0 = rec.angle ?? 0, l0 = rec.lift ?? 0;
+  const a1 = rec.rest[pose]?.angle ?? 0, l1 = rec.rest[pose]?.lift ?? 0;   // standing: no tilt
+  const s0 = { ...shapesNow(rec) }, s1 = shapesFor(rec, pose);
   setShapes(rec, s1);
-  tiltTo(rec, a1);
+  tiltTo(rec, a1, l1);
   // Exact bounds: the quick box of rotated parts reaches below the glider.
   rec.box.setFromObject(rec.root, true);
   rec.ground = 0;
   // The box above is the one of the new pose, so views frame where the glider ends up.
   rec.swing = null;
   const reshape = Object.keys(s1).some((n) => s0[n] !== s1[n]);
-  if (animate && (a0 !== a1 || reshape)) {
-    rec.swing = { a0, a1, s0, s1, start: performance.now() };
+  if (animate && (a0 !== a1 || l0 !== l1 || reshape)) {
+    rec.swing = { a0, a1, l0, l1, s0, s1, start: performance.now() };
     setShapes(rec, s0);
-    tiltTo(rec, a0);
+    tiltTo(rec, a0, l0);
   }
   if (fresh) { ropesOf(rec); setVG(rec, state.vg); }
 }
@@ -1754,9 +1770,17 @@ function loop(now) {
     rig.camera.lookAt(rig.controls.target);
   }
   stepSplit(now);
-  stepPoses(now);
+  const poseMoving = stepPoses(now);
   stepRopes(dt);
   scenes.update(rig.camera, (now - clock0) / 1000, rig.controls.target);
+  // In Hangar, the sun and hangar architecture are static between user actions: avoid re-rendering
+  // the 2048x2048 shadow map every frame when nothing casting shadows is moving (100% identical visuals).
+  if (scenes.current === 'hangar') {
+    renderer.shadowMap.autoUpdate = false;
+    if (poseMoving || gizmo?.dragging) renderer.shadowMap.needsUpdate = true;
+  } else {
+    renderer.shadowMap.autoUpdate = true;
+  }
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
   const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
@@ -2067,7 +2091,9 @@ function renderChip() {
 // "Labels on the glider" names each colour row of Customize (P1 to P5, the batten pockets,
 // the frame) where it is on the glider, with its current colour as a swatch. Each sits on
 // one wing (side: the left wing is +X) at its own fraction of the span, so they spread out.
-const LABEL_ZONES = [['nose', 1, 0.3], ['p1', 1, 0.55], ['p2', -1, 0.35], ['p3', 1, 0.3], ['p4', -1, 0.75], ['p5', 1, 0.8], ['pockets', -1, 0.55], ['frame', -1, 0.12]];
+const LABEL_ZONES = [['nose', 1, 0.3], ['p1', 1, 0.55], ['p2', -1, 0.35], ['p3', 1, 0.3], ['p4', -1, 0.75], ['p5', 1, 0.8], ['pockets', -1, 0.55],
+  ['sk_sleeves', 1, 0.65], ['sk_p6', 1, 0.12], ['sk_p5', -1, 0.2], ['sk_p4', 1, 0.3], ['sk_p3', -1, 0.4], ['sk_p2', 1, 0.5], ['sk_p1', -1, 0.65], ['sk_seams', 1, 0.4],
+  ['frame', -1, 0.12]];
 const labelEls = new Map();
 /**
  * A point on the zone's own surface in the model's frame, so it holds for every pose: the
@@ -2605,12 +2631,16 @@ function syncPanel() {
   if (record) for (const b of document.querySelectorAll('.sw.original')) {
     const t = record.tints[b.dataset.zone];
     const m = t?.meshes[0]?.userData.materials.base;
-    const c = !m ? null : m.map ? new THREE.Color(.../\(blue\)/.test(m.name) ? BAKED.blue : /\(colour\)/.test(m.name) ? BAKED.red : BAKED.white) : m.userData.original;
+    const orig = m?.userData.original;
+    const hasFactor = orig && (orig.r < 0.99 || orig.g < 0.99 || orig.b < 0.99);
+    const c = !m ? null : (m.map && !hasFactor) ? new THREE.Color(.../\(blue\)/.test(m.name) ? BAKED.blue : /\(colour\)/.test(m.name) ? BAKED.red : BAKED.white) : orig;
     b.style.setProperty('--c', c ? `#${c.getHexString(THREE.SRGBColorSpace)}` : '#888');
   }
   syncLabelSwatches();
   if (record) for (const row of document.querySelectorAll('[data-row]')) row.hidden = !record.tints[row.dataset.row]?.meshes.length;
   syncRows();
+  const bf = $('#btn-pose-flight');
+  if (bf) bf.hidden = !record?.source.poseShapes?.flight;
   for (const b of document.querySelectorAll('[data-pose]')) b.setAttribute('aria-pressed', String(b.dataset.pose === state.pose));
   $('#vgctl').hidden = !record?.vg;
   $('#vg').value = state.vg;

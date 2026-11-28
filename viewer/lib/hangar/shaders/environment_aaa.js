@@ -226,14 +226,12 @@ vec3 trComputeSplat(vec2 p, float dirtHeight) {
 }
 `;
 
-// Shared GLSL: exact meadow terrain albedo (uGrassA dual-tap + macro patches + runway stripes + cloud shadows)
-const GLSL_MEADOW_ALBEDO = /* glsl */ `
-vec3 trComputeMeadowAlbedo(vec2 p, float camDist, float wetness) {
+// Shared GLSL: macro meadow colour multiplier (5-60 m patches, runway stripes, cloud shadows) — evaluated per vertex on grass
+const GLSL_MEADOW_MACRO = /* glsl */ `
+vec4 trComputeMeadowMacro(vec2 p, float camDist, float wetness) {
   float gMix = trGrassMix(p);
-  vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(p)).rgb, texture2D(uGrassA, trGrassUvB(p)).rgb, gMix);
   float mPatch1 = trFbm(p * 0.06);
   float mPatch2 = trFbm(p * 0.24 + vec2(9.1, 3.7));
-
   float mField1 = trFbm(p * 0.022);
   float mField2 = trFbm(p * 0.055 + vec2(17.3, 6.2));
   float mClover = trFbm(p * 0.095 - vec2(4.1, 11.8));
@@ -242,30 +240,39 @@ vec3 trComputeMeadowAlbedo(vec2 p, float camDist, float wetness) {
   float runwayCorridor = smoothstep(42.0, 12.0, abs(p.x - 2.0)) * smoothstep(12.0, 28.0, p.y);
   float mowStripe = sin(p.x * 0.42 + p.y * 0.035) * 0.5 + 0.5;
 
-  vec3 grassCol = gTex * mix(0.82, 1.18, mPatch1);
-  grassCol *= mix(1.0, mix(0.90, 1.10, mowStripe), runwayCorridor * 0.80);
-  grassCol = mix(grassCol, grassCol * vec3(1.26, 1.14, 0.72), smoothstep(0.50, 0.80, mField1) * 0.56 * farMeadow);
-  grassCol = mix(grassCol, grassCol * vec3(0.70, 0.90, 0.68), smoothstep(0.48, 0.18, mClover) * 0.48 * farMeadow);
-  grassCol = mix(grassCol, grassCol * vec3(0.84, 0.96, 0.86), smoothstep(0.54, 0.82, mField2) * 0.36 * farMeadow);
-  grassCol = mix(grassCol, grassCol * vec3(1.12, 1.08, 0.78), smoothstep(0.60, 0.88, mWild) * 0.30 * farMeadow);
-  grassCol = mix(grassCol, grassCol * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.24);
-
-  float gLuma = dot(grassCol, vec3(0.2126, 0.7152, 0.0722));
-  grassCol = mix(vec3(gLuma), grassCol * vec3(0.96, 1.05, 0.93), uGrassLushness);
+  vec3 mul = vec3(mix(0.82, 1.18, mPatch1));
+  mul *= mix(1.0, mix(0.90, 1.10, mowStripe), runwayCorridor * 0.80);
+  mul = mix(mul, mul * vec3(1.26, 1.14, 0.72), smoothstep(0.50, 0.80, mField1) * 0.56 * farMeadow);
+  mul = mix(mul, mul * vec3(0.70, 0.90, 0.68), smoothstep(0.48, 0.18, mClover) * 0.48 * farMeadow);
+  mul = mix(mul, mul * vec3(0.84, 0.96, 0.86), smoothstep(0.54, 0.82, mField2) * 0.36 * farMeadow);
+  mul = mix(mul, mul * vec3(1.12, 1.08, 0.78), smoothstep(0.60, 0.88, mWild) * 0.30 * farMeadow);
+  mul = mix(mul, mul * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.24);
 
   float cloudSh = trFbm(p * 0.013 + uWindDir * uTime * 0.012);
-  grassCol *= mix(1.0, mix(0.76, 1.08, smoothstep(0.28, 0.72, cloudSh)), farMeadow * 0.88);
-  grassCol *= mix(1.0, 0.88, wetness * 0.28);
+  mul *= mix(1.0, mix(0.76, 1.08, smoothstep(0.28, 0.72, cloudSh)), farMeadow * 0.88);
+  mul *= mix(1.0, 0.88, wetness * 0.28);
 
   float windWave = sin(dot(p, uWindDir) * 0.42 - uTime * 1.10 + mPatch1 * 3.8);
-  grassCol *= (1.0 + windWave * 0.035 * (1.0 - smoothstep(25.0, 140.0, camDist)));
-  return grassCol;
+  mul *= (1.0 + windWave * 0.035 * (1.0 - smoothstep(25.0, 140.0, camDist)));
+  return vec4(mul, gMix);
+}
+`;
+
+// Shared GLSL: exact meadow terrain albedo (uGrassA dual-tap + macro patches + runway stripes + cloud shadows)
+const GLSL_MEADOW_ALBEDO = /* glsl */ `
+${GLSL_MEADOW_MACRO}
+vec3 trComputeMeadowAlbedo(vec2 p, float camDist, float wetness) {
+  vec4 macro = trComputeMeadowMacro(p, camDist, wetness);
+  vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(p)).rgb, texture2D(uGrassA, trGrassUvB(p)).rgb, macro.w);
+  vec3 grassCol = gTex * macro.rgb;
+  float gLuma = dot(grassCol, vec3(0.2126, 0.7152, 0.0722));
+  return mix(vec3(gLuma), grassCol * vec3(0.96, 1.05, 0.93), uGrassLushness);
 }
 `;
 
 // Shared GLSL: analytical height-exponential ground mist hugging Y in [0, 2.4m], masked outside the hangar apron
 const GLSL_GROUND_FOG = /* glsl */ `
-vec3 trApplyGroundFog(vec3 col, vec3 worldPos, vec3 localPos) {
+vec3 trApplyGroundFogWithWisp(vec3 col, vec3 worldPos, vec3 localPos, float wisp) {
   vec3 fDir = worldPos - cameraPosition;
   float fDist = length(fDir);
   float fb = 0.58;
@@ -274,8 +281,6 @@ vec3 trApplyGroundFog(vec3 col, vec3 worldPos, vec3 localPos) {
   float fdy = fDir.y;
   float fInt = abs(fdy) > 0.01 ? (1.0 - exp(-fb * fdy)) / (fb * fdy) : 1.0;
 
-  // Slow-drifting horizontal fBm mist wisps across the mid/far meadow (crisp < 12 m around hangar)
-  float wisp = trFbm(localPos.xz * vec2(0.016, 0.032) + uWindDir * uTime * 0.016);
   float mistBank = 0.42 + 1.08 * smoothstep(0.24, 0.78, wisp);
   float hangarClear = smoothstep(12.0, 28.0, length(localPos.xz));
   float fOd = uGroundFogDensity * mistBank * hangarClear * exp(-fb * camLocalY) * fDist * fInt;
@@ -286,6 +291,10 @@ vec3 trApplyGroundFog(vec3 col, vec3 worldPos, vec3 localPos) {
   float sunGlow = pow(max(dot(viewDir, normalize(uSunDir)), 0.0), 4.0) * 0.22;
   vec3 mistCol = uGroundFogColor + uSunColor * sunGlow * uDewStrength;
   return mix(col, mistCol, mistFactor);
+}
+vec3 trApplyGroundFog(vec3 col, vec3 worldPos, vec3 localPos) {
+  float wisp = trFbm(localPos.xz * vec2(0.016, 0.032) + uWindDir * uTime * 0.016);
+  return trApplyGroundFogWithWisp(col, worldPos, localPos, wisp);
 }
 `;
 
@@ -702,10 +711,13 @@ export class AAAEnvironment {
           uniform vec2 uWindDir;
           varying highp vec3 vWPos;
           varying highp vec3 vLPos;
+          varying vec4 vMacro;
+          varying float vMistWisp;
           varying float vY;
           varying float vRnd;
           varying float vTint;
-          ${GLSL_NOISE_AND_SPLAT}`
+          ${GLSL_NOISE_AND_SPLAT}
+          ${GLSL_MEADOW_MACRO}`
         )
         .replace(
           '#include <beginnormal_vertex>',
@@ -721,8 +733,9 @@ export class AAAEnvironment {
           vec3 gRoot = vec3(rootXZ.x, -0.004, rootXZ.y);
           vec3 camLocal = cameraPosition - modelMatrix[3].xyz;
           float gDist = distance(gRoot, camLocal);
+          float rootR = length(rootXZ);
 
-          float grassWeight = trComputeSplat(rootXZ, 0.42).x;
+          float grassWeight = rootR > 13.0 ? 1.0 : trComputeSplat(rootXZ, 0.42).x;
           float ragged = grassWeight > 0.95 ? 1.0 : step(mix(0.08, 0.58, aOff.w), grassWeight) * (0.55 + 0.45 * smoothstep(0.08, 0.62, grassWeight));
 
           // Smooth outer fade from front apron (24 -> 34 m) + gentle distance thinning (16 -> 32 m)
@@ -732,7 +745,7 @@ export class AAAEnvironment {
 
           // Natural airfield tussock height (~0.12-0.31 m), slightly shorter right at apron edge (0.78x -> 1.05x)
           float tuftNoise = trFbm(rootXZ * 0.28 + vec2(5.2, 1.9));
-          float fieldScale = mix(0.78, 1.05, smoothstep(4.5, 11.5, length(rootXZ)));
+          float fieldScale = mix(0.78, 1.05, smoothstep(4.5, 11.5, rootR));
           float gH = (0.12 + 0.11 * aRnd.w * aRnd.w + 0.08 * smoothstep(0.30, 0.78, tuftNoise)) * fieldScale * ragged * keep * rimFade;
           float gW = (0.013 + 0.012 * aRnd.x) * (1.0 + gDist * 0.048) * step(0.002, gH);
 
@@ -751,6 +764,8 @@ export class AAAEnvironment {
             + gFwd * (curve * y * y * gH)
             + vec3(lean.x, -0.22 * length(lean), lean.y) * (y * y * gH);
 
+          vMacro = gH > 0.002 ? trComputeMeadowMacro(rootXZ, gDist, 0.0) : vec4(1.0);
+          vMistWisp = gH > 0.002 ? trFbm(rootXZ * vec2(0.016, 0.032) + uWindDir * uTime * 0.016) : 0.5;
           vY = y;
           vRnd = aRnd.w;
           vTint = aRnd.x;
@@ -774,11 +789,12 @@ export class AAAEnvironment {
           uniform sampler2D uGrassA;
           varying highp vec3 vWPos;
           varying highp vec3 vLPos;
+          varying vec4 vMacro;
+          varying float vMistWisp;
           varying float vY;
           varying float vRnd;
           varying float vTint;
           ${GLSL_NOISE_AND_SPLAT}
-          ${GLSL_MEADOW_ALBEDO}
           ${GLSL_GROUND_FOG}`
         )
         .replace(
@@ -790,7 +806,10 @@ export class AAAEnvironment {
           `#include <map_fragment>
           {
             float camDist = length(cameraPosition - vWPos);
-            vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
+            vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(vLPos.xz)).rgb, texture2D(uGrassA, trGrassUvB(vLPos.xz)).rgb, vMacro.w);
+            vec3 c = gTex * vMacro.rgb;
+            float gLuma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            c = mix(vec3(gLuma), c * vec3(0.96, 1.05, 0.93), uGrassLushness);
             c *= mix(0.92, 1.08, vTint);
 
             // Photographic root-to-tip depth shading, flattening smoothly to 1.0 over 18 -> 58 m
@@ -828,7 +847,7 @@ export class AAAEnvironment {
         .replace(
           '#include <tonemapping_fragment>',
           `{
-            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vWPos, vLPos);
+            gl_FragColor.rgb = trApplyGroundFogWithWisp(gl_FragColor.rgb, vWPos, vLPos, vMistWisp);
             float dist = length(cameraPosition.xz - vWPos.xz);
             float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
             gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));
@@ -924,11 +943,14 @@ export class AAAEnvironment {
           uniform vec2 uWindDir;
           varying highp vec3 vWPos;
           varying highp vec3 vLPos;
+          varying vec4 vMacro;
+          varying float vMistWisp;
           varying vec2 vQ;
           varying float vY;
           varying float vRnd;
           varying float vTint;
-          ${GLSL_NOISE_AND_SPLAT}`
+          ${GLSL_NOISE_AND_SPLAT}
+          ${GLSL_MEADOW_MACRO}`
         )
         .replace(
           '#include <beginnormal_vertex>',
@@ -941,7 +963,7 @@ export class AAAEnvironment {
           vec3 camLocal = cameraPosition - modelMatrix[3].xyz;
           float gDist = distance(gRoot, camLocal);
 
-          float grassWeight = trComputeSplat(rootXZ, 0.42).x;
+          float grassWeight = length(rootXZ) > 13.0 ? 1.0 : trComputeSplat(rootXZ, 0.42).x;
           float ragged = smoothstep(0.18, 0.65, grassWeight);
 
           // ZERO billboards inside 0-18 m (innerFade 18->32 m), steep top-down fade (0.45->0.76), outer dropout (48->95 m)
@@ -973,6 +995,8 @@ export class AAAEnvironment {
             + vec3(0.0, y * gH, 0.0)
             + vec3(lean.x, -0.22 * length(lean), lean.y) * (y * y * gH);
 
+          vMacro = gH > 0.004 ? trComputeMeadowMacro(rootXZ, gDist, 0.0) : vec4(1.0);
+          vMistWisp = gH > 0.004 ? trFbm(rootXZ * vec2(0.016, 0.032) + uWindDir * uTime * 0.016) : 0.5;
           vY = y;
           vRnd = aRnd.w;
           vTint = aRnd.x;
@@ -998,12 +1022,13 @@ export class AAAEnvironment {
           uniform sampler2D uTuft;
           varying highp vec3 vWPos;
           varying highp vec3 vLPos;
+          varying vec4 vMacro;
+          varying float vMistWisp;
           varying vec2 vQ;
           varying float vY;
           varying float vRnd;
           varying float vTint;
           ${GLSL_NOISE_AND_SPLAT}
-          ${GLSL_MEADOW_ALBEDO}
           ${GLSL_GROUND_FOG}`
         )
         .replace(
@@ -1016,7 +1041,10 @@ export class AAAEnvironment {
           {
             vec4 tf = texture2D(uTuft, vQ);
             float camDist = length(cameraPosition - vWPos);
-            vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
+            vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(vLPos.xz)).rgb, texture2D(uGrassA, trGrassUvB(vLPos.xz)).rgb, vMacro.w);
+            vec3 c = gTex * vMacro.rgb;
+            float gLuma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            c = mix(vec3(gLuma), c * vec3(0.96, 1.05, 0.93), uGrassLushness);
             c *= mix(0.94, 1.06, vTint);
 
             // Match Tier 1 root-to-tip depth near 20-32 m, flattening smoothly to 1.0 over 24 -> 68 m
@@ -1051,7 +1079,7 @@ export class AAAEnvironment {
         .replace(
           '#include <tonemapping_fragment>',
           `{
-            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vWPos, vLPos);
+            gl_FragColor.rgb = trApplyGroundFogWithWisp(gl_FragColor.rgb, vWPos, vLPos, vMistWisp);
             float dist = length(cameraPosition.xz - vWPos.xz);
             float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
             gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));

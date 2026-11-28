@@ -13,13 +13,15 @@ const rules = [
   ['01', /^Sail (lower|speed|transverse) batten|^Transverse batten saddle|^Rear sail (mount webbing|strap tang)/],   // Sport 3: sewn-in battens and the rear sail mount
   ['03', /^Sail (nose )?batten( \d+)?( [LR])?$/],                              // Sport 3: the main and nose battens (their pockets are sail)
   ['05', /^Sail bridle (common|inner|outer|ring|branch press)/],                // Sport 3: reflex bridle lines; grommets and retainers are sail
+  ['06', /^Apex strap$|^Nose plate\b|^Cable disc\b|^Foot dowel\b|^Nose LE packing\b/i], // Skyhook Mk3 hardware
+  ['07', /^Harness (seat|rope)/i],                                             // Skyhook Mk3 swing-seat harness
   ['07', /webbing|hang loop|cinch strap|rope (hand )?loop|bungee|suspension tape|backup eye|Rapidlink|(?<!pocket )strap\b/i],     // Webbing
   ['01', /^Sail (top|upper|lower|under|P\d|number|panel)|^Sail\b(?! mount)|Trailing (edge )?hem|pocket|zigzag|stitch|Kingpost patch|Kingpost base sock|Nosecone|cloth cover|Nose bridge|Nose former|Nose lacing reinforcement|Mast binding|Batten pocket top tape|Batten doubler|Batten end reinforcement|Hinge cover (hook|loop) strip|Leading-edge|hem\b|selvedge|seam\b|patch\b|emblem|lap\b|Undersail|^Undersurface|^Upper sail|Tip cuff/i], // Sail & cloth
   ['05', /^Bridle|Luff (bridle|line)/i],                                       // reflex bridles, before the batten rule (#4)
   ['03', /batten|Lever tip|String tip|Washout|Sprog|Tip wand|^Wand /i],               // Battens & washout
   ['06', /\btang\b|keyhole/i],                                                 // wire tangs count as hardware
   ['05', /^Top .*wire|Bridle|Sweep wire/i],                                    // Upper wires & bridles
-  ['04', /^Bottom .*wire/i],                                                   // Lower wires
+  ['04', /^(Bottom |Front |Rear |Side ).*wire/i],                              // Lower wires
   ['06', /bolt|nut\b|washer|rivet|screw|pin\b|ring\b|bracket|cap\b|lug|plug|spacer|lock|grip|stud|ball|hub|flange|spigot|elbow|label|slot|collar|Noseplate|saddle|tab\b|bush|fitting|shackle|insert|channel|block|sheave|bearing|cord|rope|line\b|tie\b|swage|thimble|eyelet|grommet|sticker|lashing|keeper|clip|pad\b/i], // Hardware
   ['06', /jam ?cleat/i],                                                       // U2: the VG cleat of each basetube option
   ['02', /Keel|^LE |Crossbar|Kingpost|Downtube|Basetube|Basebar|Speedbar|Stinger|Control bar|Upright|Link\b/i], // Main frame
