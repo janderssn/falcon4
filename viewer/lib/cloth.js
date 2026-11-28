@@ -88,9 +88,9 @@ export function setCloth(uniforms, materials, id, opacity = 1) {
  */
 export function toCloth(m, mesh) {
   const c = new THREE.MeshPhysicalMaterial();
-  for (const key of ['name', 'map', 'color', 'emissive', 'emissiveIntensity', 'side', 'alphaTest', 'transparent', 'opacity', 'depthWrite', 'metalness', 'roughness']) {
+  for (const key of ['name', 'map', 'normalMap', 'normalScale', 'roughnessMap', 'color', 'emissive', 'emissiveIntensity', 'side', 'alphaTest', 'transparent', 'opacity', 'depthWrite', 'metalness', 'roughness']) {
     if (m[key] === undefined) continue;
-    if (m[key]?.isColor) c[key].copy(m[key]); else c[key] = m[key];
+    if (m[key]?.isColor || m[key]?.isVector2) c[key].copy(m[key]); else c[key] = m[key];
   }
   c.userData = { ...m.userData };
   addClothUv(mesh);

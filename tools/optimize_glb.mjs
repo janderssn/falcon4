@@ -107,7 +107,8 @@ await doc.transform(
   textureCompress({ encoder: sharp, targetFormat: 'webp', quality: 92, pattern: ATLAS_FILE }),
 );
 for (const t of atlases) t.setURI('');
-doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
+const METHOD = process.env.LOSSLESS ? EXTMeshoptCompression.EncoderMethod.FILTER : EXTMeshoptCompression.EncoderMethod.QUANTIZE;
+doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: METHOD });
 await io.write(output, doc);
 report.sort((x, y) => y.before - x.before);
 if (reportPath) writeFileSync(reportPath, JSON.stringify({ err: ERR, before, after, meshes: report }, null, 1));

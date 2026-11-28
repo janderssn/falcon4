@@ -93,6 +93,27 @@
       "glider": "Medium 15",
       "subtitle": "Tecma · Opus build",
       "rotateY": 180
+    },
+    {
+      "id": "skyhook",
+      "label": "Skyhook Mk3",
+      "title": "Skyhook Mk3",
+      "description": "147 parts · 1973 standard Rogallo · swing-seat harness",
+      "glb": "models/skyhook/model.glb",
+      "parts": "models/skyhook/parts.json",
+      "download": "skyhook-mk3.glb",
+      "version": "3",
+      "poseShapes": {
+        "bar": {},
+        "nose": { "nose_down": 1 },
+        "tail": { "tail_down": 1 },
+        "flight": { "flight": 1 }
+      },
+      "flightPitchDeg": -13,
+      "flightLift": 0.45,
+      "glider": "Skyhook Mk3",
+      "subtitle": "Standard Rogallo · 1973",
+      "rotateY": 180
     }
   ]
 }
