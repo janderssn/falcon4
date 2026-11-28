@@ -12,9 +12,9 @@ function mulberry32(seed) {
 }
 
 /**
- * Procedural 1024x256 4-clump side-on grass atlas (adapted from granholmstoppen-fable):
- * Dense, soft, overlapping turf cushion at the base tapering into natural grass tips
- * (zero thin spiky forks). Alpha = silhouette, green channel = subtle per-blade tone.
+ * Procedural 1024x256 4-clump side-on grass atlas (crisp granholmstoppen-fable style):
+ * 28 slender curved outward-splaying blades per tile with real negative space between tips
+ * (zero opaque curtain walls!). Alpha = silhouette, green channel = per-blade tone.
  */
 function createTuftAtlas(seed = 1337) {
   const W = 1024;
@@ -30,20 +30,21 @@ function createTuftAtlas(seed = 1337) {
     c.beginPath();
     c.rect(x0, 0, 256, H);
     c.clip();
-    // 48 wide overlapping blades per clump for a lush, continuous turf silhouette
-    for (let i = 0; i < 48; i++) {
-      const bx = x0 + 10 + r() * 236;
-      const top = H * (0.08 + r() * r() * 0.48);
-      const lean = (r() - 0.5) * 58;
-      const w = 13 + r() * 16;
-      const v = 175 + Math.floor(r() * 80);
+    for (let i = 0; i < 28; i++) {
+      const bx = x0 + 24 + r() * 208;
+      const top = H * (0.06 + r() * r() * 0.58);
+      const sideBias = ((bx - (x0 + 128)) / 128) * 32;
+      const lean = sideBias + (r() - 0.5) * 136;
+      const w = 7 + r() * 8;
+      const v = 135 + Math.floor(r() * 120);
       const tx = bx + lean;
-      const mx = bx + lean * 0.35;
+      const midX = bx + lean * 0.40;
+      const midY = H - (H - top) * (0.55 + r() * 0.16);
       c.fillStyle = `rgb(${v},${v},${v})`;
       c.beginPath();
       c.moveTo(bx - w, H);
-      c.quadraticCurveTo(mx - w * 0.65, (H + top) / 2, tx, top);
-      c.quadraticCurveTo(mx + w * 0.65, (H + top) / 2, bx + w, H);
+      c.quadraticCurveTo(midX - w * 0.50, midY, tx, top);
+      c.quadraticCurveTo(midX + w * 0.50, midY + 4, bx + w, H);
       c.closePath();
       c.fill();
     }
@@ -500,6 +501,9 @@ export class AAAEnvironment {
             dirtCol *= mix(1.0, 0.72, wetness * 0.85 + puddle * 0.15);
 
             vec3 grassCol = trComputeMeadowAlbedo(p, camDist, wetness);
+            // Subtle root/thatch shadow under dense near grass (fading smoothly back to 1.0 over 14 -> 28 m)
+            float thatchMask = smoothstep(0.55, 0.85, grassWeight) * (1.0 - smoothstep(14.0, 28.0, length(p - vec2(0.0, 3.0))));
+            grassCol *= mix(1.0, 0.90, thatchMask);
             diffuseColor.rgb = mix(dirtCol, grassCol, grassWeight) * wallAO;
           }`
         )
@@ -615,13 +619,11 @@ export class AAAEnvironment {
     const GOLDEN_ANGLE = 2.399963229728653;
 
     // ------------------------------------------------------------------ Tier 1: Near Individual Tapered Blades
-    // 80,000 3-segment tapered blades (5 tris/blade, 1 draw call) across R = 24 m
-    // Uses MeshStandardMaterial (roughness 0.90, metalness 0.0) so PMREM IBL + PBR lighting
-    // matches UnifiedAirfieldGround pixel-for-pixel!
-    const NEAR_COUNT = 80000;
-    const NEAR_R = 24.0;
+    // 120,000 3-segment tapered blades (5 tris/blade, 1 draw call) filtered strictly into the VISIBLE
+    // meadow (skipping sheltered interior dirt & behind closed rear wall) -> ~180-240 blades/m² in foreground!
+    const NEAR_COUNT = 120000;
     const ys = [0.0, 0.35, 0.70, 1.0];
-    const ws = [1.0, 0.78, 0.44, 0.0];
+    const ws = [1.0, 0.80, 0.45, 0.0];
     const bPos = [];
     const bIdx = [];
     ys.forEach((y, i) => {
@@ -637,32 +639,47 @@ export class AAAEnvironment {
     const rNear = mulberry32(91337);
     const nOff = new Float32Array(NEAR_COUNT * 4);
     const nRnd = new Float32Array(NEAR_COUNT * 4);
-    for (let i = 0; i < NEAR_COUNT; i++) {
-      // Blue-noise-like jittered Vogel spiral prevents random bald pockets
-      const u = (i + 0.5 + (rNear() - 0.5) * 0.85) / NEAR_COUNT;
-      const rad = NEAR_R * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.56);
-      const ang = i * GOLDEN_ANGLE + (rNear() - 0.5) * 0.28;
-      nOff[i * 4] = Math.cos(ang) * rad;
-      nOff[i * 4 + 1] = Math.sin(ang) * rad;
-      nOff[i * 4 + 2] = rNear(); // distance thinning hash
-      nOff[i * 4 + 3] = rNear(); // apron boundary ragged edge threshold
-      nRnd[i * 4] = rNear();     // width / neutral tone
-      nRnd[i * 4 + 1] = rNear(); // curve
-      nRnd[i * 4 + 2] = rNear(); // yaw angle
-      nRnd[i * 4 + 3] = rNear(); // height
+    let nPlaced = 0;
+    let nIter = 0;
+    const FRONT_CX = 0.0;
+    const FRONT_CZ = 3.0;
+    const MAX_FRONT_R = 34.0;
+    // Stratified blue-noise Vogel spiral filtered into visible front + side aprons
+    while (nPlaced < NEAR_COUNT && nIter < NEAR_COUNT * 4) {
+      const idx = nIter++;
+      const u = ((idx % (NEAR_COUNT * 2)) + 0.5 + (rNear() - 0.5) * 0.9) / (NEAR_COUNT * 2);
+      const rad = MAX_FRONT_R * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.54);
+      const ang = idx * GOLDEN_ANGLE + (rNear() - 0.5) * 0.30;
+      const x = FRONT_CX + Math.cos(ang) * rad;
+      const z = FRONT_CZ + Math.sin(ang) * rad;
+      // Skip dead zones: behind closed back wall, far sides, or deep sheltered hangar interior
+      if (z < -8.0 || z > 37.0) continue;
+      if (z < 4.0 && Math.abs(x) > 16.5) continue;
+      if (Math.abs(x) > 28.5) continue;
+      if (Math.abs(x) < 5.7 && z > -5.7 && z < 1.2) continue;
+
+      nOff[nPlaced * 4] = x;
+      nOff[nPlaced * 4 + 1] = z;
+      nOff[nPlaced * 4 + 2] = rNear(); // distance thinning hash
+      nOff[nPlaced * 4 + 3] = rNear(); // apron boundary ragged edge threshold
+      nRnd[nPlaced * 4] = rNear();     // width / neutral tone
+      nRnd[nPlaced * 4 + 1] = rNear(); // curve / arch
+      nRnd[nPlaced * 4 + 2] = rNear(); // 360-deg yaw angle
+      nRnd[nPlaced * 4 + 3] = rNear(); // height / seed-head
+      nPlaced++;
     }
-    nearGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(nOff, 4));
-    nearGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(nRnd, 4));
-    nearGeo.instanceCount = NEAR_COUNT;
-    nearGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.2, 0), NEAR_R + 2);
+    nearGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(nOff.subarray(0, nPlaced * 4), 4));
+    nearGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(nRnd.subarray(0, nPlaced * 4), 4));
+    nearGeo.instanceCount = nPlaced;
+    nearGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.3, 12), 40);
 
     const nearMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.90,
+      roughness: 0.88,
       metalness: 0.0,
       side: THREE.DoubleSide,
     });
-    nearMat.customProgramCacheKey = () => 'hangar-near-grass-blades-pbr-v2';
+    nearMat.customProgramCacheKey = () => 'hangar-near-grass-blades-pbr-v3';
     nearMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = this.sharedUniforms.uTime;
       shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
@@ -695,8 +712,8 @@ export class AAAEnvironment {
           `float gAng = aRnd.z * 6.2831853;
           vec3 gSide = vec3(cos(gAng), 0.0, sin(gAng));
           vec3 gFwd = vec3(-gSide.z, 0.0, gSide.x);
-          // Mostly upward normal so PMREM IBL + sun lighting matches UnifiedAirfieldGround seamlessly
-          vec3 objectNormal = normalize(vec3(0.0, 1.0, 0.0) + gFwd * 0.14);`
+          // Upward-biased normal leaning gently with blade tip so PMREM IBL + sun match UnifiedAirfieldGround
+          vec3 objectNormal = normalize(vec3(0.0, 1.0, 0.0) + gFwd * (0.24 * position.y));`
         )
         .replace(
           '#include <begin_vertex>',
@@ -706,28 +723,31 @@ export class AAAEnvironment {
           float gDist = distance(gRoot, camLocal);
 
           float grassWeight = trComputeSplat(rootXZ, 0.42).x;
-          // Ragged edge ONLY along the apron boundary (grassWeight < 0.95); 100% continuous in outer meadow
           float ragged = grassWeight > 0.95 ? 1.0 : step(mix(0.08, 0.58, aOff.w), grassWeight) * (0.55 + 0.45 * smoothstep(0.08, 0.62, grassWeight));
 
-          // Smooth distance thinning + outer perimeter fade (16 -> 24 m)
-          float keep = clamp((mix(1.0, 0.28, smoothstep(10.0, 23.0, gDist)) - aOff.z) / 0.10, 0.0, 1.0);
-          float rimFade = 1.0 - smoothstep(16.0, 24.0, length(rootXZ));
+          // Smooth outer fade from front apron (24 -> 34 m) + gentle distance thinning (16 -> 32 m)
+          float distFromFront = length(rootXZ - vec2(0.0, 3.0));
+          float keep = clamp((mix(1.0, 0.35, smoothstep(16.0, 32.0, gDist)) - aOff.z) / 0.10, 0.0, 1.0);
+          float rimFade = 1.0 - smoothstep(24.0, 34.0, distFromFront);
 
-          float tuftNoise = trFbm(rootXZ * 0.35 + vec2(5.2, 1.9));
-          float fieldScale = mix(0.88, 1.22, smoothstep(7.0, 16.0, length(rootXZ)));
-          float gH = (0.068 + 0.064 * aRnd.w * aRnd.w + 0.042 * smoothstep(0.32, 0.76, tuftNoise)) * fieldScale * ragged * keep * rimFade;
-          float gW = (0.015 + 0.013 * aRnd.x) * (1.0 + gDist * 0.055) * step(0.002, gH);
+          // Natural airfield tussock height (~0.12-0.31 m), slightly shorter right at apron edge (0.78x -> 1.05x)
+          float tuftNoise = trFbm(rootXZ * 0.28 + vec2(5.2, 1.9));
+          float fieldScale = mix(0.78, 1.05, smoothstep(4.5, 11.5, length(rootXZ)));
+          float gH = (0.12 + 0.11 * aRnd.w * aRnd.w + 0.08 * smoothstep(0.30, 0.78, tuftNoise)) * fieldScale * ragged * keep * rimFade;
+          float gW = (0.013 + 0.012 * aRnd.x) * (1.0 + gDist * 0.048) * step(0.002, gH);
 
           float along = dot(rootXZ, uWindDir);
           float gust = trNoise(rootXZ * 0.07 - uWindDir * uTime * 0.28);
           float wave = sin(along * 0.55 - uTime * 2.1 + aRnd.x * 3.0) * 0.5 + sin(along * 1.6 - uTime * 4.2 + aRnd.y * 6.0) * 0.22;
-          vec2 lean = uWindDir * (0.12 + gust * 0.65 + wave * 0.28) * 0.32;
+          vec2 lean = uWindDir * (0.12 + gust * 0.65 + wave * 0.28) * 0.34;
 
+          // Organic 360-deg arch/curve + subtle drop so blades cross naturally from steep look-down angles
           float y = position.y;
-          float curve = 0.20 + 0.42 * aRnd.y;
+          float curve = 0.25 + 0.48 * aRnd.y;
+          float archDrop = 0.22 * curve * y * y;
           vec3 transformed = gRoot
             + gSide * (position.x * gW)
-            + vec3(0.0, y * gH, 0.0)
+            + vec3(0.0, (y - archDrop) * gH, 0.0)
             + gFwd * (curve * y * y * gH)
             + vec3(lean.x, -0.22 * length(lean), lean.y) * (y * y * gH);
 
@@ -770,12 +790,18 @@ export class AAAEnvironment {
           `#include <map_fragment>
           {
             float camDist = length(cameraPosition - vWPos);
-            // Exact same terrain meadow albedo as UnifiedAirfieldGround (zero hue shift)
             vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
-            c *= mix(0.95, 1.05, vTint);
-            float away = smoothstep(14.0, 55.0, camDist);
-            float grad = mix(mix(0.88, 1.12, smoothstep(0.0, 1.0, vY)), 1.0, away);
-            diffuseColor.rgb = c * grad;
+            c *= mix(0.92, 1.08, vTint);
+
+            // Photographic root-to-tip depth shading, flattening smoothly to 1.0 over 18 -> 58 m
+            float away = smoothstep(18.0, 58.0, camDist);
+            float shade = mix(mix(0.56, 1.24, pow(clamp(vY, 0.0, 1.0), 0.85)), 1.0, away);
+            c *= shade;
+
+            // Subtle natural golden/straw seed-head tips on the tallest ~20% of blades
+            float seedTip = smoothstep(0.68, 1.0, vY) * smoothstep(0.72, 1.0, vRnd) * 0.48 * (1.0 - away);
+            c = mix(c, c * vec3(1.18, 1.10, 0.72), seedTip);
+            diffuseColor.rgb = c;
           }`
         )
         .replace(
@@ -788,9 +814,9 @@ export class AAAEnvironment {
             vec3 H = normalize(V + L);
             float sunElev = max(uSunDir.y + 0.08, 0.0);
 
-            // Subtle neutral-warm backlit translucency + morning dew micro-glints
+            // Gentle backlit sun translucency + morning dew tip specular & micro-glints
             float back = pow(max(dot(-V, L), 0.0), 3.0);
-            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.42 * vY * vec3(1.0, 1.04, 0.88) * sunElev;
+            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.48 * vY * vec3(1.04, 1.08, 0.78) * sunElev;
 
             float tipMask = smoothstep(0.55, 1.0, vY);
             float dewSpec = pow(max(dot(N, H), 0.0), 48.0) * tipMask;
@@ -818,16 +844,14 @@ export class AAAEnvironment {
     nearMesh.frustumCulled = false;
     this.root.add(nearMesh);
 
-    // ------------------------------------------------------------------ Tier 2: Mid/Far Billboard Clump Cards
-    // 36,000 2-tri billboard clump cards (6 m -> 90 m, 1 draw call) using fuller 4-clump atlas
-    // Uses MeshStandardMaterial (roughness 0.90, metalness 0.0, upward normal) so lighting & color
-    // match UnifiedAirfieldGround pixel-for-pixel across the entire meadow!
+    // ------------------------------------------------------------------ Tier 2: Airy Mid/Far Billboard Clumps
+    // 30,000 visible-meadow filtered 2-tri billboard clump cards (18 -> 95 m, ZERO billboards inside 0-18 m!)
     if (!this._tuftAtlas) {
       this._tuftAtlas = createTuftAtlas(4242);
     }
-    const FAR_COUNT = 36000;
-    const FAR_MIN_R = 6.0;
-    const FAR_MAX_R = 90.0;
+    const FAR_COUNT = 30000;
+    const FAR_MIN_R = 16.0;
+    const FAR_MAX_R = 95.0;
 
     const farGeo = new THREE.InstancedBufferGeometry();
     farGeo.setAttribute('position', new THREE.Float32BufferAttribute([
@@ -841,34 +865,42 @@ export class AAAEnvironment {
     const rFar = mulberry32(43219);
     const fOff = new Float32Array(FAR_COUNT * 4);
     const fRnd = new Float32Array(FAR_COUNT * 4);
-    for (let i = 0; i < FAR_COUNT; i++) {
-      // Blue-noise-like jittered Vogel annulus for uniform, gap-free meadow coverage
-      const u = (i + 0.5 + (rFar() - 0.5) * 0.85) / FAR_COUNT;
+    let fPlaced = 0;
+    let fIter = 0;
+    while (fPlaced < FAR_COUNT && fIter < FAR_COUNT * 4) {
+      const idx = fIter++;
+      const u = ((idx % (FAR_COUNT * 2)) + 0.5 + (rFar() - 0.5) * 0.9) / (FAR_COUNT * 2);
       const rad = FAR_MIN_R + (FAR_MAX_R - FAR_MIN_R) * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.68);
-      const ang = i * GOLDEN_ANGLE + (rFar() - 0.5) * 0.25;
-      fOff[i * 4] = Math.cos(ang) * rad;
-      fOff[i * 4 + 1] = Math.sin(ang) * rad;
-      fOff[i * 4 + 2] = rFar(); // outer stochastic dropout
-      fOff[i * 4 + 3] = rFar(); // ragged edge threshold
-      fRnd[i * 4] = rFar();     // width / neutral tone
-      fRnd[i * 4 + 1] = rFar(); // atlas clump index (0..3)
-      fRnd[i * 4 + 2] = rFar(); // billboard yaw jitter
-      fRnd[i * 4 + 3] = rFar(); // height
+      const ang = idx * GOLDEN_ANGLE + (rFar() - 0.5) * 0.25;
+      const x = Math.cos(ang) * rad;
+      const z = 2.0 + Math.sin(ang) * rad;
+      // Filter to visible meadow (z > -10 m) -> 2x higher real far density!
+      if (z < -10.0) continue;
+
+      fOff[fPlaced * 4] = x;
+      fOff[fPlaced * 4 + 1] = z;
+      fOff[fPlaced * 4 + 2] = rFar(); // outer stochastic dropout
+      fOff[fPlaced * 4 + 3] = rFar(); // ragged edge threshold
+      fRnd[fPlaced * 4] = rFar();     // width / neutral tone
+      fRnd[fPlaced * 4 + 1] = rFar(); // atlas clump index (0..3)
+      fRnd[fPlaced * 4 + 2] = rFar(); // billboard yaw jitter
+      fRnd[fPlaced * 4 + 3] = rFar(); // height / seed-head
+      fPlaced++;
     }
-    farGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(fOff, 4));
-    farGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(fRnd, 4));
-    farGeo.instanceCount = FAR_COUNT;
-    farGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.3, 0), FAR_MAX_R + 4);
+    farGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(fOff.subarray(0, fPlaced * 4), 4));
+    farGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(fRnd.subarray(0, fPlaced * 4), 4));
+    farGeo.instanceCount = fPlaced;
+    farGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.3, 40), FAR_MAX_R + 10);
 
     const farMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.90,
+      roughness: 0.88,
       metalness: 0.0,
       side: THREE.DoubleSide,
       alphaTest: 0.25,
       alphaToCoverage: true,
     });
-    farMat.customProgramCacheKey = () => 'hangar-far-grass-clumps-pbr-v2';
+    farMat.customProgramCacheKey = () => 'hangar-far-grass-clumps-pbr-v3';
     farMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = this.sharedUniforms.uTime;
       shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
@@ -912,15 +944,16 @@ export class AAAEnvironment {
           float grassWeight = trComputeSplat(rootXZ, 0.42).x;
           float ragged = smoothstep(0.18, 0.65, grassWeight);
 
-          // Smooth overlap with near blades (6->15 m), steep top-down fade, and outer dropout (48->90 m)
-          float innerFade = smoothstep(6.0, 15.0, gDist);
-          float steepFade = 1.0 - smoothstep(0.50, 0.80, (camLocal.y - gRoot.y) / max(gDist, 1.0));
-          float outerT = smoothstep(48.0, 90.0, gDist);
+          // ZERO billboards inside 0-18 m (innerFade 18->32 m), steep top-down fade (0.45->0.76), outer dropout (48->95 m)
+          float innerFade = smoothstep(18.0, 32.0, gDist);
+          float steepFade = 1.0 - smoothstep(0.45, 0.76, (camLocal.y - gRoot.y) / max(gDist, 1.0));
+          float outerT = smoothstep(48.0, 95.0, gDist);
           float outerKeep = clamp((aOff.z - outerT) / 0.14, 0.0, 1.0) * (1.0 - 0.45 * outerT);
 
-          float tuftNoise = trFbm(rootXZ * 0.18 + vec2(3.4, 7.1));
-          float gH = (0.14 + 0.11 * aRnd.w + 0.09 * smoothstep(0.35, 0.78, tuftNoise)) * ragged * innerFade * steepFade * outerKeep;
-          float gW = (0.68 + 0.44 * aRnd.x) * (1.0 + max(gDist - 32.0, 0.0) * 0.009) * step(0.004, gH);
+          // Exact height match to Tier 1 (~0.14-0.31 m)
+          float tuftNoise = trFbm(rootXZ * 0.22 + vec2(3.4, 7.1));
+          float gH = (0.14 + 0.09 * aRnd.w + 0.08 * smoothstep(0.32, 0.78, tuftNoise)) * ragged * innerFade * steepFade * outerKeep;
+          float gW = (0.64 + 0.42 * aRnd.x) * (1.0 + max(gDist - 35.0, 0.0) * 0.009) * step(0.004, gH);
 
           // Cylindrical Y-billboard facing camera with +-0.65 rad random yaw jitter to break rows
           vec2 toCam = normalize(camLocal.xz - rootXZ + vec2(1e-4));
@@ -983,14 +1016,17 @@ export class AAAEnvironment {
           {
             vec4 tf = texture2D(uTuft, vQ);
             float camDist = length(cameraPosition - vWPos);
-            // Exact same terrain meadow albedo as UnifiedAirfieldGround (zero hue shift)
             vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
-            c *= mix(0.96, 1.04, vTint);
+            c *= mix(0.94, 1.06, vTint);
 
-            // Subtle near shading flattening smoothly to 1.0 over 14->55 m so clumps dissolve invisibly into ground
-            float away = smoothstep(14.0, 55.0, camDist);
-            float nearShade = mix(0.88, 1.12, smoothstep(0.0, 1.0, vY)) * (0.92 + 0.16 * tf.g);
-            diffuseColor.rgb = c * mix(nearShade, 1.0, away);
+            // Match Tier 1 root-to-tip depth near 20-32 m, flattening smoothly to 1.0 over 24 -> 68 m
+            float away = smoothstep(24.0, 68.0, camDist);
+            float nearShade = mix(0.58, 1.22, pow(clamp(vY, 0.0, 1.0), 0.85)) * (0.86 + 0.28 * tf.g);
+            c *= mix(nearShade, 1.0, away);
+            float seedTip = smoothstep(0.68, 1.0, vY) * smoothstep(0.72, 1.0, vRnd) * 0.42 * (1.0 - away);
+            c = mix(c, c * vec3(1.18, 1.10, 0.72), seedTip);
+
+            diffuseColor.rgb = c;
             diffuseColor.a = tf.a;
           }`
         )
@@ -1005,7 +1041,7 @@ export class AAAEnvironment {
             float sunElev = max(uSunDir.y + 0.08, 0.0);
 
             float back = pow(max(dot(-V, L), 0.0), 3.0);
-            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.38 * vY * vec3(1.0, 1.04, 0.88) * sunElev;
+            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.42 * vY * vec3(1.04, 1.08, 0.78) * sunElev;
 
             float tipMask = smoothstep(0.55, 1.0, vY);
             float dewSpec = pow(max(dot(N, H), 0.0), 48.0) * tipMask;
