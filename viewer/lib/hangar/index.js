@@ -669,6 +669,7 @@ export class HangarScene {
 
   dispose() {
     clearTimeout(this._iblTimer);
+    this.audio?.dispose();
     this.atmosphere.dispose();
     this.worldGroup.traverse((o) => {
       if (o.geometry) o.geometry.dispose();

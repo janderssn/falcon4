@@ -127,7 +127,7 @@ const state = {
   rotOpen: false,
   hangarBackView: false,
   hangarPreset: 'day',
-  hangarAudio: false,
+  hangarAudio: true,
   vg: params.has('vg') ? Math.min(1, Math.max(0, Number(params.get('vg')) || 0)) : 1,   // VG: 0 loose, 1 tight (as modelled)
   // Sail design (lib/designs.js): null as built; the fabric per zone where it differs from the design's default.
   design: params.get('design') || null,
@@ -347,6 +347,9 @@ async function setModel(id, first = false) {
       catch (e) { console.warn('[hangar] failed to load:', e); }
     }
     scenes.set(state.scene);
+    if (state.scene === 'hangar' && state.hangarAudio) {
+      scenes.setHangarAudio(true);
+    }
     limitCamera(0);
     const hasUrlCam = params.has('cam');
     const cam = hasUrlCam ? readCamera() : null;
@@ -2701,7 +2704,6 @@ async function setScene(id) {
       state.hangarBackView = false;
     }
     if (state.hangarAudio) {
-      state.hangarAudio = false;
       scenes.setHangarAudio(false);
     }
     if (state.rotOpen) state.rotOpen = false;
@@ -2720,7 +2722,7 @@ async function setScene(id) {
     resetSpringArm();
   } else if (id !== 'hangar') {
     if (state.hangarBackView) { clearBackParallax(); state.hangarBackView = false; }
-    if (state.hangarAudio) { state.hangarAudio = false; scenes.setHangarAudio(false); }
+    scenes.setHangarAudio(false);
   }
 
   rig.transition = null;
@@ -2728,6 +2730,9 @@ async function setScene(id) {
   rig.controls._panOffset?.set(0, 0, 0);
 
   scenes.set(id);
+  if (id === 'hangar' && state.hangarAudio) {
+    scenes.setHangarAudio(true);
+  }
   limitCamera(0);
 
   if (id === 'hangar' && record) {

@@ -267,6 +267,29 @@ export class AirfieldWindAudio {
     this._pheasantTimer = null;
     this._birdTimer = null;
     this._cricketTimer = null;
+    this._gestureHandler = null;
+  }
+
+  _armGestureResume() {
+    if (this._gestureHandler || typeof window === 'undefined') return;
+    this._gestureHandler = () => {
+      this._disarmGestureResume();
+      if (!this.active || !this.ctx) return;
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().then(() => {
+          if (this.active) this._playBirdPhrase();
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('pointerdown', this._gestureHandler, { passive: true, capture: true });
+    window.addEventListener('keydown', this._gestureHandler, { passive: true, capture: true });
+  }
+
+  _disarmGestureResume() {
+    if (!this._gestureHandler || typeof window === 'undefined') return;
+    window.removeEventListener('pointerdown', this._gestureHandler, { capture: true });
+    window.removeEventListener('keydown', this._gestureHandler, { capture: true });
+    this._gestureHandler = null;
   }
 
   setSunPreset(presetId) {
@@ -445,7 +468,13 @@ export class AirfieldWindAudio {
 
   setEnabled(on) {
     const want = Boolean(on);
-    if (want === this.active) return this.active;
+    if (want === this.active) {
+      if (want && this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+        this._armGestureResume();
+      }
+      return this.active;
+    }
     return this.toggle();
   }
 
@@ -456,18 +485,36 @@ export class AirfieldWindAudio {
       this.ctx = new AudioCtx();
     }
     this.active = !this.active;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
     if (this.active) {
-      this._playBirdPhrase();
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+        this._armGestureResume();
+      } else {
+        this._playBirdPhrase();
+      }
       this._scheduleBirds();
       this._scheduleCrickets();
       this._schedulePheasant();
     } else {
+      this._disarmGestureResume();
       for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer]) {
         if (t) clearTimeout(t);
       }
       this._pheasantTimer = this._birdTimer = this._cricketTimer = null;
     }
     return this.active;
+  }
+
+  dispose() {
+    this.active = false;
+    this._disarmGestureResume();
+    for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer]) {
+      if (t) clearTimeout(t);
+    }
+    this._pheasantTimer = this._birdTimer = this._cricketTimer = null;
+    if (this.ctx) {
+      this.ctx.close().catch(() => {});
+      this.ctx = null;
+    }
   }
 }
