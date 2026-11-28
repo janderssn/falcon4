@@ -234,6 +234,7 @@ export class HangarScene {
       });
 
       this.loaded = true;
+      this.renderer.shadowMap.needsUpdate = true;
       return { glbBytes: this.hangarBytes, hangarTriangles: this.hangarTriangles };
     })();
 
@@ -284,6 +285,7 @@ export class HangarScene {
 
   notifyGliderMoved() {
     this.wildlife.startleGliderButterflies();
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   setPreset(id) {
@@ -296,6 +298,7 @@ export class HangarScene {
     this.wildlife.syncSun(preset);
     this.audio?.setSunPreset(preset.id);
     if (this.postFx) this.postFx.syncPreset(preset.id);
+    this.renderer.shadowMap.needsUpdate = true;
     return preset;
   }
 

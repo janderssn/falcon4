@@ -576,6 +576,7 @@ function applyLook() {
   applyDesign();   // first: whether the design has a see-through laminate
   if (record) lookOf(record, 'A');
   if (other) lookOf(other, 'B');
+  if (renderer) renderer.shadowMap.needsUpdate = true;
 }
 function lookOf(rec, side) {
   const clear = {};
@@ -742,6 +743,7 @@ function applyPose(animate = false) {
   if (other) {
     poseOf(other, animate);                          // on the same floor (y = 0) as the first
   }
+  if (renderer) renderer.shadowMap.needsUpdate = true;
   syncRotUI();
   scenes.notifyGliderMoved();
 }
@@ -1768,9 +1770,17 @@ function loop(now) {
     rig.camera.lookAt(rig.controls.target);
   }
   stepSplit(now);
-  stepPoses(now);
+  const poseMoving = stepPoses(now);
   stepRopes(dt);
   scenes.update(rig.camera, (now - clock0) / 1000, rig.controls.target);
+  // In Hangar, the sun and hangar architecture are static between user actions: avoid re-rendering
+  // the 2048x2048 shadow map every frame when nothing casting shadows is moving (100% identical visuals).
+  if (scenes.current === 'hangar') {
+    renderer.shadowMap.autoUpdate = false;
+    if (poseMoving || gizmo?.dragging) renderer.shadowMap.needsUpdate = true;
+  } else {
+    renderer.shadowMap.autoUpdate = true;
+  }
   const split = plan.quad || plan.split > 0;
   // Film blur needs one camera over the whole picture: off in four views and compare.
   const fb = Boolean(state.frost && !THUMB && !split && !(other && state.compare));
