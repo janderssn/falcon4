@@ -1,16 +1,211 @@
 import * as THREE from 'three';
 
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Procedural 1024x256 4-clump side-on grass atlas (adapted from granholmstoppen-fable):
+ * Dense, soft, overlapping turf cushion at the base tapering into natural grass tips
+ * (zero thin spiky forks). Alpha = silhouette, green channel = subtle per-blade tone.
+ */
+function createTuftAtlas(seed = 1337) {
+  const W = 1024;
+  const H = 256;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const c = cv.getContext('2d');
+  const r = mulberry32(seed);
+  for (let k = 0; k < 4; k++) {
+    const x0 = k * 256;
+    c.save();
+    c.beginPath();
+    c.rect(x0, 0, 256, H);
+    c.clip();
+    // 48 wide overlapping blades per clump for a lush, continuous turf silhouette
+    for (let i = 0; i < 48; i++) {
+      const bx = x0 + 10 + r() * 236;
+      const top = H * (0.08 + r() * r() * 0.48);
+      const lean = (r() - 0.5) * 58;
+      const w = 13 + r() * 16;
+      const v = 175 + Math.floor(r() * 80);
+      const tx = bx + lean;
+      const mx = bx + lean * 0.35;
+      c.fillStyle = `rgb(${v},${v},${v})`;
+      c.beginPath();
+      c.moveTo(bx - w, H);
+      c.quadraticCurveTo(mx - w * 0.65, (H + top) / 2, tx, top);
+      c.quadraticCurveTo(mx + w * 0.65, (H + top) / 2, bx + w, H);
+      c.closePath();
+      c.fill();
+    }
+    c.restore();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Shared GLSL: noise, UV rotation, and organic hangar-apron splat mask (used identically by ground + both grass tiers)
+const GLSL_NOISE_AND_SPLAT = /* glsl */ `
+float trHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+float trNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(trHash(i), trHash(i + vec2(1.0, 0.0)), u.x),
+    mix(trHash(i + vec2(0.0, 1.0)), trHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+float trFbm(vec2 p) {
+  return trNoise(p) * 0.56 + trNoise(p * 2.07 + vec2(3.1, 1.7)) * 0.29 + trNoise(p * 4.29 + vec2(7.7, 5.3)) * 0.15;
+}
+
+const mat2 TR_ROT = mat2(0.80, -0.60, 0.60, 0.80);
+vec2 trGrassUvA(vec2 p) { return p / 2.0; }
+vec2 trGrassUvB(vec2 p) { return (TR_ROT * p) / 2.73 + vec2(0.37, 0.19); }
+float trGrassMix(vec2 p) { return smoothstep(0.35, 0.65, trFbm(p * 0.22 + vec2(4.1, 2.3))); }
+
+// Returns (splatGrassWeight, rutMask, wallAO) with ZERO straight lines or rectangular borders
+vec3 trComputeSplat(vec2 p, float dirtHeight) {
+  vec2 warp = vec2(
+    trFbm(p * 0.34 + vec2(2.1, 7.4)) - 0.5,
+    trFbm(p * 0.34 + vec2(8.3, 1.9)) - 0.5
+  ) * 2.15 + vec2(
+    trFbm(p * 1.12 + vec2(4.7, 3.1)) - 0.5,
+    trFbm(p * 1.12 + vec2(1.2, 9.6)) - 0.5
+  ) * 0.58;
+  vec2 pw = p + warp;
+
+  float rut = exp(-pow(abs(p.x - 1.15), 2.0) * 1.15) + exp(-pow(abs(p.x + 1.15), 2.0) * 1.15);
+  float rutMask = clamp(rut * smoothstep(-3.8, 2.2, p.y) * (1.0 - smoothstep(4.5, 11.5, p.y)), 0.0, 1.0);
+
+  float insideX = 1.0 - smoothstep(5.45, 6.65, abs(pw.x));
+  float insideRear = smoothstep(-6.05, -5.15, pw.y);
+  float centerPathBias = exp(-pow(p.x * 0.32, 2.0)) * 1.25;
+  float frontCutoff = 2.05 + centerPathBias;
+  float insideFront = 1.0 - smoothstep(frontCutoff - 1.35, frontCutoff + 2.35, pw.y);
+  float shelteredDirt = insideX * insideRear * insideFront;
+
+  vec2 wallBox = abs(p - vec2(0.0, -0.75)) - vec2(6.35, 4.90);
+  float wallDist = length(max(wallBox, 0.0));
+  float dripDirt = (1.0 - smoothstep(0.0, 1.15, wallDist + (trFbm(p * 0.85) - 0.5) * 0.85)) * 0.42;
+
+  // Organic patchy dirt-to-grass transition ONLY near the hangar apron (~7-11.5 m),
+  // transitioning to continuous full lush Swedish airfield meadow (grassWeight = 1.0) beyond!
+  float fieldPatchMacro = trFbm(p * 0.14 + vec2(3.7, 9.1));
+  float fieldPatchMed = trFbm(p * 0.52 + vec2(6.2, 1.4));
+  float fieldPatchFine = trFbm(p * 1.65 + vec2(2.8, 5.9));
+  float thinBareSpots = smoothstep(0.56, 0.84, fieldPatchMacro * 0.52 + fieldPatchMed * 0.34 + fieldPatchFine * 0.14);
+  float apronBareMask = 1.0 - smoothstep(6.8, 11.5, length(p));
+  float baseGrass = 1.0 - max(shelteredDirt, dripDirt);
+  baseGrass -= thinBareSpots * 0.48 * apronBareMask;
+  baseGrass -= rutMask * 0.32 * apronBareMask;
+
+  float panelLight = exp(-pow(p.y + 1.95, 2.0) * 0.9) * smoothstep(4.8, 6.2, abs(p.x)) * smoothstep(0.45, 0.78, fieldPatchMed) * 0.45;
+  baseGrass = clamp(baseGrass + panelLight, 0.0, 1.0);
+
+  float grassHeight = 0.42 + 0.36 * fieldPatchFine;
+  float hDiff = (baseGrass + grassHeight * 0.34) - ((1.0 - baseGrass) + dirtHeight * 0.34);
+  float splat = smoothstep(-0.24, 0.24, hDiff);
+
+  float deepInterior = (1.0 - smoothstep(4.8, 5.8, abs(p.x))) * smoothstep(-5.5, -4.6, p.y) * (1.0 - smoothstep(0.35, 1.65, p.y));
+  splat *= (1.0 - deepInterior);
+
+  float inHangar = step(abs(p.x), 6.32) * step(-5.65, p.y) * step(p.y, 4.15);
+  float wallAO = 1.0 - inHangar * max(smoothstep(5.2, 6.25, abs(p.x)), smoothstep(-4.6, -5.65, p.y)) * 0.26;
+  return vec3(clamp(splat, 0.0, 1.0), rutMask, wallAO);
+}
+`;
+
+// Shared GLSL: exact meadow terrain albedo (uGrassA dual-tap + macro patches + runway stripes + cloud shadows)
+const GLSL_MEADOW_ALBEDO = /* glsl */ `
+vec3 trComputeMeadowAlbedo(vec2 p, float camDist, float wetness) {
+  float gMix = trGrassMix(p);
+  vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(p)).rgb, texture2D(uGrassA, trGrassUvB(p)).rgb, gMix);
+  float mPatch1 = trFbm(p * 0.06);
+  float mPatch2 = trFbm(p * 0.24 + vec2(9.1, 3.7));
+
+  float mField1 = trFbm(p * 0.022);
+  float mField2 = trFbm(p * 0.055 + vec2(17.3, 6.2));
+  float mClover = trFbm(p * 0.095 - vec2(4.1, 11.8));
+  float mWild = trFbm(p * 0.16 + vec2(-8.4, 14.2));
+  float farMeadow = smoothstep(12.0, 32.0, length(p));
+  float runwayCorridor = smoothstep(42.0, 12.0, abs(p.x - 2.0)) * smoothstep(12.0, 28.0, p.y);
+  float mowStripe = sin(p.x * 0.42 + p.y * 0.035) * 0.5 + 0.5;
+
+  vec3 grassCol = gTex * mix(0.82, 1.18, mPatch1);
+  grassCol *= mix(1.0, mix(0.90, 1.10, mowStripe), runwayCorridor * 0.80);
+  grassCol = mix(grassCol, grassCol * vec3(1.26, 1.14, 0.72), smoothstep(0.50, 0.80, mField1) * 0.56 * farMeadow);
+  grassCol = mix(grassCol, grassCol * vec3(0.70, 0.90, 0.68), smoothstep(0.48, 0.18, mClover) * 0.48 * farMeadow);
+  grassCol = mix(grassCol, grassCol * vec3(0.84, 0.96, 0.86), smoothstep(0.54, 0.82, mField2) * 0.36 * farMeadow);
+  grassCol = mix(grassCol, grassCol * vec3(1.12, 1.08, 0.78), smoothstep(0.60, 0.88, mWild) * 0.30 * farMeadow);
+  grassCol = mix(grassCol, grassCol * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.24);
+
+  float gLuma = dot(grassCol, vec3(0.2126, 0.7152, 0.0722));
+  grassCol = mix(vec3(gLuma), grassCol * vec3(0.96, 1.05, 0.93), uGrassLushness);
+
+  float cloudSh = trFbm(p * 0.013 + uWindDir * uTime * 0.012);
+  grassCol *= mix(1.0, mix(0.76, 1.08, smoothstep(0.28, 0.72, cloudSh)), farMeadow * 0.88);
+  grassCol *= mix(1.0, 0.88, wetness * 0.28);
+
+  float windWave = sin(dot(p, uWindDir) * 0.42 - uTime * 1.10 + mPatch1 * 3.8);
+  grassCol *= (1.0 + windWave * 0.035 * (1.0 - smoothstep(25.0, 140.0, camDist)));
+  return grassCol;
+}
+`;
+
+// Shared GLSL: analytical height-exponential ground mist hugging Y in [0, 2.4m], masked outside the hangar apron
+const GLSL_GROUND_FOG = /* glsl */ `
+vec3 trApplyGroundFog(vec3 col, vec3 worldPos, vec3 localPos) {
+  vec3 fDir = worldPos - cameraPosition;
+  float fDist = length(fDir);
+  float fb = 0.58;
+  float groundY = worldPos.y - localPos.y;
+  float camLocalY = max(cameraPosition.y - groundY, 0.0);
+  float fdy = fDir.y;
+  float fInt = abs(fdy) > 0.01 ? (1.0 - exp(-fb * fdy)) / (fb * fdy) : 1.0;
+
+  // Slow-drifting horizontal fBm mist wisps across the mid/far meadow (crisp < 12 m around hangar)
+  float wisp = trFbm(localPos.xz * vec2(0.016, 0.032) + uWindDir * uTime * 0.016);
+  float mistBank = 0.42 + 1.08 * smoothstep(0.24, 0.78, wisp);
+  float hangarClear = smoothstep(12.0, 28.0, length(localPos.xz));
+  float fOd = uGroundFogDensity * mistBank * hangarClear * exp(-fb * camLocalY) * fDist * fInt;
+  float mistFactor = clamp(1.0 - exp(-max(fOd, 0.0)), 0.0, 0.84);
+
+  // Subtle forward-scattered solar glow inside the low mist
+  vec3 viewDir = fDir / max(fDist, 1e-3);
+  float sunGlow = pow(max(dot(viewDir, normalize(uSunDir)), 0.0), 4.0) * 0.22;
+  vec3 mistCol = uGroundFogColor + uSunColor * sunGlow * uDewStrength;
+  return mix(col, mistCol, mistFactor);
+}
+`;
+
 /**
  * AAA Living Nordic Airfield Environment Layer:
  * 1. Extended 1000x1000m seamless airfield meadow that dissolves smoothly into the
- *    atmospheric sky horizon (zero hard horizon seam).
- * 2. Dense, short, mowed lush airfield turf (52,000 crossed 3-blade clumps = 156,000 blades,
- *    5-11 cm tall, 1 draw call) with Nordic green/clover/straw macro patches, root AO,
- *    sunlit subsurface translucency, dew specular sheen, and rolling wind-wave ripples.
+ *    atmospheric sky horizon (zero hard horizon seam) with low-lying ground fog & morning dew sheen.
+ * 2. Two-tier instanced grass (2 draw calls total, MeshLambertMaterial + onBeforeCompile):
+ *    - Near tier: 55,000 individual 3-segment tapered blades across R = 26 m, masked by the exact
+ *      same trComputeSplat() as UnifiedAirfieldGround.
+ *    - Mid/Far tier: 22,000 billboard clump cards (10-95 m) using a procedural 4-clump atlas,
+ *      seamlessly matching the underlying meadow texture color & dissolving invisibly into the distance.
  * 3. Full continuous distant Swedish conifer/birch treeline silhouette ring tinted by
- *    atmospheric aerial perspective haze.
+ *    atmospheric aerial perspective & low meadow mist.
  * 4. Animated orange-and-white airfield windsock reacting to the shared wind vector.
- * 5. Grounded contact AO shadows + subtle gravel/apron wheel-track decals.
+ * 5. Grounded contact AO shadows.
  */
 export class AAAEnvironment {
   constructor(scene, renderer = null) {
@@ -26,6 +221,9 @@ export class AAAEnvironment {
       uSunColor: { value: new THREE.Color(0xfff5e4) },
       uFogColor: { value: new THREE.Color(0xc8d8e6) },
       uFogDensity: { value: 0.0042 },
+      uGroundFogColor: { value: new THREE.Color(0xdce8f0) },
+      uGroundFogDensity: { value: 0.009 },
+      uDewStrength: { value: 0.55 },
       uWindDir: { value: this.windDir },
       uDetailEnabled: { value: 1.0 },
       uWetnessGain: { value: 1.0 },
@@ -34,8 +232,8 @@ export class AAAEnvironment {
 
     this.terrainMat = null;
     this.terrainShader = null;
+    this._tuftAtlas = null;
 
-    this._buildDenseLushTurf();
     this._buildTreelineHorizon();
     this._buildWindsock();
     this._buildContactAOAndDecals();
@@ -51,11 +249,6 @@ export class AAAEnvironment {
   }
 
   buildUnifiedGround(textures) {
-    // ONE single continuous 1000x1000 m MeshStandardMaterial ground plane at Y = 0.000
-    // covering BOTH the hangar interior AND the entire airfield meadow:
-    // - Shares already-awaited textures from CustomMaterialSystem (zero duplicate network downloads!)
-    // - Mathematically impossible to have rectangular floor seams or z-fighting!
-    // - Receives full Three.js soft directional shadows, PMREM IBL, and GTAO seamlessly.
     const {
       dirtAlbedo, dirtNormal, dirtORM, dirtDetailN, dirtDetailR,
       grassAlbedo, grassNormal, grassRough,
@@ -65,9 +258,6 @@ export class AAAEnvironment {
     const existing = this.root.getObjectByName('UnifiedAirfieldGround');
     if (existing) this.root.remove(existing);
 
-    // Non-uniformly concentrated 96x96 grid: ~0.25m vertex spacing inside & around the hangar
-    // expanding smoothly to +-500m at the horizon (1 draw call, eliminates 1/w float32 texture
-    // swimming/twitching when zoomed in <1m at grazing macro angles!).
     const geo = new THREE.PlaneGeometry(2, 2, 96, 96);
     const posAttr = geo.attributes.position;
     for (let i = 0; i < posAttr.count; i++) {
@@ -92,6 +282,9 @@ export class AAAEnvironment {
       shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
       shader.uniforms.uSunColor = this.sharedUniforms.uSunColor;
       shader.uniforms.uFogColor = this.sharedUniforms.uFogColor;
+      shader.uniforms.uGroundFogColor = this.sharedUniforms.uGroundFogColor;
+      shader.uniforms.uGroundFogDensity = this.sharedUniforms.uGroundFogDensity;
+      shader.uniforms.uDewStrength = this.sharedUniforms.uDewStrength;
       shader.uniforms.uWindDir = this.sharedUniforms.uWindDir;
       shader.uniforms.uDetailEnabled = this.sharedUniforms.uDetailEnabled;
       shader.uniforms.uWetnessGain = this.sharedUniforms.uWetnessGain;
@@ -131,6 +324,9 @@ export class AAAEnvironment {
           uniform vec3 uSunDir;
           uniform vec3 uSunColor;
           uniform vec3 uFogColor;
+          uniform vec3 uGroundFogColor;
+          uniform float uGroundFogDensity;
+          uniform float uDewStrength;
           uniform vec2 uWindDir;
           uniform float uDetailEnabled;
           uniform float uWetnessGain;
@@ -146,118 +342,36 @@ export class AAAEnvironment {
           uniform sampler2D uGrassN;
           uniform sampler2D uGrassR;
 
-          float trHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
-          float trNoise(vec2 p) {
-            vec2 i = floor(p), f = fract(p);
-            vec2 u = f * f * (3.0 - 2.0 * f);
-            return mix(
-              mix(trHash(i), trHash(i + vec2(1.0, 0.0)), u.x),
-              mix(trHash(i + vec2(0.0, 1.0)), trHash(i + vec2(1.0, 1.0)), u.x),
-              u.y
-            );
-          }
-          float trFbm(vec2 p) {
-            return trNoise(p) * 0.56 + trNoise(p * 2.07 + vec2(3.1, 1.7)) * 0.29 + trNoise(p * 4.29 + vec2(7.7, 5.3)) * 0.15;
-          }
+          ${GLSL_NOISE_AND_SPLAT}
 
-          const mat2 TR_ROT = mat2(0.80, -0.60, 0.60, 0.80);
           vec2 trDirtUvA(vec2 p) { return p / 1.5; }
           vec2 trDirtUvB(vec2 p) { return TR_ROT * p / 1.93 + vec2(0.37, 0.11); }
           float trDirtMix(vec2 p) { return smoothstep(0.38, 0.62, trFbm(p * 0.55 + vec2(7.3, 2.9))); }
 
-          vec2 trGrassUvA(vec2 p) { return p / 2.0; }
-          vec2 trGrassUvB(vec2 p) { return (TR_ROT * p) / 2.73 + vec2(0.37, 0.19); }
-          float trGrassMix(vec2 p) { return smoothstep(0.35, 0.65, trFbm(p * 0.22 + vec2(4.1, 2.3))); }
+          ${GLSL_MEADOW_ALBEDO}
+          ${GLSL_GROUND_FOG}
 
-          // Returns (splatGrassWeight, rutMask, wallAO) with ZERO straight lines or rectangular borders
-          vec3 trComputeSplat(vec2 p, float dirtHeight) {
-            // Multi-scale organic coordinate warp completely breaks up any straight hangar edge
-            vec2 warp = vec2(
-              trFbm(p * 0.34 + vec2(2.1, 7.4)) - 0.5,
-              trFbm(p * 0.34 + vec2(8.3, 1.9)) - 0.5
-            ) * 2.15 + vec2(
-              trFbm(p * 1.12 + vec2(4.7, 3.1)) - 0.5,
-              trFbm(p * 1.12 + vec2(1.2, 9.6)) - 0.5
-            ) * 0.58;
-            vec2 pw = p + warp;
-
-            // Worn wheel ruts leading out the center bay onto the apron
-            float rut = exp(-pow(abs(p.x - 1.15), 2.0) * 1.15) + exp(-pow(abs(p.x + 1.15), 2.0) * 1.15);
-            float rutMask = clamp(rut * smoothstep(-3.8, 2.2, p.y) * (1.0 - smoothstep(4.5, 11.5, p.y)), 0.0, 1.0);
-
-            // Hangar sheltered interior core (X in [-6.15, 6.15], Z in [-5.55, ~1.4])
-            // Front open bay lets irregular patchy grass creep 2-3 m INSIDE (Z ~ 1.0 .. 4.1)
-            float insideX = 1.0 - smoothstep(5.45, 6.65, abs(pw.x));
-            float insideRear = smoothstep(-6.05, -5.15, pw.y);
-            // Deeper dirt/gravel in center wheel-path, grass creeping deeper along sunlit front-left & front-right edges
-            float centerPathBias = exp(-pow(p.x * 0.32, 2.0)) * 1.25;
-            float frontCutoff = 2.05 + centerPathBias;
-            float insideFront = 1.0 - smoothstep(frontCutoff - 1.35, frontCutoff + 2.35, pw.y);
-            float shelteredDirt = insideX * insideRear * insideFront;
-
-            // Subtle irregular drip-line / worn earth apron fringe outside walls (zero hard outline)
-            vec2 wallBox = abs(p - vec2(0.0, -0.75)) - vec2(6.35, 4.90);
-            float wallDist = length(max(wallBox, 0.0));
-            float dripDirt = (1.0 - smoothstep(0.0, 1.15, wallDist + (trFbm(p * 0.85) - 0.5) * 0.85)) * 0.42;
-
-            // Authentic thin, patchy Nordic airfield turf: sandy dirt peeks organically through thin grass patches across the field!
-            float fieldPatchMacro = trFbm(p * 0.14 + vec2(3.7, 9.1));
-            float fieldPatchMed = trFbm(p * 0.52 + vec2(6.2, 1.4));
-            float fieldPatchFine = trFbm(p * 1.65 + vec2(2.8, 5.9));
-            float thinBareSpots = smoothstep(0.56, 0.84, fieldPatchMacro * 0.52 + fieldPatchMed * 0.34 + fieldPatchFine * 0.14);
-            // Extra worn thinness on the front apron (Z in 3..11) and along wheel ruts
-            float apronZone = exp(-pow((p.y - 5.6) * 0.20, 2.0)) * exp(-pow(p.x * 0.14, 2.0));
-            float baseGrass = 1.0 - max(shelteredDirt, dripDirt);
-            baseGrass -= thinBareSpots * (0.34 + apronZone * 0.28);
-            baseGrass -= rutMask * 0.32;
-
-            // Patchy grass creeping under the sunlit daylight panels at Z ~ -1.95
-            float panelLight = exp(-pow(p.y + 1.95, 2.0) * 0.9) * smoothstep(4.8, 6.2, abs(p.x)) * smoothstep(0.45, 0.78, fieldPatchMed) * 0.45;
-            baseGrass = clamp(baseGrass + panelLight, 0.0, 1.0);
-
-            // Height-blend using dirt/gravel pebble height (orm.b) so grass grows in low soil crevices first!
-            float grassHeight = 0.42 + 0.36 * fieldPatchFine;
-            float hDiff = (baseGrass + grassHeight * 0.34) - ((1.0 - baseGrass) + dirtHeight * 0.34);
-            float splat = smoothstep(-0.24, 0.24, hDiff);
-
-            // Keep deep shaded center/rear bay pure dirt/gravel (protects Basebar Corner macro!)
-            float deepInterior = (1.0 - smoothstep(4.8, 5.8, abs(p.x))) * smoothstep(-5.5, -4.6, p.y) * (1.0 - smoothstep(0.35, 1.65, p.y));
-            splat *= (1.0 - deepInterior);
-
-            // Subtle interior wall/footing contact darkening
-            float inHangar = step(abs(p.x), 6.32) * step(-5.65, p.y) * step(p.y, 4.15);
-            float wallAO = 1.0 - inHangar * max(smoothstep(5.2, 6.25, abs(p.x)), smoothstep(-4.6, -5.65, p.y)) * 0.26;
-            return vec3(clamp(splat, 0.0, 1.0), rutMask, wallAO);
-          }
-
-          // Physically-based after-rain / morning-dew wetness & micro-depression mask on dirt/gravel:
-          // Smaller organic feathered damp patches; raised stones poke through bumpy & satin-damp,
-          // while only tiny broken micro-depressions hold thin water (roof-occluded under overhang!).
-          // Returns vec3(wetness, puddleMask, skyExposed)
           vec3 trComputeWetness(vec2 p, float dirtHeight, float rutMask) {
             float wPatch1 = trFbm(p * 0.62 + vec2(3.4, 8.2));
             float wPatch2 = trFbm(p * 1.85 + vec2(7.1, 1.6));
             float wNoise = wPatch1 * 0.62 + wPatch2 * 0.38;
 
-            // Sky exposure: 0 under the hangar roof overhang, 1 out on the open sunlit apron & eaves
             float underRoofX = 1.0 - smoothstep(5.8, 6.65, abs(p.x));
             float underRoofZ = smoothstep(-5.8, -5.2, p.y) * (1.0 - smoothstep(3.5, 4.6, p.y));
             float skyExposed = clamp(1.0 - underRoofX * underRoofZ, 0.0, 1.0);
 
-            // Organic dampness strongest at open front apron, eave drip-lines & wheel-rut hollows
             float frontExpo = smoothstep(0.6, 4.4, p.y);
             float eaveDrip = exp(-pow(abs(abs(p.x) - 6.35) * 1.4, 2.0)) * step(-5.8, p.y) * step(p.y, 4.4);
             float frontDrip = exp(-pow((p.y - 4.15) * 1.1, 2.0)) * step(abs(p.x), 6.8);
 
             float dampZone = clamp(frontExpo * 0.78 + eaveDrip * 0.72 + frontDrip * 0.60 + rutMask * 0.42, 0.0, 1.0);
+            float apronMask = 1.0 - smoothstep(7.5, 13.5, length(p));
             float wetness = smoothstep(0.42, 0.80, wNoise + (dampZone - 0.50) * 0.72);
-            // Keep sheltered rear bay dry & dusty
-            wetness *= smoothstep(-2.4, 1.2, p.y);
+            wetness *= smoothstep(-2.4, 1.2, p.y) * apronMask;
             wetness = clamp(wetness * uWetnessGain, 0.0, 1.0);
 
-            // Height-broken thin micro-depressions: raised gravel pebbles (high dirtHeight) poke cleanly through!
             float crevice = 1.0 - smoothstep(0.14, 0.30, dirtHeight);
-            float puddle = smoothstep(0.55, 0.88, wetness) * crevice * skyExposed * clamp(uWetnessGain, 0.0, 1.15);
+            float puddle = smoothstep(0.55, 0.88, wetness) * crevice * skyExposed * apronMask * clamp(uWetnessGain, 0.0, 1.15);
             return vec3(wetness, clamp(puddle, 0.0, 1.0), skyExposed);
           }
           `
@@ -269,7 +383,6 @@ export class AAAEnvironment {
             vec2 p = vTerrainLocalPos.xz;
             float camDist = length(cameraPosition - vTerrainWorldPos);
 
-            // --- Layer 1: 2048px Packed Dirt & Gravel with PBR After-Rain Wetness ---
             float dMix = trDirtMix(p);
             vec3 dirtCol = mix(texture2D(uDirtA, trDirtUvA(p)).rgb, texture2D(uDirtA, trDirtUvB(p)).rgb, dMix);
             vec3 dirtORM = mix(texture2D(uDirtORM, trDirtUvA(p)).rgb, texture2D(uDirtORM, trDirtUvB(p)).rgb, dMix);
@@ -287,43 +400,9 @@ export class AAAEnvironment {
             dirtCol *= mix(0.84, 1.14, nMacro * 0.65 + nMed * 0.35);
             dirtCol *= mix(1.0, 0.90, rutMask * 0.55);
             dirtCol *= mix(1.0, dirtORM.r, 0.55);
-            // Gentle, natural porous darkening on damp gravel/earth (never muddy black)
             dirtCol *= mix(1.0, 0.72, wetness * 0.85 + puddle * 0.15);
 
-            // --- Layer 2: Pure 2048x2048 Real-Blade Nordic Airfield Grass (no procedural micro-noise blotches!) ---
-            float gMix = trGrassMix(p);
-            vec3 gTex = mix(texture2D(uGrassA, trGrassUvA(p)).rgb, texture2D(uGrassA, trGrassUvB(p)).rgb, gMix);
-            float mPatch1 = trFbm(p * 0.06);
-            float mPatch2 = trFbm(p * 0.24 + vec2(9.1, 3.7));
-
-            // Rich organic macro airfield meadow/vegetation shifts across 20-160m (no 3D trees, pure natural turf)
-            float mField1 = trFbm(p * 0.022);
-            float mField2 = trFbm(p * 0.055 + vec2(17.3, 6.2));
-            float mClover = trFbm(p * 0.095 - vec2(4.1, 11.8));
-            float mWild = trFbm(p * 0.16 + vec2(-8.4, 14.2));
-            float farMeadow = smoothstep(12.0, 32.0, length(p));
-            // Classic Swedish grass-runway subtle alternating mowed strip bands (p is vec2(x, z))
-            float runwayCorridor = smoothstep(42.0, 12.0, abs(p.x - 2.0)) * smoothstep(12.0, 28.0, p.y);
-            float mowStripe = sin(p.x * 0.42 + p.y * 0.035) * 0.5 + 0.5;
-            vec3 grassCol = gTex * mix(0.82, 1.18, mPatch1);
-            grassCol *= mix(1.0, mix(0.90, 1.10, mowStripe), runwayCorridor * 0.80);
-            // Gently readable warm dry straw/hay streaks, deeper lush clover hollows, sage & yellow-green pockets
-            grassCol = mix(grassCol, grassCol * vec3(1.26, 1.14, 0.72), smoothstep(0.50, 0.80, mField1) * 0.56 * farMeadow);
-            grassCol = mix(grassCol, grassCol * vec3(0.70, 0.90, 0.68), smoothstep(0.48, 0.18, mClover) * 0.48 * farMeadow);
-            grassCol = mix(grassCol, grassCol * vec3(0.84, 0.96, 0.86), smoothstep(0.54, 0.82, mField2) * 0.36 * farMeadow);
-            grassCol = mix(grassCol, grassCol * vec3(1.12, 1.08, 0.78), smoothstep(0.60, 0.88, mWild) * 0.30 * farMeadow);
-            grassCol = mix(grassCol, grassCol * vec3(1.06, 1.01, 0.86), smoothstep(0.58, 0.88, mPatch2) * 0.24);
-            float gLuma = dot(grassCol, vec3(0.2126, 0.7152, 0.0722));
-            grassCol = mix(vec3(gLuma), grassCol * vec3(0.96, 1.05, 0.93), uGrassLushness);
-            // Slow drifting soft Nordic cloud-shadow mottling across the airfield
-            float cloudSh = trFbm(p * 0.013 + uWindDir * uTime * 0.012);
-            grassCol *= mix(1.0, mix(0.76, 1.08, smoothstep(0.28, 0.72, cloudSh)), farMeadow * 0.88);
-            // Subtle morning-dew richness on damp grass patches + gentle animated wind-wave light shimmer
-            grassCol *= mix(1.0, 0.88, wetness * 0.28);
-            float windWave = sin(dot(p, uWindDir) * 0.42 - uTime * 1.10 + mPatch1 * 3.8);
-            grassCol *= (1.0 + windWave * 0.035 * (1.0 - smoothstep(25.0, 140.0, camDist)));
-
-            // Combine seamlessly via height-blended splat weight
+            vec3 grassCol = trComputeMeadowAlbedo(p, camDist, wetness);
             diffuseColor.rgb = mix(dirtCol, grassCol, grassWeight) * wallAO;
           }`
         )
@@ -345,18 +424,14 @@ export class AAAEnvironment {
             float detailFade = (1.0 - smoothstep(1.2, 6.5, camDist)) * uDetailEnabled;
             float dR = texture2D(uDirtDR, p / 0.20).r;
             float dryDirtRough = clamp(dirtORM.g + (dR - 0.75) * 0.20 * detailFade, 0.46, 0.98);
-            // Raised stones stay satin-damp (0.34-0.48); roof-occluded bay avoids open-sky mirror reflection!
             float satinTarget = mix(0.46, 0.34, skyExposed) + (dR - 0.5) * 0.12;
             float wetDirtRough = mix(dryDirtRough, satinTarget, wetness);
-            // Small broken micro-depressions hold thin water (0.14-0.18, never 0.05 chrome oil-slick)
             float dirtRough = mix(wetDirtRough, 0.15, puddle);
 
             float gMix = trGrassMix(p);
             float gR = mix(texture2D(uGrassR, trGrassUvA(p)).g, texture2D(uGrassR, trGrassUvB(p)).g, gMix);
-            // Pure 2048px grass blade roughness near hangar; matte 0.86-0.94 beyond 18m (kills grazing glare streak!)
-            float farMatte = smoothstep(14.0, 32.0, camDist);
-            float nearGrassRough = clamp(gR - wetness * 0.14, 0.48, 0.96);
-            float grassRough = mix(nearGrassRough, 0.90, farMatte);
+            // Matte meadow turf roughness (0.88-0.95) prevents grazing sun-facing specular blowout
+            float grassRough = clamp(0.88 + (gR - 0.5) * 0.14, 0.88, 0.95);
 
             roughnessFactor = mix(dirtRough, grassRough, grassWeight);
           }`
@@ -373,7 +448,6 @@ export class AAAEnvironment {
             float grassWeight = splatInfo.x;
             float puddle = trComputeWetness(p, dirtORM.b, splatInfo.y).y;
 
-            // Dirt normal (2048px dual-tap + 0.20m micro-grit detail when Detail Shaders On; level water in puddles!)
             float dirtMacroFade = 1.0 - smoothstep(9.0, 34.0, camDist) * 0.75;
             float dirtDetailFade = (1.0 - smoothstep(1.2, 6.5, camDist)) * uDetailEnabled;
             vec3 dnA = texture2D(uDirtN, trDirtUvA(p)).xyz * 2.0 - 1.0;
@@ -383,7 +457,6 @@ export class AAAEnvironment {
             vec2 dnD = texture2D(uDirtDN, p / 0.20).xy * 2.0 - 1.0;
             vec2 dirtXY = (dnM * 1.05 * dirtMacroFade + dnD * 0.36 * dirtDetailFade) * (1.0 - puddle * 0.68);
 
-            // Grass normal: pure 2048x2048 real-blade normal map (zero procedural blotches!)
             float gMix = trGrassMix(p);
             float grassNormalFade = 1.0 - smoothstep(12.0, 48.0, camDist);
             vec3 gnA = texture2D(uGrassN, trGrassUvA(p)).xyz * 2.0 - 1.0;
@@ -399,14 +472,22 @@ export class AAAEnvironment {
         )
         .replace(
           '#include <tonemapping_fragment>',
-          `// Soft grazing-angle grass velvet sun sheen + seamless atmospheric horizon dissolve
+          `// Directional morning-dew velvet sheen + low-lying meadow mist + seamless horizon dissolve
           {
-            vec2 p = vTerrainWorldPos.xz;
-            float dist = length(cameraPosition.xz - p);
+            vec2 p = vTerrainLocalPos.xz;
+            float dist = length(cameraPosition.xz - vTerrainWorldPos.xz);
             vec3 V = normalize(cameraPosition - vTerrainWorldPos);
             float fresnel = pow(1.0 - max(V.y, 0.0), 3.0);
             float grassApprox = smoothstep(5.0, 9.5, length(p));
-            gl_FragColor.rgb += uSunColor * fresnel * 0.022 * grassApprox * (1.0 - smoothstep(12.0, 44.0, dist));
+
+            // Subtle warm sunlit-green morning dew velvet sheen (never brighter than 3D grass blades)
+            vec2 vHoriz = normalize(vec2(-V.x, -V.z) + vec2(1e-4));
+            vec2 sHoriz = normalize(uSunDir.xz + vec2(1e-4));
+            float sunAlign = pow(max(dot(vHoriz, sHoriz), 0.0), 3.0);
+            float dewGlint = (0.005 + 0.019 * sunAlign * uDewStrength) * fresnel * grassApprox * (1.0 - smoothstep(18.0, 95.0, dist));
+            gl_FragColor.rgb += uSunColor * vec3(0.92, 1.0, 0.78) * dewGlint;
+
+            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vTerrainWorldPos, vTerrainLocalPos);
 
             float horizonBlend = smoothstep(38.0, 190.0, dist);
             horizonBlend = pow(horizonBlend, 0.85);
@@ -415,7 +496,7 @@ export class AAAEnvironment {
           #include <tonemapping_fragment>`
         );
     };
-    mat.customProgramCacheKey = () => 'hangar-unified-terrain-splat-v1';
+    mat.customProgramCacheKey = () => 'hangar-unified-terrain-splat-v2';
     mat.needsUpdate = true;
 
     const plane = new THREE.Mesh(geo, mat);
@@ -424,186 +505,437 @@ export class AAAEnvironment {
     plane.castShadow = false;
     plane.name = 'UnifiedAirfieldGround';
     this.root.add(plane);
+
+    this._buildTwoTierGrass(grassAlbedo);
   }
 
-  _buildDenseLushTurf() {
-    // Fast, lightweight thin wispy accent 3D tufts (~600 short 3-7 cm crossed 3-blade tufts, 1 draw call)
-    // Clustered in small organic patches near footings, walls, barrel, chairs, leaned gate, and patchy apron spots.
-    const positions = [];
-    const uvs = [];
-    const normals = [];
-    const indices = [];
-
-    const bladeAngles = [0, 1.57, 3.14, 4.71];
-    const bladeOffsets = [[0.0, 0.0], [0.022, 0.015], [-0.019, 0.017], [0.008, -0.021]];
-    const bladeHeights = [0.088, 0.072, 0.058, 0.048];
-    const bladeW = 0.014;
-
-    let vBase = 0;
-    for (let b = 0; b < 4; b++) {
-      const ang = bladeAngles[b];
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const ox = bladeOffsets[b][0], oz = bladeOffsets[b][1];
-      const h = bladeHeights[b];
-      const lean = 0.024;
-      const pts = [
-        [-bladeW * 0.5, 0.0, 0.0],
-        [ bladeW * 0.5, 0.0, 0.0],
-        [-bladeW * 0.30, h * 0.55, lean * 0.45],
-        [ bladeW * 0.30, h * 0.55, lean * 0.45],
-        [0.0, h, lean],
-      ];
-      const buvs = [[0, 0], [1, 0], [0, 0.55], [1, 0.55], [0.5, 1.0]];
-      for (let i = 0; i < pts.length; i++) {
-        positions.push(pts[i][0] * ca - pts[i][2] * sa + ox, pts[i][1], pts[i][0] * sa + pts[i][2] * ca + oz);
-        uvs.push(buvs[i][0], buvs[i][1]);
-        normals.push(-sa * 0.3, 0.94, ca * 0.3);
-      }
-      indices.push(vBase, vBase + 1, vBase + 2, vBase + 1, vBase + 3, vBase + 2, vBase + 2, vBase + 3, vBase + 4);
-      vBase += 5;
+  _buildTwoTierGrass(grassAlbedo) {
+    for (const oldName of ['NearAirfieldBlades', 'FarAirfieldClumps', 'AccentAirfieldTufts']) {
+      const old = this.root.getObjectByName(oldName);
+      if (old) this.root.remove(old);
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geo.setIndex(indices);
+    const GOLDEN_ANGLE = 2.399963229728653;
 
-    const COUNT = 2600;
-    const aTint = new Float32Array(COUNT);
-    const aPhase = new Float32Array(COUNT);
-    const matrices = new Float32Array(COUNT * 16);
-    const dummy = new THREE.Object3D();
+    // ------------------------------------------------------------------ Tier 1: Near Individual Tapered Blades
+    // 80,000 3-segment tapered blades (5 tris/blade, 1 draw call) across R = 24 m
+    // Uses MeshStandardMaterial (roughness 0.90, metalness 0.0) so PMREM IBL + PBR lighting
+    // matches UnifiedAirfieldGround pixel-for-pixel!
+    const NEAR_COUNT = 80000;
+    const NEAR_R = 24.0;
+    const ys = [0.0, 0.35, 0.70, 1.0];
+    const ws = [1.0, 0.78, 0.44, 0.0];
+    const bPos = [];
+    const bIdx = [];
+    ys.forEach((y, i) => {
+      if (i < 3) bPos.push(-0.5 * ws[i], y, 0, 0.5 * ws[i], y, 0);
+      else bPos.push(0, y, 0);
+    });
+    bIdx.push(0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6);
 
-    let seed = 61231;
-    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const nearGeo = new THREE.InstancedBufferGeometry();
+    nearGeo.setAttribute('position', new THREE.Float32BufferAttribute(bPos, 3));
+    nearGeo.setIndex(bIdx);
 
-    let placed = 0;
-    const addTuft = (x, z, sXZ, sY) => {
-      if (placed >= COUNT) return;
-      dummy.position.set(x, -0.003, z);
-      dummy.rotation.set((rnd() - 0.5) * 0.16, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.16);
-      dummy.scale.set(sXZ, sY, sXZ);
-      dummy.updateMatrix();
-      dummy.matrix.toArray(matrices, placed * 16);
-      aTint[placed] = rnd();
-      aPhase[placed] = rnd() * 6.283;
-      placed++;
+    const rNear = mulberry32(91337);
+    const nOff = new Float32Array(NEAR_COUNT * 4);
+    const nRnd = new Float32Array(NEAR_COUNT * 4);
+    for (let i = 0; i < NEAR_COUNT; i++) {
+      // Blue-noise-like jittered Vogel spiral prevents random bald pockets
+      const u = (i + 0.5 + (rNear() - 0.5) * 0.85) / NEAR_COUNT;
+      const rad = NEAR_R * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.56);
+      const ang = i * GOLDEN_ANGLE + (rNear() - 0.5) * 0.28;
+      nOff[i * 4] = Math.cos(ang) * rad;
+      nOff[i * 4 + 1] = Math.sin(ang) * rad;
+      nOff[i * 4 + 2] = rNear(); // distance thinning hash
+      nOff[i * 4 + 3] = rNear(); // apron boundary ragged edge threshold
+      nRnd[i * 4] = rNear();     // width / neutral tone
+      nRnd[i * 4 + 1] = rNear(); // curve
+      nRnd[i * 4 + 2] = rNear(); // yaw angle
+      nRnd[i * 4 + 3] = rNear(); // height
+    }
+    nearGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(nOff, 4));
+    nearGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(nRnd, 4));
+    nearGeo.instanceCount = NEAR_COUNT;
+    nearGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.2, 0), NEAR_R + 2);
+
+    const nearMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.90,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+    });
+    nearMat.customProgramCacheKey = () => 'hangar-near-grass-blades-pbr-v2';
+    nearMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.sharedUniforms.uTime;
+      shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
+      shader.uniforms.uSunColor = this.sharedUniforms.uSunColor;
+      shader.uniforms.uFogColor = this.sharedUniforms.uFogColor;
+      shader.uniforms.uGroundFogColor = this.sharedUniforms.uGroundFogColor;
+      shader.uniforms.uGroundFogDensity = this.sharedUniforms.uGroundFogDensity;
+      shader.uniforms.uDewStrength = this.sharedUniforms.uDewStrength;
+      shader.uniforms.uWindDir = this.sharedUniforms.uWindDir;
+      shader.uniforms.uGrassLushness = this.sharedUniforms.uGrassLushness;
+      shader.uniforms.uGrassA = { value: grassAlbedo };
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute vec4 aOff;
+          attribute vec4 aRnd;
+          uniform float uTime;
+          uniform vec2 uWindDir;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying float vY;
+          varying float vRnd;
+          varying float vTint;
+          ${GLSL_NOISE_AND_SPLAT}`
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `float gAng = aRnd.z * 6.2831853;
+          vec3 gSide = vec3(cos(gAng), 0.0, sin(gAng));
+          vec3 gFwd = vec3(-gSide.z, 0.0, gSide.x);
+          // Mostly upward normal so PMREM IBL + sun lighting matches UnifiedAirfieldGround seamlessly
+          vec3 objectNormal = normalize(vec3(0.0, 1.0, 0.0) + gFwd * 0.14);`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `vec2 rootXZ = aOff.xy;
+          vec3 gRoot = vec3(rootXZ.x, -0.004, rootXZ.y);
+          vec3 camLocal = cameraPosition - modelMatrix[3].xyz;
+          float gDist = distance(gRoot, camLocal);
+
+          float grassWeight = trComputeSplat(rootXZ, 0.42).x;
+          // Ragged edge ONLY along the apron boundary (grassWeight < 0.95); 100% continuous in outer meadow
+          float ragged = grassWeight > 0.95 ? 1.0 : step(mix(0.08, 0.58, aOff.w), grassWeight) * (0.55 + 0.45 * smoothstep(0.08, 0.62, grassWeight));
+
+          // Smooth distance thinning + outer perimeter fade (16 -> 24 m)
+          float keep = clamp((mix(1.0, 0.28, smoothstep(10.0, 23.0, gDist)) - aOff.z) / 0.10, 0.0, 1.0);
+          float rimFade = 1.0 - smoothstep(16.0, 24.0, length(rootXZ));
+
+          float tuftNoise = trFbm(rootXZ * 0.35 + vec2(5.2, 1.9));
+          float fieldScale = mix(0.88, 1.22, smoothstep(7.0, 16.0, length(rootXZ)));
+          float gH = (0.068 + 0.064 * aRnd.w * aRnd.w + 0.042 * smoothstep(0.32, 0.76, tuftNoise)) * fieldScale * ragged * keep * rimFade;
+          float gW = (0.015 + 0.013 * aRnd.x) * (1.0 + gDist * 0.055) * step(0.002, gH);
+
+          float along = dot(rootXZ, uWindDir);
+          float gust = trNoise(rootXZ * 0.07 - uWindDir * uTime * 0.28);
+          float wave = sin(along * 0.55 - uTime * 2.1 + aRnd.x * 3.0) * 0.5 + sin(along * 1.6 - uTime * 4.2 + aRnd.y * 6.0) * 0.22;
+          vec2 lean = uWindDir * (0.12 + gust * 0.65 + wave * 0.28) * 0.32;
+
+          float y = position.y;
+          float curve = 0.20 + 0.42 * aRnd.y;
+          vec3 transformed = gRoot
+            + gSide * (position.x * gW)
+            + vec3(0.0, y * gH, 0.0)
+            + gFwd * (curve * y * y * gH)
+            + vec3(lean.x, -0.22 * length(lean), lean.y) * (y * y * gH);
+
+          vY = y;
+          vRnd = aRnd.w;
+          vTint = aRnd.x;
+          vLPos = transformed;
+          vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uTime;
+          uniform vec3 uSunDir;
+          uniform vec3 uSunColor;
+          uniform vec3 uFogColor;
+          uniform vec3 uGroundFogColor;
+          uniform float uGroundFogDensity;
+          uniform float uDewStrength;
+          uniform vec2 uWindDir;
+          uniform float uGrassLushness;
+          uniform sampler2D uGrassA;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying float vY;
+          varying float vRnd;
+          varying float vTint;
+          ${GLSL_NOISE_AND_SPLAT}
+          ${GLSL_MEADOW_ALBEDO}
+          ${GLSL_GROUND_FOG}`
+        )
+        .replace(
+          '#include <normal_fragment_begin>',
+          '#include <normal_fragment_begin>\n normal = normalize(vNormal);'
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          {
+            float camDist = length(cameraPosition - vWPos);
+            // Exact same terrain meadow albedo as UnifiedAirfieldGround (zero hue shift)
+            vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
+            c *= mix(0.95, 1.05, vTint);
+            float away = smoothstep(14.0, 55.0, camDist);
+            float grad = mix(mix(0.88, 1.12, smoothstep(0.0, 1.0, vY)), 1.0, away);
+            diffuseColor.rgb = c * grad;
+          }`
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          {
+            vec3 V = normalize(vViewPosition);
+            vec3 L = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
+            vec3 N = normalize(vNormal);
+            vec3 H = normalize(V + L);
+            float sunElev = max(uSunDir.y + 0.08, 0.0);
+
+            // Subtle neutral-warm backlit translucency + morning dew micro-glints
+            float back = pow(max(dot(-V, L), 0.0), 3.0);
+            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.42 * vY * vec3(1.0, 1.04, 0.88) * sunElev;
+
+            float tipMask = smoothstep(0.55, 1.0, vY);
+            float dewSpec = pow(max(dot(N, H), 0.0), 48.0) * tipMask;
+            float glintCell = trHash(floor(vLPos.xz * 24.0));
+            float microGlint = smoothstep(0.93, 0.995, glintCell) * pow(max(dot(N, H), 0.0), 20.0) * tipMask;
+            reflectedLight.directSpecular += uSunColor * (dewSpec * 0.16 + microGlint * 0.38) * uDewStrength * sunElev;
+          }`
+        )
+        .replace(
+          '#include <tonemapping_fragment>',
+          `{
+            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vWPos, vLPos);
+            float dist = length(cameraPosition.xz - vWPos.xz);
+            float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));
+          }
+          #include <tonemapping_fragment>`
+        );
     };
 
-    // Organic patchy drifts of lush thin Nordic grass/clover across foreground, apron edges, footings, & walls
-    const patchCenters = [
-      // Front-left chairs, barrel & footing
-      [-6.55, 3.85, 0.95], [-6.85, 2.85, 0.90], [-5.45, 3.70, 0.95], [-4.35, 3.85, 0.90], [-3.20, 4.15, 1.05],
-      // Front-right corner, leaned gate & footing
-      [6.45, 3.85, 1.00], [5.35, 3.75, 0.95], [4.10, 4.05, 1.05], [6.80, 1.40, 1.15], [6.75, -1.80, 1.15],
-      // Side & rear wall footings
-      [-6.75, 0.65, 1.10], [-6.75, -2.45, 1.10], [-6.60, -5.60, 1.15], [6.60, -5.55, 1.15],
-      [-2.80, -6.05, 1.25], [2.40, -6.10, 1.25],
-      // Foreground & sunny airfield meadow drifts (keeping worn gravel center apron patchy & natural)
-      [-4.90, 2.55, 0.85], [4.65, 2.65, 0.85], [-2.30, 5.15, 1.25], [2.55, 5.25, 1.25],
-      [-5.90, 5.90, 1.55], [5.70, 6.05, 1.55], [0.25, 6.75, 1.35], [-3.80, 7.60, 1.85],
-      [3.90, 7.80, 1.85], [-8.20, 4.90, 1.75], [8.30, 5.10, 1.75],
-      [-7.20, 8.80, 2.20], [-1.20, 9.40, 2.10], [4.80, 9.80, 2.20], [9.40, 8.60, 2.10],
-      [-10.2, 7.20, 2.20], [-4.60, 11.4, 2.40], [1.80, 11.8, 2.40], [7.60, 11.5, 2.30],
-    ];
+    const nearMesh = new THREE.Mesh(nearGeo, nearMat);
+    nearMesh.name = 'NearAirfieldBlades';
+    nearMesh.receiveShadow = true;
+    nearMesh.castShadow = false;
+    nearMesh.frustumCulled = false;
+    this.root.add(nearMesh);
 
-    for (const [cx, cz, rad] of patchCenters) {
-      const n = 58 + Math.floor(rnd() * 32);
-      for (let i = 0; i < n; i++) {
-        const ang = rnd() * Math.PI * 2;
-        const r = Math.pow(rnd(), 0.62) * rad;
-        const x = cx + Math.cos(ang) * r;
-        const z = cz + Math.sin(ang) * r;
-        // Keep deep interior center bay clear
-        if (Math.abs(x) < 5.6 && z < 2.2) continue;
-        addTuft(x, z, 0.78 + rnd() * 0.72, 0.65 + rnd() * 0.75);
-      }
+    // ------------------------------------------------------------------ Tier 2: Mid/Far Billboard Clump Cards
+    // 36,000 2-tri billboard clump cards (6 m -> 90 m, 1 draw call) using fuller 4-clump atlas
+    // Uses MeshStandardMaterial (roughness 0.90, metalness 0.0, upward normal) so lighting & color
+    // match UnifiedAirfieldGround pixel-for-pixel across the entire meadow!
+    if (!this._tuftAtlas) {
+      this._tuftAtlas = createTuftAtlas(4242);
     }
+    const FAR_COUNT = 36000;
+    const FAR_MIN_R = 6.0;
+    const FAR_MAX_R = 90.0;
 
-    geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(aTint.subarray(0, placed), 1));
-    geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase.subarray(0, placed), 1));
+    const farGeo = new THREE.InstancedBufferGeometry();
+    farGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, 0, 0,
+       0.5, 0, 0,
+       0.5, 1, 0,
+      -0.5, 1, 0,
+    ], 3));
+    farGeo.setIndex([0, 1, 2, 0, 2, 3]);
 
-    const mat = new THREE.ShaderMaterial({
+    const rFar = mulberry32(43219);
+    const fOff = new Float32Array(FAR_COUNT * 4);
+    const fRnd = new Float32Array(FAR_COUNT * 4);
+    for (let i = 0; i < FAR_COUNT; i++) {
+      // Blue-noise-like jittered Vogel annulus for uniform, gap-free meadow coverage
+      const u = (i + 0.5 + (rFar() - 0.5) * 0.85) / FAR_COUNT;
+      const rad = FAR_MIN_R + (FAR_MAX_R - FAR_MIN_R) * Math.pow(Math.min(Math.max(u, 0.0001), 1.0), 0.68);
+      const ang = i * GOLDEN_ANGLE + (rFar() - 0.5) * 0.25;
+      fOff[i * 4] = Math.cos(ang) * rad;
+      fOff[i * 4 + 1] = Math.sin(ang) * rad;
+      fOff[i * 4 + 2] = rFar(); // outer stochastic dropout
+      fOff[i * 4 + 3] = rFar(); // ragged edge threshold
+      fRnd[i * 4] = rFar();     // width / neutral tone
+      fRnd[i * 4 + 1] = rFar(); // atlas clump index (0..3)
+      fRnd[i * 4 + 2] = rFar(); // billboard yaw jitter
+      fRnd[i * 4 + 3] = rFar(); // height
+    }
+    farGeo.setAttribute('aOff', new THREE.InstancedBufferAttribute(fOff, 4));
+    farGeo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(fRnd, 4));
+    farGeo.instanceCount = FAR_COUNT;
+    farGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.3, 0), FAR_MAX_R + 4);
+
+    const farMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.90,
+      metalness: 0.0,
       side: THREE.DoubleSide,
-      uniforms: {
-        uTime: this.sharedUniforms.uTime,
-        uSunDir: this.sharedUniforms.uSunDir,
-        uSunColor: this.sharedUniforms.uSunColor,
-        uFogColor: this.sharedUniforms.uFogColor,
-        uWindDir: this.sharedUniforms.uWindDir,
-        uGrassLushness: this.sharedUniforms.uGrassLushness,
-      },
-      vertexShader: `
-        #include <common>
-        #include <logdepthbuf_pars_vertex>
-        attribute float aTint;
-        attribute float aPhase;
-        uniform float uTime;
-        uniform vec2 uWindDir;
-        varying float vH;
-        varying float vTint;
-        varying vec3 vWorldPos;
-        void main() {
-          vH = uv.y;
-          vTint = aTint;
-          vec4 instW = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-          float gust = sin(dot(instW.xz, uWindDir) * 0.35 - uTime * 1.45 + aPhase) * 0.5 + 0.3;
-          float bend = gust * 0.025 * (vH * vH);
-          vec4 lp = instanceMatrix * vec4(position, 1.0);
-          lp.x += uWindDir.x * bend;
-          lp.z += uWindDir.y * bend;
-          vec4 wp = modelMatrix * lp;
-          vWorldPos = wp.xyz;
-          gl_Position = projectionMatrix * viewMatrix * wp;
-          #include <logdepthbuf_vertex>
-        }
-      `,
-      fragmentShader: `
-        #include <common>
-        #include <logdepthbuf_pars_fragment>
-        uniform vec3 uSunDir;
-        uniform vec3 uSunColor;
-        uniform vec3 uFogColor;
-        uniform float uGrassLushness;
-        varying float vH;
-        varying float vTint;
-        varying vec3 vWorldPos;
-        void main() {
-          // Lush Nordic spring-summer grass palette with sunlit yellow-green tips & morning-dew sheen
-          vec3 rootCol = vec3(0.055, 0.11, 0.032);
-          vec3 greenTip = vec3(0.18, 0.34, 0.085);
-          vec3 warmTip = vec3(0.32, 0.40, 0.11);
-          vec3 strawTip = vec3(0.38, 0.34, 0.16);
-          vec3 tipCol = mix(greenTip, warmTip, smoothstep(0.25, 0.72, vTint) * 0.60);
-          tipCol = mix(tipCol, strawTip, smoothstep(0.76, 0.96, vTint) * 0.55);
-          vec3 col = mix(rootCol, tipCol, pow(vH, 0.72)) * mix(0.48, 1.05, vH);
-          float tLuma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-          col = mix(vec3(tLuma), col * vec3(0.96, 1.06, 0.92), uGrassLushness);
-
-          vec3 sDir = normalize(uSunDir);
-          vec3 vDir = normalize(cameraPosition - vWorldPos);
-          float sss = pow(max(dot(-vDir, sDir), 0.0), 3.0) * vH * 0.32;
-          float sunY = max(sDir.y, 0.1);
-          vec3 lit = col * (vec3(0.28, 0.36, 0.42) + uSunColor * (0.55 + 0.85 * sunY)) + uSunColor * tipCol * sss;
-          float dist = length(cameraPosition.xz - vWorldPos.xz);
-          float fogBlend = smoothstep(42.0, 260.0, dist);
-          gl_FragColor = vec4(mix(lit, uFogColor, clamp(pow(fogBlend, 0.78), 0.0, 1.0)), 1.0);
-          #include <logdepthbuf_fragment>
-        }
-      `,
+      alphaTest: 0.25,
+      alphaToCoverage: true,
     });
+    farMat.customProgramCacheKey = () => 'hangar-far-grass-clumps-pbr-v2';
+    farMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.sharedUniforms.uTime;
+      shader.uniforms.uSunDir = this.sharedUniforms.uSunDir;
+      shader.uniforms.uSunColor = this.sharedUniforms.uSunColor;
+      shader.uniforms.uFogColor = this.sharedUniforms.uFogColor;
+      shader.uniforms.uGroundFogColor = this.sharedUniforms.uGroundFogColor;
+      shader.uniforms.uGroundFogDensity = this.sharedUniforms.uGroundFogDensity;
+      shader.uniforms.uDewStrength = this.sharedUniforms.uDewStrength;
+      shader.uniforms.uWindDir = this.sharedUniforms.uWindDir;
+      shader.uniforms.uGrassLushness = this.sharedUniforms.uGrassLushness;
+      shader.uniforms.uGrassA = { value: grassAlbedo };
+      shader.uniforms.uTuft = { value: this._tuftAtlas };
 
-    const mesh = new THREE.InstancedMesh(geo, mat, placed);
-    mesh.instanceMatrix.array.set(matrices.subarray(0, placed * 16));
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.name = 'AccentAirfieldTufts';
-    this.root.add(mesh);
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute vec4 aOff;
+          attribute vec4 aRnd;
+          uniform float uTime;
+          uniform vec2 uWindDir;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying vec2 vQ;
+          varying float vY;
+          varying float vRnd;
+          varying float vTint;
+          ${GLSL_NOISE_AND_SPLAT}`
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec3 objectNormal = vec3(0.0, 1.0, 0.0);`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `vec2 rootXZ = aOff.xy;
+          vec3 gRoot = vec3(rootXZ.x, -0.006, rootXZ.y);
+          vec3 camLocal = cameraPosition - modelMatrix[3].xyz;
+          float gDist = distance(gRoot, camLocal);
+
+          float grassWeight = trComputeSplat(rootXZ, 0.42).x;
+          float ragged = smoothstep(0.18, 0.65, grassWeight);
+
+          // Smooth overlap with near blades (6->15 m), steep top-down fade, and outer dropout (48->90 m)
+          float innerFade = smoothstep(6.0, 15.0, gDist);
+          float steepFade = 1.0 - smoothstep(0.50, 0.80, (camLocal.y - gRoot.y) / max(gDist, 1.0));
+          float outerT = smoothstep(48.0, 90.0, gDist);
+          float outerKeep = clamp((aOff.z - outerT) / 0.14, 0.0, 1.0) * (1.0 - 0.45 * outerT);
+
+          float tuftNoise = trFbm(rootXZ * 0.18 + vec2(3.4, 7.1));
+          float gH = (0.14 + 0.11 * aRnd.w + 0.09 * smoothstep(0.35, 0.78, tuftNoise)) * ragged * innerFade * steepFade * outerKeep;
+          float gW = (0.68 + 0.44 * aRnd.x) * (1.0 + max(gDist - 32.0, 0.0) * 0.009) * step(0.004, gH);
+
+          // Cylindrical Y-billboard facing camera with +-0.65 rad random yaw jitter to break rows
+          vec2 toCam = normalize(camLocal.xz - rootXZ + vec2(1e-4));
+          float turn = (aRnd.z - 0.5) * 1.3;
+          float ct = cos(turn), st = sin(turn);
+          vec2 sd = vec2(-toCam.y, toCam.x);
+          sd = vec2(sd.x * ct - sd.y * st, sd.x * st + sd.y * ct);
+
+          float along = dot(rootXZ, uWindDir);
+          float gust = trNoise(rootXZ * 0.05 - uWindDir * uTime * 0.24);
+          float wave = sin(along * 0.45 - uTime * 1.85 + aRnd.x * 3.0) * 0.5;
+          vec2 lean = uWindDir * (0.12 + gust * 0.65 + wave * 0.25) * 0.30;
+
+          float y = position.y;
+          vec3 transformed = gRoot
+            + vec3(sd.x, 0.0, sd.y) * (position.x * gW)
+            + vec3(0.0, y * gH, 0.0)
+            + vec3(lean.x, -0.22 * length(lean), lean.y) * (y * y * gH);
+
+          vY = y;
+          vRnd = aRnd.w;
+          vTint = aRnd.x;
+          vQ = vec2((position.x + 0.5 + floor(aRnd.y * 4.0)) * 0.25, y);
+          vLPos = transformed;
+          vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uTime;
+          uniform vec3 uSunDir;
+          uniform vec3 uSunColor;
+          uniform vec3 uFogColor;
+          uniform vec3 uGroundFogColor;
+          uniform float uGroundFogDensity;
+          uniform float uDewStrength;
+          uniform vec2 uWindDir;
+          uniform float uGrassLushness;
+          uniform sampler2D uGrassA;
+          uniform sampler2D uTuft;
+          varying highp vec3 vWPos;
+          varying highp vec3 vLPos;
+          varying vec2 vQ;
+          varying float vY;
+          varying float vRnd;
+          varying float vTint;
+          ${GLSL_NOISE_AND_SPLAT}
+          ${GLSL_MEADOW_ALBEDO}
+          ${GLSL_GROUND_FOG}`
+        )
+        .replace(
+          '#include <normal_fragment_begin>',
+          '#include <normal_fragment_begin>\n normal = normalize(vNormal);'
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          {
+            vec4 tf = texture2D(uTuft, vQ);
+            float camDist = length(cameraPosition - vWPos);
+            // Exact same terrain meadow albedo as UnifiedAirfieldGround (zero hue shift)
+            vec3 c = trComputeMeadowAlbedo(vLPos.xz, camDist, 0.0);
+            c *= mix(0.96, 1.04, vTint);
+
+            // Subtle near shading flattening smoothly to 1.0 over 14->55 m so clumps dissolve invisibly into ground
+            float away = smoothstep(14.0, 55.0, camDist);
+            float nearShade = mix(0.88, 1.12, smoothstep(0.0, 1.0, vY)) * (0.92 + 0.16 * tf.g);
+            diffuseColor.rgb = c * mix(nearShade, 1.0, away);
+            diffuseColor.a = tf.a;
+          }`
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          {
+            vec3 V = normalize(vViewPosition);
+            vec3 L = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
+            vec3 N = normalize(vNormal);
+            vec3 H = normalize(V + L);
+            float sunElev = max(uSunDir.y + 0.08, 0.0);
+
+            float back = pow(max(dot(-V, L), 0.0), 3.0);
+            reflectedLight.directDiffuse += diffuseColor.rgb * uSunColor * back * 0.38 * vY * vec3(1.0, 1.04, 0.88) * sunElev;
+
+            float tipMask = smoothstep(0.55, 1.0, vY);
+            float dewSpec = pow(max(dot(N, H), 0.0), 48.0) * tipMask;
+            reflectedLight.directSpecular += uSunColor * dewSpec * 0.14 * uDewStrength * sunElev;
+          }`
+        )
+        .replace(
+          '#include <tonemapping_fragment>',
+          `{
+            gl_FragColor.rgb = trApplyGroundFog(gl_FragColor.rgb, vWPos, vLPos);
+            float dist = length(cameraPosition.xz - vWPos.xz);
+            float horizonBlend = pow(smoothstep(38.0, 190.0, dist), 0.85);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(horizonBlend, 0.0, 1.0));
+          }
+          #include <tonemapping_fragment>`
+        );
+    };
+
+    const farMesh = new THREE.Mesh(farGeo, farMat);
+    farMesh.name = 'FarAirfieldClumps';
+    farMesh.receiveShadow = true;
+    farMesh.castShadow = false;
+    farMesh.frustumCulled = false;
+    this.root.add(farMesh);
   }
 
   _buildTreelineHorizon() {
-    // Full, continuous distant Swedish pine/birch forest canopy silhouette at R = 132 m
-    // Eliminates sparse triangles and melts naturally into the atmospheric horizon mist.
     const segs = 240;
     const radius = 132;
     const positions = [];
@@ -615,7 +947,6 @@ export class AAAEnvironment {
       const ang = t * Math.PI * 2;
       const x = Math.cos(ang) * radius;
       const z = Math.sin(ang) * radius;
-      // Continuous Swedish countryside treeline (slightly lower across front airfield approach, fuller behind)
       const approachDip = Math.exp(-Math.pow(Math.sin(ang - 1.35), 2) * 5.0) * 0.32;
       const h = (12.5 - approachDip * 4.0) + Math.sin(ang * 7.0) * 1.2 + Math.cos(ang * 17.0) * 0.7;
 
@@ -640,17 +971,24 @@ export class AAAEnvironment {
       depthWrite: false,
       side: THREE.DoubleSide,
       uniforms: {
+        uTime: this.sharedUniforms.uTime,
         uSunDir: this.sharedUniforms.uSunDir,
         uSunColor: this.sharedUniforms.uSunColor,
         uFogColor: this.sharedUniforms.uFogColor,
+        uGroundFogColor: this.sharedUniforms.uGroundFogColor,
+        uGroundFogDensity: this.sharedUniforms.uGroundFogDensity,
+        uDewStrength: this.sharedUniforms.uDewStrength,
+        uWindDir: this.sharedUniforms.uWindDir,
       },
       vertexShader: `
         #include <common>
         #include <logdepthbuf_pars_vertex>
         varying vec2 vUv;
         varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
         void main() {
           vUv = uv;
+          vLocalPos = position;
           vec4 wp = modelMatrix * vec4(position, 1.0);
           vWorldPos = wp.xyz;
           gl_Position = projectionMatrix * viewMatrix * wp;
@@ -660,11 +998,20 @@ export class AAAEnvironment {
       fragmentShader: `
         #include <common>
         #include <logdepthbuf_pars_fragment>
+        uniform float uTime;
         uniform vec3 uSunDir;
         uniform vec3 uSunColor;
         uniform vec3 uFogColor;
+        uniform vec3 uGroundFogColor;
+        uniform float uGroundFogDensity;
+        uniform float uDewStrength;
+        uniform vec2 uWindDir;
         varying vec2 vUv;
         varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
+
+        ${GLSL_NOISE_AND_SPLAT}
+        ${GLSL_GROUND_FOG}
 
         float tHash(float n) { return fract(sin(n) * 43758.5453123); }
         float tNoise(float x) {
@@ -673,7 +1020,6 @@ export class AAAEnvironment {
           return mix(tHash(i), tHash(i + 1.0), f);
         }
 
-        // Organic varied Swedish birch & pine forest canopy clusters (no uniform sawtooth triangles!)
         float canopyHeight(float x) {
           float ridge = 0.38 + 0.22 * tNoise(x * 0.16);
           float clusters = 0.20 * tNoise(x * 0.52 + 3.7) + 0.14 * tNoise(x * 1.15 + 9.2);
@@ -692,9 +1038,10 @@ export class AAAEnvironment {
           vec3 litCrown = vec3(0.08, 0.13, 0.068) + uSunColor * 0.04 * sunSide;
           vec3 treeCol = mix(deepPine, litCrown, smoothstep(0.18, 0.88, vUv.y));
 
-          // Soft atmospheric mist blending seamlessly into exact uFogColor (identical to ground & sky horizon)
+          // Low meadow mist hugging tree bases + seamless horizon fog
+          vec3 misted = trApplyGroundFog(treeCol, vWorldPos, vLocalPos);
           float mistBase = 1.0 - smoothstep(0.08, 0.42, vUv.y);
-          vec3 finalCol = mix(treeCol, uFogColor, clamp(0.64 + mistBase * 0.36, 0.0, 1.0));
+          vec3 finalCol = mix(misted, uFogColor, clamp(0.64 + mistBase * 0.36, 0.0, 1.0));
           gl_FragColor = vec4(finalCol, alpha * 0.94);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -854,6 +1201,21 @@ export class AAAEnvironment {
     this.sharedUniforms.uSunColor.value.setHex(preset.sunColor);
     this.sharedUniforms.uFogColor.value.setHex(preset.fogColor);
     this.sharedUniforms.uFogDensity.value = preset.fogDensity;
+
+    // Preset-driven low-lying meadow ground mist & morning dew sheen
+    if (preset.id === 'golden_hour') {
+      this.sharedUniforms.uGroundFogColor.value.setHex(0xf0c892);
+      this.sharedUniforms.uGroundFogDensity.value = 0.022;
+      this.sharedUniforms.uDewStrength.value = 1.0;
+    } else if (preset.id === 'overcast') {
+      this.sharedUniforms.uGroundFogColor.value.setHex(0xc5ced6);
+      this.sharedUniforms.uGroundFogDensity.value = 0.015;
+      this.sharedUniforms.uDewStrength.value = 0.18;
+    } else {
+      this.sharedUniforms.uGroundFogColor.value.setHex(0xdce8f0);
+      this.sharedUniforms.uGroundFogDensity.value = 0.009;
+      this.sharedUniforms.uDewStrength.value = 0.55;
+    }
   }
 
   update(seconds) {
