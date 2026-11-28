@@ -909,6 +909,7 @@ const defaultOther = () => ({ ...gliderNow(), self: true });
 const gliderLabel = (g) => (g.self ? 'Compare with' : g.name || catalog.sources.get(g.model)?.label || g.model);
 /** Turns the comparison on or off; `glider` puts that glider on the other side. */
 async function setCompare(on, glider) {
+  if (on && state.scene === 'hangar') on = false;
   if (on && plan.quad) setQuad(false);
   if (on) state.b = glider || (state.b && catalog.sources.has(state.b.model) ? state.b : defaultOther());
   state.compare = on && Boolean(state.b);
@@ -1190,6 +1191,7 @@ function zoom(f) {
   userActive();
 }
 function toggle2d() {
+  if (state.scene === 'hangar') return;
   const ortho = rig.projection !== 'orthographic';
   rig.setProjection(ortho ? 'orthographic' : 'perspective', !reduced);
   if (ortho && record) rig.animateTo(planFrame(PLAN.top), !reduced, fitSize);
@@ -1207,7 +1209,7 @@ const SPLIT_TIME = 650;
 // panes: the centre and size of each quarter; the active one is driven by the camera rig.
 const plan = { quad: false, view: null, cams: null, panes: null, active: 0, flat: false, wall: null, split: 0, splitFrom: 0, splitStart: 0 };
 function planView(name) {
-  if (!record) return;
+  if (!record || state.scene === 'hangar') return;
   if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
   stopTour();
   if (name === 'quad') return setQuad(!plan.quad);
@@ -1215,7 +1217,7 @@ function planView(name) {
 }
 /** A 2D view looking from `dir` (from the glider towards the camera), framing the glider. */
 function viewFrom(dir) {
-  if (!record) return;
+  if (!record || state.scene === 'hangar') return;
   if (rig.projection !== 'orthographic') rig.setProjection('orthographic', !reduced);
   stopTour();
   setQuad(false);
@@ -1247,7 +1249,7 @@ function numpadKey(e) {
   else if (k === '3') planView(ctrl ? 'left' : 'right');
   else if (k === '7') planView(ctrl ? 'bottom' : 'top');
   else if (k === '9') { if (record && !plan.quad) viewFrom(rig.pose().dir.negate()); }
-  else if (k === '5') { rig.setProjection(rig.projection === 'orthographic' ? 'perspective' : 'orthographic', !reduced); syncPanel(); userActive(); }
+  else if (k === '5') { if (state.scene !== 'hangar') { rig.setProjection(rig.projection === 'orthographic' ? 'perspective' : 'orthographic', !reduced); syncPanel(); userActive(); } }
   else if (k === '0') frontView();
   else if (k === '4') orbit(-15, 0);
   else if (k === '6') orbit(15, 0);
@@ -2498,6 +2500,10 @@ function syncHangarToolbar() {
         : '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/>';
     }
   }
+  const btnCompare = $('#btn-compare');
+  if (btnCompare) btnCompare.hidden = inHangar;
+  const btn2d = $('#btn-2d');
+  if (btn2d) btn2d.hidden = inHangar;
 }
 
 function syncPanel() {
@@ -2686,6 +2692,8 @@ async function setScene(id) {
   limitCamera(0);
 
   if (id === 'hangar' && record) {
+    if (state.compare) setCompare(false);
+    if (plan.quad) { setQuad(false); plan.split = 0; }
     rig.setProjection('perspective', false);
     rig.setPose(hangarFrontPose());
     limitCamera(0);
