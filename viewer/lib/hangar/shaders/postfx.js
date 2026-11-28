@@ -257,6 +257,7 @@ export class CinematicPostFX {
  * - Gentle distant swallow / skylark chirps
  * - Occasional melodic willow warbler / blackbird (koltrast) flute-like phrases
  * - Distant Swedish pheasant ("fasan") morning/evening calls ("kork-kok!" + muffled wing thrum)
+ * - Soft, distant Swedish Common Crane ("trana") calls & mated-pair duets across the misty meadow
  * - Very faint warm meadow cricket shimmer
  */
 export class AirfieldWindAudio {
@@ -267,6 +268,11 @@ export class AirfieldWindAudio {
     this._pheasantTimer = null;
     this._birdTimer = null;
     this._cricketTimer = null;
+    this._craneTimer = null;
+    this._craneWave = null;
+    this._craneWaveCtx = null;
+    this._noiseBuf = null;
+    this._noiseBufCtx = null;
     this._gestureHandler = null;
   }
 
@@ -277,7 +283,10 @@ export class AirfieldWindAudio {
       if (!this.active || !this.ctx) return;
       if (this.ctx.state === 'suspended') {
         this.ctx.resume().then(() => {
-          if (this.active) this._playBirdPhrase();
+          if (this.active) {
+            this._playBirdPhrase();
+            this._scheduleCranes(true);
+          }
         }).catch(() => {});
       }
     };
@@ -437,6 +446,185 @@ export class AirfieldWindAudio {
     }
   }
 
+  _getCraneWave() {
+    if (this._craneWave && this._craneWaveCtx === this.ctx) return this._craneWave;
+    const real = new Float32Array([0, 0, 0, 0, 0]);
+    const imag = new Float32Array([0, 0.55, 0.42, 0.22, 0.09]);
+    this._craneWave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    this._craneWaveCtx = this.ctx;
+    return this._craneWave;
+  }
+
+  _getNoiseBuffer() {
+    if (this._noiseBuf && this._noiseBufCtx === this.ctx) return this._noiseBuf;
+    const len = Math.floor(this.ctx.sampleRate * 1.0);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    this._noiseBuf = buf;
+    this._noiseBufCtx = this.ctx;
+    return buf;
+  }
+
+  _makeCraneBus(gainVal) {
+    const ctx = this.ctx;
+    const master = ctx.createGain();
+    master.gain.value = gainVal;
+
+    // Silky distance low-pass so zero harshness ever gets through
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = 2050 + Math.random() * 200;
+    lpf.Q.value = 0.7;
+
+    // Gentle right-of-center stereo pan matching the distant cranes in the meadow
+    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (panner) panner.pan.value = 0.28 + Math.random() * 0.14;
+
+    lpf.connect(master);
+
+    // Soft 3-tap progressively filtered mist echo across the open field
+    const taps = [
+      { delay: 0.18, lpf: 1450, gain: 0.30 },
+      { delay: 0.37, lpf: 1050, gain: 0.16 },
+      { delay: 0.58, lpf: 800, gain: 0.08 },
+    ];
+    for (const tap of taps) {
+      const d = ctx.createDelay(0.75);
+      d.delayTime.value = tap.delay;
+      const flt = ctx.createBiquadFilter();
+      flt.type = 'lowpass';
+      flt.frequency.value = tap.lpf;
+      const g = ctx.createGain();
+      g.gain.value = tap.gain;
+      lpf.connect(d).connect(flt).connect(g).connect(master);
+    }
+
+    if (panner) master.connect(panner).connect(ctx.destination);
+    else master.connect(ctx.destination);
+    return lpf;
+  }
+
+  _playSoftCraneNote(bus, t0, f0, dur, amp, trillHz, drop) {
+    const ctx = this.ctx;
+    const tEnd = t0 + dur;
+    const tStop = tEnd + 0.04;
+
+    // Warm hollow horn PeriodicWave oscillator
+    const osc = ctx.createOscillator();
+    osc.setPeriodicWave(this._getCraneWave());
+    osc.frequency.setValueAtTime(f0 * 0.87, t0);
+    osc.frequency.exponentialRampToValueAtTime(f0 * 1.03, t0 + dur * 0.16);
+    osc.frequency.linearRampToValueAtTime(f0 * 1.01, t0 + dur * 0.56);
+    osc.frequency.exponentialRampToValueAtTime(f0 * drop, tEnd);
+
+    // Organic rolling throat flutter LFO (subtle FM + soft AM)
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(trillHz, t0);
+    lfo.frequency.linearRampToValueAtTime(trillHz * 0.85, tEnd);
+
+    const fmGain = ctx.createGain();
+    fmGain.gain.setValueAtTime(f0 * 0.020, t0);
+    fmGain.gain.linearRampToValueAtTime(f0 * 0.008, tEnd);
+    lfo.connect(fmGain).connect(osc.frequency);
+
+    const amGain = ctx.createGain();
+    amGain.gain.setValueAtTime(0.72, t0);
+    const amDepth = ctx.createGain();
+    amDepth.gain.setValueAtTime(0.26, t0);
+    amDepth.gain.linearRampToValueAtTime(0.11, tEnd);
+    lfo.connect(amDepth).connect(amGain.gain);
+
+    // Subtle breath air layer
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = this._getNoiseBuffer();
+    noiseSrc.loop = true;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.10, t0);
+    noiseGain.gain.linearRampToValueAtTime(0.04, tEnd);
+
+    // Dual coiled-trachea formant bandpasses + gentle dry warmth
+    const bp1 = ctx.createBiquadFilter();
+    bp1.type = 'bandpass';
+    bp1.frequency.setValueAtTime(f0 * 1.15, t0);
+    bp1.Q.value = 2.2;
+    const bp1Gain = ctx.createGain();
+    bp1Gain.gain.value = 0.75;
+
+    const bp2 = ctx.createBiquadFilter();
+    bp2.type = 'bandpass';
+    bp2.frequency.setValueAtTime(f0 * 2.05, t0);
+    bp2.Q.value = 2.6;
+    const bp2Gain = ctx.createGain();
+    bp2Gain.gain.value = 0.38;
+
+    const dryGain = ctx.createGain();
+    dryGain.gain.value = 0.16;
+
+    // Smooth organic breath envelope
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.linearRampToValueAtTime(amp, t0 + dur * 0.07);
+    env.gain.linearRampToValueAtTime(amp * 0.88, t0 + dur * 0.62);
+    env.gain.exponentialRampToValueAtTime(0.0001, tEnd);
+
+    osc.connect(amGain);
+    noiseSrc.connect(noiseGain).connect(amGain);
+
+    amGain.connect(bp1).connect(bp1Gain).connect(env);
+    amGain.connect(bp2).connect(bp2Gain).connect(env);
+    amGain.connect(dryGain).connect(env);
+    env.connect(bus);
+
+    osc.start(t0);
+    lfo.start(t0);
+    noiseSrc.start(t0);
+
+    osc.stop(tStop);
+    lfo.stop(tStop);
+    noiseSrc.stop(tStop);
+  }
+
+  _playCraneCall() {
+    if (!this.active || !this.ctx || this.ctx.state !== 'running') return;
+    const now = this.ctx.currentTime + 0.05;
+    const baseGain = this.sunPreset === 'golden_hour' ? 0.038 : 0.028;
+    const bus = this._makeCraneBus(baseGain);
+
+    const isDuet = Math.random() < 0.55;
+    if (isDuet) {
+      const f0 = 910 + Math.random() * 80;
+      const dur1 = 0.56 + Math.random() * 0.12;
+      const trill1 = 30 + Math.random() * 6;
+      this._playSoftCraneNote(bus, now, f0, dur1, 1.0, trill1, 0.80);
+
+      const gap = 0.58 + Math.random() * 0.16;
+      const fPartner = f0 * (1.14 + Math.random() * 0.04);
+      const dur2 = 0.36 + Math.random() * 0.08;
+      const trill2 = 30 + Math.random() * 6;
+      this._playSoftCraneNote(bus, now + gap, fPartner, dur2, 0.68, trill2, 0.84);
+    } else {
+      const f0 = 890 + Math.random() * 70;
+      const dur = 0.60 + Math.random() * 0.12;
+      const trill = 30 + Math.random() * 6;
+      const drop = 0.79 + Math.random() * 0.05;
+      this._playSoftCraneNote(bus, now, f0, dur, 1.0, trill, drop);
+    }
+  }
+
+  _scheduleCranes(initial = false) {
+    if (this._craneTimer) { clearTimeout(this._craneTimer); this._craneTimer = null; }
+    if (!this.active) return;
+    const delayMs = initial
+      ? 5000 + Math.random() * 4000
+      : 20000 + Math.random() * 20000;
+    this._craneTimer = setTimeout(() => {
+      this._playCraneCall();
+      this._scheduleCranes(false);
+    }, delayMs);
+  }
+
   _schedulePheasant() {
     if (this._pheasantTimer) { clearTimeout(this._pheasantTimer); this._pheasantTimer = null; }
     if (!this.active) return;
@@ -495,12 +683,13 @@ export class AirfieldWindAudio {
       this._scheduleBirds();
       this._scheduleCrickets();
       this._schedulePheasant();
+      this._scheduleCranes(true);
     } else {
       this._disarmGestureResume();
-      for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer]) {
+      for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer, this._craneTimer]) {
         if (t) clearTimeout(t);
       }
-      this._pheasantTimer = this._birdTimer = this._cricketTimer = null;
+      this._pheasantTimer = this._birdTimer = this._cricketTimer = this._craneTimer = null;
     }
     return this.active;
   }
@@ -508,10 +697,14 @@ export class AirfieldWindAudio {
   dispose() {
     this.active = false;
     this._disarmGestureResume();
-    for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer]) {
+    for (const t of [this._pheasantTimer, this._birdTimer, this._cricketTimer, this._craneTimer]) {
       if (t) clearTimeout(t);
     }
-    this._pheasantTimer = this._birdTimer = this._cricketTimer = null;
+    this._pheasantTimer = this._birdTimer = this._cricketTimer = this._craneTimer = null;
+    this._craneWave = null;
+    this._craneWaveCtx = null;
+    this._noiseBuf = null;
+    this._noiseBufCtx = null;
     if (this.ctx) {
       this.ctx.close().catch(() => {});
       this.ctx = null;
